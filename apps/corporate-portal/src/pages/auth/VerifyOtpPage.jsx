@@ -40,7 +40,8 @@ export default function VerifyOtpPage() {
     try {
       const session = await verifyOtp(identifier, code.trim(), remember);
       toast.success('Welcome', session.user.companyName);
-      navigate(from ?? '/dashboard', { replace: true });
+      // A temporary password has to be replaced before anything else is reachable.
+      navigate(session.passwordChangeRequired ? '/change-password-required' : (from ?? '/dashboard'), { replace: true });
     } catch (e2) {
       setError(e2 instanceof Error ? e2.message : 'Verification failed. Please try again.');
     } finally {

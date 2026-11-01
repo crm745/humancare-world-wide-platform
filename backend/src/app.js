@@ -42,7 +42,12 @@ app.use((err, req, res, next) => {
   console.error(err);
   const isUploadError = err.name === 'MulterError' || /Unsupported file type/.test(err.message || '');
   const status = err.statusCode || (isUploadError ? 400 : 500);
-  res.status(status).json({ error: status === 500 ? 'Internal server error' : err.message });
+  // `publicCode` is set deliberately by the code that throws (never a Prisma/system code),
+  // so clients can branch on it without parsing the message.
+  res.status(status).json({
+    error: status === 500 ? 'Internal server error' : err.message,
+    ...(status !== 500 && err.publicCode && { code: err.publicCode }),
+  });
 });
 
 module.exports = { app };

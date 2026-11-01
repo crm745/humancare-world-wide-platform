@@ -2,7 +2,7 @@
 // Only used when VITE_USE_MOCK_API=false.
 import axios from 'axios';
 import { API_BASE_URL, ApiError } from './config';
-import { clearSession, getRefreshToken, getToken, updateSessionTokens } from './session';
+import { clearSession, getRefreshToken, getToken, markPasswordChangeRequired, updateSessionTokens } from './session';
 
 export const http = axios.create({
   baseURL: API_BASE_URL,
@@ -60,6 +60,13 @@ http.interceptors.response.use(
     if (status === 401) {
       clearSession();
       window.dispatchEvent(new Event('hcw:unauthorized'));
+    }
+    // The backend is the authority on the first-login restriction: if it refuses a call
+    // for that reason, restrict the stored session too, so the portal shows the password
+    // change screen even if its own copy of the flag was missing.
+    if (status === 403 && err.response?.data?.code === 'password_change_required' && getToken()) {
+      markPasswordChangeRequired();
+      window.dispatchEvent(new Event('hcw:password-change-required'));
     }
     const message =
       err.response?.data?.error ??

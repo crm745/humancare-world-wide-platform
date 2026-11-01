@@ -11,7 +11,18 @@ function getCookieToken(req, name) {
   return match ? decodeURIComponent(match.slice(name.length + 1)) : null;
 }
 
-function requireAuth(allowedRoles) {
+// Sent to a corporate login that still has a temporary password (see CorporateUser.
+// mustChangePassword). The mobile app shows `error` as-is, so it says where to go.
+const PASSWORD_CHANGE_REQUIRED = {
+  error: 'You must set a new password before continuing. Please sign in to the HumanCare Corporate Portal to complete this first-time password change.',
+  code: 'password_change_required',
+};
+
+// `options.allowPasswordChangePending` lets a route be used while the token is restricted
+// by the `pwc` claim (corporate first-login password change). Every other route refuses
+// such a token, so a restricted session can do nothing but change its password — new
+// routes included, with no per-route work. Patient and admin tokens never carry `pwc`.
+function requireAuth(allowedRoles, options = {}) {
   return function (req, res, next) {
     const header = req.headers.authorization;
     const token = header && header.startsWith('Bearer ') ? header.slice('Bearer '.length) : getCookieToken(req, 'hc_admin_token');
@@ -34,6 +45,10 @@ function requireAuth(allowedRoles) {
       return res.status(403).json({ error: 'Not authorized for this action' });
     }
 
+    if (payload.pwc === true && !options.allowPasswordChangePending) {
+      return res.status(403).json(PASSWORD_CHANGE_REQUIRED);
+    }
+
     req.user = { id: payload.sub, role: payload.role, corporateId: payload.corporateId ?? null, adminRole: payload.adminRole ?? null };
     next();
   };
@@ -49,4 +64,4 @@ function requireSuperAdmin(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireSuperAdmin };
+module.exports = { requireAuth, requireSuperAdmin, PASSWORD_CHANGE_REQUIRED };

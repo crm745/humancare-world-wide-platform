@@ -2,7 +2,7 @@ const { prisma } = require('../../db/prisma');
 const { hashPassword, comparePassword, signAccessToken, signRefreshToken } = require('../auth/auth.service');
 const { VALID_CASE_STATUSES } = require('../cases/cases.service');
 const { ticketIdFor, ticketDbIdFrom, TICKET_STATUS_LABEL } = require('../corporate-portal/corporate-portal.service');
-const { getRegistrationOr404, toAdminRegistration } = require('../corporate-registration/corporate-registration.service');
+const { normalizeEmail } = require('../../lib/phone');
 
 async function loginAdmin(email, password) {
   const admin = await prisma.adminUser.findUnique({ where: { email } });
@@ -64,46 +64,6 @@ async function deleteAdmin(adminId, requestingAdminId) {
   await prisma.adminUser.delete({ where: { id: admin.id } });
 }
 
-// ---------- corporate registration approvals ----------
-// New corporate partners are onboarded through corporate-portal's /register wizard,
-// then reviewed here before they can set a password and actually log in. This
-// "approved" flag is what represents HumanCare's own compliance/bank-verification
-// review (up to 48 hours) — distinct from the registrant's own email verification.
-async function listPendingRegistrations() {
-  const regs = await prisma.corporateRegistration.findMany({
-    where: { credentialsCreated: false, rejectedAt: null },
-    orderBy: { submittedAt: 'asc' },
-  });
-  return regs.map(toAdminRegistration);
-}
-
-async function getRegistrationForAdmin(id) {
-  return toAdminRegistration(await getRegistrationOr404(id));
-}
-
-async function approveRegistration(id, adminId) {
-  const reg = await getRegistrationOr404(id);
-  if (reg.rejectedAt) {
-    const err = new Error('This registration was already rejected.');
-    err.statusCode = 409;
-    throw err;
-  }
-  const updated = await prisma.corporateRegistration.update({
-    where: { id: reg.id },
-    data: { approved: true, approvedBy: Number(adminId), approvedAt: new Date() },
-  });
-  return toAdminRegistration(updated);
-}
-
-async function rejectRegistration(id, reason) {
-  const reg = await getRegistrationOr404(id);
-  const updated = await prisma.corporateRegistration.update({
-    where: { id: reg.id },
-    data: { approved: false, rejectedAt: new Date(), rejectionReason: reason || null },
-  });
-  return toAdminRegistration(updated);
-}
-
 // Corporate logins don't have a password-value history (never store old passwords —
 // that's a security anti-pattern). This is just an event log of when a reset was
 // requested/completed, read straight off the OTP records already created for that flow.
@@ -135,13 +95,26 @@ async function createCorporate({ companyName, type }) {
   return prisma.corporate.create({ data: { companyName, type } });
 }
 
-async function createCorporateUser(corporateId, { email, password }) {
+// Adds a SUBSEQUENT login (an employee) to a company that already has one. It can never
+// create a company's first login: the initial Owner exists only through an authorised
+// Admin provisioning an approved registration (registration-review.service.js), so this
+// route cannot be used to skip registration, approval or mobile verification. Nothing here
+// updates or deletes an existing login, so it cannot replace the Owner either. The password
+// is one the Admin chose, so the new login must change it at first sign-in.
+async function createCorporateUser(corporateId, { email: rawEmail, password }) {
   const corporate = await prisma.corporate.findUnique({ where: { id: Number(corporateId) } });
   if (!corporate) {
     const err = new Error('Corporate not found');
     err.statusCode = 404;
     throw err;
   }
+  if ((await prisma.corporateUser.count({ where: { corporateId: corporate.id } })) === 0) {
+    const err = new Error("A company's first login is created by approving and provisioning its registration, not here.");
+    err.statusCode = 409;
+    err.publicCode = 'initial_owner_required';
+    throw err;
+  }
+  const email = normalizeEmail(rawEmail);
   const existing = await prisma.corporateUser.findUnique({ where: { email } });
   if (existing) {
     const err = new Error('A corporate user with that email already exists.');
@@ -150,7 +123,7 @@ async function createCorporateUser(corporateId, { email, password }) {
   }
   const passwordHash = await hashPassword(password);
   const corporateUser = await prisma.corporateUser.create({
-    data: { corporateId: corporate.id, email, passwordHash },
+    data: { corporateId: corporate.id, email, passwordHash, mustChangePassword: true },
   });
   const { passwordHash: _omit, ...safeCorporateUser } = corporateUser;
   return safeCorporateUser;
@@ -393,10 +366,6 @@ module.exports = {
   listAdmins,
   createAdmin,
   deleteAdmin,
-  listPendingRegistrations,
-  getRegistrationForAdmin,
-  approveRegistration,
-  rejectRegistration,
   listCorporates,
   createCorporate,
   createCorporateUser,

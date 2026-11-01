@@ -21,6 +21,7 @@ const {
   SocialNoAccountError,
 } = require("./auth.service");
 const { EVENTS, recordSecurityEvent } = require("./security-events");
+const { PASSWORD_CHANGE_REQUIRED } = require("../../middleware/auth.middleware");
 const { isFirebasePhoneEnabled, verifyPhoneProof } = require("../../lib/firebase");
 
 const disposableDomainSet = new Set(disposableDomains);
@@ -655,18 +656,27 @@ async function corporateVerifyOtp(req, res) {
   });
   if (!corporateUser) return res.status(404).json({ error: "Account not found" });
 
-  const token = signAccessToken({
+  // A login whose password someone else chose gets a restricted session (`pwc`): it can
+  // only change the password, until it does. See requireAuth.
+  const claims = {
     sub: corporateUser.id,
     role: "corporate",
     corporateId: corporateUser.corporateId,
-  });
-  const refreshToken = signRefreshToken({
-    sub: corporateUser.id,
-    role: "corporate",
-    corporateId: corporateUser.corporateId,
-  });
+    ...(corporateUser.mustChangePassword && { pwc: true }),
+  };
+  const token = signAccessToken(claims);
+  const refreshToken = signRefreshToken(claims);
   const { passwordHash: _omit, ...safeCorporateUser } = corporateUser;
-  res.json({ token, refreshToken, corporateUser: safeCorporateUser });
+  res.json({
+    token,
+    refreshToken,
+    corporateUser: safeCorporateUser,
+    ...(corporateUser.mustChangePassword && {
+      mustChangePassword: true,
+      code: PASSWORD_CHANGE_REQUIRED.code,
+      message: PASSWORD_CHANGE_REQUIRED.error,
+    }),
+  });
 }
 
 async function refreshAccessToken(req, res) {
@@ -697,6 +707,19 @@ async function refreshAccessToken(req, res) {
       return res.status(401).json({ error: "Your session has ended. Please log in again." });
     }
     claims.tv = user.tokenVersion;
+  }
+  // A corporate refresh reads the account, so the first-login restriction is decided by
+  // the database and not by what the old token says: a restricted refresh token can never
+  // produce an unrestricted access token while the flag is set, and a token issued before
+  // the flag was set is restricted too. (Patient and admin refreshes are unchanged.)
+  if (payload.role === "corporate") {
+    const user = await prisma.corporateUser.findUnique({
+      where: { id: payload.sub },
+      select: { corporateId: true, mustChangePassword: true },
+    });
+    if (!user) return res.status(401).json({ error: "Your session has ended. Please log in again." });
+    claims.corporateId = user.corporateId;
+    if (user.mustChangePassword) claims.pwc = true;
   }
   const token = signAccessToken(claims);
   const newRefreshToken = signRefreshToken(claims);
@@ -880,10 +903,12 @@ async function resetPassword(req, res) {
   const corporateUser = await prisma.corporateUser.findUnique({ where: { email } });
   if (!corporateUser) return res.status(404).json({ error: "Account not found" });
 
+  // They picked this password themselves (after proving the mailbox), so any
+  // first-login restriction is satisfied.
   const passwordHash = await hashPassword(newPassword);
   await prisma.corporateUser.update({
     where: { id: corporateUser.id },
-    data: { passwordHash },
+    data: { passwordHash, mustChangePassword: false, passwordChangedAt: new Date() },
   });
   res.json({
     message: "Password updated. Please log in with your new password.",
@@ -899,21 +924,31 @@ async function changePassword(req, res) {
       .status(400)
       .json({ error: "currentPassword and newPassword are required" });
   }
-  if (newPassword.length < 8) {
-    return res
-      .status(400)
-      .json({ error: "Password must be at least 8 characters" });
-  }
+  const problem = passwordProblem(newPassword);
+  if (problem) return res.status(400).json({ error: problem });
 
   const corporateUser = await prisma.corporateUser.findUnique({ where: { id: req.user.id } });
   if (!corporateUser) return res.status(404).json({ error: "Account not found" });
 
   const matches = await comparePassword(currentPassword, corporateUser.passwordHash);
   if (!matches) return res.status(400).json({ error: "Current password is incorrect." });
+  if (currentPassword === newPassword) {
+    return res.status(400).json({ error: "Choose a new password that is different from the current one." });
+  }
 
+  // This is also what completes the first-login change: it clears the restriction and
+  // hands back a fresh, unrestricted token pair so the client can carry on.
   const passwordHash = await hashPassword(newPassword);
-  await prisma.corporateUser.update({ where: { id: corporateUser.id }, data: { passwordHash } });
-  res.json({ message: "Password updated." });
+  await prisma.corporateUser.update({
+    where: { id: corporateUser.id },
+    data: { passwordHash, mustChangePassword: false, passwordChangedAt: new Date() },
+  });
+  const claims = { sub: corporateUser.id, role: "corporate", corporateId: corporateUser.corporateId };
+  res.json({
+    message: "Password updated.",
+    token: signAccessToken(claims),
+    refreshToken: signRefreshToken(claims),
+  });
 }
 
 // JWTs are stateless — there's no server-side session to end, so this is just a
