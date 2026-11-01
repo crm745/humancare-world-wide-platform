@@ -59,4 +59,32 @@ async function verifyPhoneProof(idToken) {
   return decoded.phone_number;
 }
 
-module.exports = { isFirebasePhoneEnabled, verifyPhoneProof, PhoneProofError };
+// Same checks as verifyPhoneProof, but also returns which sign-in this was, for flows that
+// must accept each SMS confirmation only once (the corporate registration flows). `uid` and
+// `auth_time` together identify one confirmation: a refreshed ID token for the same sign-in
+// keeps both, a new SMS gets a new auth_time. verifyPhoneProof is left exactly as it is so
+// the patient flows are untouched; unlike it, this refuses a token without an integer
+// auth_time or a uid instead of letting a missing auth_time slip past the freshness check.
+async function verifyPhoneProofDetails(idToken) {
+  if (!idToken) throw new PhoneProofError('otp_invalid', 'Enter the code we sent you.');
+  let decoded;
+  try {
+    decoded = await admin.auth.getAuth(firebaseApp()).verifyIdToken(String(idToken));
+  } catch (err) {
+    if (err.code === 'auth/id-token-expired') throw new PhoneProofError('otp_expired', 'Code expired.');
+    if (String(err.code || '').startsWith('auth/')) throw new PhoneProofError('otp_invalid', 'Incorrect code.');
+    throw err; // misconfiguration (missing/invalid key file): a server error, not the user's fault
+  }
+  if (decoded.firebase?.sign_in_provider !== 'phone' || !decoded.phone_number) {
+    throw new PhoneProofError('otp_invalid', 'Incorrect code.');
+  }
+  const uid = decoded.uid || decoded.sub;
+  const authTime = decoded.auth_time;
+  if (!uid || !Number.isInteger(authTime)) throw new PhoneProofError('otp_invalid', 'Incorrect code.');
+  const age = Date.now() / 1000 - authTime;
+  if (age > MAX_PROOF_AGE_SECONDS) throw new PhoneProofError('otp_expired', 'Code expired.');
+  if (age < -60) throw new PhoneProofError('otp_invalid', 'Incorrect code.'); // from the future
+  return { phone: decoded.phone_number, uid: String(uid), authTime };
+}
+
+module.exports = { isFirebasePhoneEnabled, verifyPhoneProof, verifyPhoneProofDetails, PhoneProofError, MAX_PROOF_AGE_SECONDS };

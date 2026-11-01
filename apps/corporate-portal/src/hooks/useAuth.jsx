@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { authService } from '@/services/authService';
-import { getSession, updateSessionUser } from '@/services/session';
+import { getSession, isPasswordChangeRequired, updateSessionUser } from '@/services/session';
 
 const AuthContext = createContext(null);
 
@@ -13,6 +13,14 @@ export function AuthProvider({ children }) {
     const onUnauthorized = () => setSession(null);
     window.addEventListener('hcw:unauthorized', onUnauthorized);
     return () => window.removeEventListener('hcw:unauthorized', onUnauthorized);
+  }, []);
+
+  // The HTTP client fires this when the backend refuses a call because the account still
+  // has to change its temporary password; pick up the restriction it just stored.
+  useEffect(() => {
+    const onPasswordChangeRequired = () => setSession(getSession());
+    window.addEventListener('hcw:password-change-required', onPasswordChangeRequired);
+    return () => window.removeEventListener('hcw:password-change-required', onPasswordChangeRequired);
   }, []);
 
   // Expire the session on its deadline even if the tab stays open.
@@ -43,6 +51,19 @@ export function AuthProvider({ children }) {
     return s;
   }, []);
 
+  // First-login password change: on success the session now holds the unrestricted tokens.
+  // On any failure the restricted session is kept (or cleared, if the browser lost it).
+  const completeFirstLogin = useCallback(async (currentPassword, newPassword) => {
+    try {
+      const s = await authService.completeFirstLoginPasswordChange(currentPassword, newPassword);
+      setSession(s);
+      return s;
+    } catch (e) {
+      setSession(getSession());
+      throw e;
+    }
+  }, []);
+
   const logout = useCallback(() => {
     authService.logout();
     setSession(null);
@@ -58,8 +79,18 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ session, user: session?.user ?? null, isAuthenticated: !!session, login, verifyOtp, logout, updateUser }),
-    [session, login, verifyOtp, logout, updateUser],
+    () => ({
+      session,
+      user: session?.user ?? null,
+      isAuthenticated: !!session,
+      passwordChangeRequired: isPasswordChangeRequired(session),
+      login,
+      verifyOtp,
+      completeFirstLogin,
+      logout,
+      updateUser,
+    }),
+    [session, login, verifyOtp, completeFirstLogin, logout, updateUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
