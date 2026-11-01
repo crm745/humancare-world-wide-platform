@@ -4,7 +4,7 @@ import { DashboardLayout } from '@/layouts/DashboardLayout';
 import { RegistrationLayout } from '@/layouts/RegistrationLayout';
 import { PageLoader } from '@/components/ui/Loading';
 import { useAuth } from '@/hooks/useAuth';
-import { ProtectedRoute, PublicOnlyRoute } from './guards';
+import { PasswordChangeRoute, ProtectedRoute, PublicOnlyRoute } from './guards';
 import { RegistrationIndex } from '@/pages/register/RegistrationContext';
 
 // Pages are code-split so the login screen doesn't download charts and tables.
@@ -12,6 +12,7 @@ const LoginPage = lazy(() => import('@/pages/auth/LoginPage'));
 const VerifyOtpPage = lazy(() => import('@/pages/auth/VerifyOtpPage'));
 const ForgotPasswordPage = lazy(() => import('@/pages/auth/ForgotPasswordPage'));
 const ResetPasswordPage = lazy(() => import('@/pages/auth/ResetPasswordPage'));
+const FirstLoginPasswordPage = lazy(() => import('@/pages/auth/FirstLoginPasswordPage'));
 
 const CompanyStep = lazy(() => import('@/pages/register/CompanyStep'));
 const BankStep = lazy(() => import('@/pages/register/BankStep'));
@@ -58,6 +59,14 @@ export function AppRoutes() {
         <Route path="/verify-otp" element={<VerifyOtpPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route
+          path="/change-password-required"
+          element={
+            <PasswordChangeRoute>
+              <FirstLoginPasswordPage />
+            </PasswordChangeRoute>
+          }
+        />
 
         {/* New corporate: company → bank → documents → submitted (Corporate ID) → email → credentials → active */}
         <Route

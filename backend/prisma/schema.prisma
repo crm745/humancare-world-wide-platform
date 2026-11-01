@@ -72,10 +72,16 @@ model SecurityEvent {
   ipAddress  String?  @map("ip_address")
   userAgent  String?  @db.VarChar(255) @map("user_agent")
   detail     Json?
+  // Who performed the action, when it isn't a patient (userId is patient-only): an Admin
+  // reviewing a corporate registration, the registrant themselves, or the system. Null on
+  // patient rows, so existing history is untouched.
+  actorType  String?  @db.VarChar(16) @map("actor_type") // "admin" | "registrant" | "system"
+  actorId    Int?     @map("actor_id")
   createdAt  DateTime @default(now()) @map("created_at")
 
   @@index([userId, createdAt])
   @@index([event, createdAt])
+  @@index([actorType, actorId, createdAt])
   @@map("security_events")
 }
 
@@ -102,6 +108,9 @@ model AdminUser {
   // additionally manages other admin accounts and sensitive settings (the services
   // catalog today, billing later) — see requireSuperAdmin in auth.middleware.js.
   role         String   @default("admin")
+  // Lets a regular admin review corporate registrations (list, approve, reject, provision).
+  // Superadmins can always do so. Granted by a server-side script, never by the request.
+  corporateReview Boolean @default(false) @map("corporate_review")
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@map("admin_users")
@@ -122,10 +131,11 @@ model Service {
 }
 
 // A pending corporate-partner application — the corporate-portal's /register wizard
-// (company → bank → documents → email verify → HumanCare approval → credentials).
-// company/bank are stored as submitted (not yet a real Corporate row); once a
-// superadmin approves and the applicant sets their password, a real Corporate +
-// CorporateUser are created and linked back here via corporateId/corporateUserId.
+// (company → bank → documents → mobile verified by Firebase → email verify → HumanCare
+// approval → Admin provisions the initial Owner).
+// company/bank are stored as submitted (not yet a real Corporate row); once an authorised
+// Admin approves it and then provisions the Owner, a real Corporate + CorporateUser are
+// created and linked back here via corporateId/corporateUserId.
 // The row is kept permanently afterwards as the record of how/when they registered
 // and their verified bank details — there's no separate bank-details store yet.
 model CorporateRegistration {
@@ -146,10 +156,42 @@ model CorporateRegistration {
   credentialsCreated   Boolean   @default(false) @map("credentials_created")
   corporateId          Int?      @map("corporate_id")
   corporateUserId      Int?      @map("corporate_user_id")
+  // The applicant's mobile, taken from a verified Firebase phone sign-in (never from the
+  // form) and fixed from then on. Null on registrations made before mobile verification
+  // existed; those must be verified (legacy recovery) before they can be approved or
+  // provisioned.
+  mobileE164           String?   @db.VarChar(32) @map("mobile_e164")
+  mobileVerifiedAt     DateTime? @map("mobile_verified_at")
+  // Which Admin did what, kept on the row so it outlives the security-event retention.
+  rejectedBy           Int?      @map("rejected_by")
+  provisionedBy        Int?      @map("provisioned_by")
+  provisionedAt        DateTime? @map("provisioned_at")
+  // An Admin's review of a contact email that differs from the one originally submitted.
+  emailReviewedBy      Int?      @map("email_reviewed_by")
+  emailReviewedAt      DateTime? @map("email_reviewed_at")
   submittedAt          DateTime  @default(now()) @map("submitted_at")
   updatedAt            DateTime  @updatedAt @map("updated_at")
 
+  @@index([mobileE164])
   @@map("corporate_registrations")
+}
+
+// Ledger of Firebase phone sign-ins already used by a corporate flow. Firebase tokens carry
+// no purpose and no unique id, so single use is enforced here: proofKey is the hash of the
+// sign-in (uid + auth_time) and is UNIQUE, so a second insert of the same sign-in fails
+// atomically. Rows must be kept at least as long as the proof freshness window; they are
+// kept 90 days. No foreign keys, so the ledger never blocks anything else.
+model PhoneProof {
+  id             Int      @id @default(autoincrement())
+  proofKey       String   @unique @db.Char(64) @map("proof_key")
+  purpose        String   @db.VarChar(64) // "corporate_registration" | "corporate_registration_email_change" | "corporate_registration_legacy_mobile"
+  phoneE164      String   @db.VarChar(32) @map("phone_e164")
+  registrationId Int?     @map("registration_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([purpose, createdAt])
+  @@index([registrationId])
+  @@map("phone_proofs")
 }
 
 model Corporate {
@@ -221,6 +263,11 @@ model CorporateUser {
   // JSON column since this is a flexible, evolving per-login preference set, not
   // something that needs to be queried/filtered on.
   settings     Json?
+  // True for a login whose password someone else chose (the temporary password of a
+  // provisioned Owner, or an Admin-added employee). While set, the session is limited to
+  // changing the password; see requireAuth in auth.middleware.js.
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  passwordChangedAt  DateTime? @map("password_changed_at")
   createdAt    DateTime  @default(now()) @map("created_at")
 
   @@map("corporate_users")

@@ -61,11 +61,12 @@ authRouter.post('/reset-password', resetPassword);
 // them by this name. Patients reset through /password/* above.
 authRouter.post('/corporate/forgot-password', otpRequestLimiter, requestPasswordReset);
 authRouter.post('/corporate/reset-password', resetPassword);
-authRouter.post('/corporate/change-password', requireAuth(['corporate']), changePassword);
+// The two routes a restricted (first-login) corporate token may still use.
+authRouter.post('/corporate/change-password', requireAuth(['corporate'], { allowPasswordChangePending: true }), changePassword);
 authRouter.post('/corporate/logout', corporateLogout);
 
 authRouter.post('/refresh', refreshAccessToken);
-authRouter.get('/me', requireAuth(), getMe);
+authRouter.get('/me', requireAuth(undefined, { allowPasswordChangePending: true }), getMe);
 authRouter.patch('/me', requireAuth(['patient']), updateMe);
 // Mobile/email changes: current password, then an OTP to the new value.
 authRouter.post('/me/contact', requireAuth(['patient']), patientLoginLimiter, otpSendIpLimiter, requestContactChange);

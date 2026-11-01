@@ -1,7 +1,7 @@
 import { sha256 } from '@/utils/crypto';
 import { ApiError, USE_MOCK_API, mockDelay } from './config';
 import { http } from './http';
-import { REMEMBER_DAYS, SESSION_HOURS, clearSession, getSession, saveSession } from './session';
+import { REMEMBER_DAYS, SESSION_HOURS, clearSession, completePasswordChange, getSession, saveSession } from './session';
 import { listUsers, saveUsers } from './registrationStore';
 
 /**
@@ -97,7 +97,18 @@ export const authService = {
     if (!USE_MOCK_API) {
       const { data } = await http.post('/auth/corporate/otp/verify', { email: identifier, code });
       const ttl = remember ? REMEMBER_DAYS * 86400000 : SESSION_HOURS * 3600000;
-      const session = { token: data.token, refreshToken: data.refreshToken, user: toUserFromBackend(data.corporateUser), expiresAt: Date.now() + ttl };
+      // A login with a temporary password comes back restricted (mustChangePassword /
+      // code password_change_required): keep that on the session so the portal can send
+      // the person to the first-login password change instead of the dashboard.
+      const passwordChangeRequired =
+        data.mustChangePassword === true || data.code === 'password_change_required' || data.corporateUser?.mustChangePassword === true;
+      const session = {
+        token: data.token,
+        refreshToken: data.refreshToken,
+        user: toUserFromBackend(data.corporateUser),
+        expiresAt: Date.now() + ttl,
+        ...(passwordChangeRequired && { passwordChangeRequired: true }),
+      };
       saveSession(session, remember);
       return session;
     }
@@ -147,10 +158,11 @@ export const authService = {
     saveUsers(users);
   },
 
+  // Real backend: resolves to { message, token, refreshToken } — a fresh, unrestricted pair.
   async changePassword(currentPassword, newPassword) {
     if (!USE_MOCK_API) {
-      await http.post('/auth/corporate/change-password', { currentPassword, newPassword });
-      return;
+      const { data } = await http.post('/auth/corporate/change-password', { currentPassword, newPassword });
+      return data;
     }
     await ensureDemoUser();
     await mockDelay(700);
@@ -162,5 +174,20 @@ export const authService = {
     if (currentPassword === newPassword) throw new ApiError('New password must be different from the current password.', 400);
     user.passwordHash = await sha256(newPassword);
     saveUsers(users);
+  },
+
+  // The mandatory first-login change. Only after the backend accepts it AND the new
+  // unrestricted tokens are stored does this resolve with the upgraded session; otherwise
+  // it throws and the restricted session is left exactly as it was.
+  async completeFirstLoginPasswordChange(currentPassword, newPassword) {
+    const data = await authService.changePassword(currentPassword, newPassword);
+    if (!data?.token || !data?.refreshToken) throw new ApiError('Unexpected response from the server. Please try again.', 502);
+    const session = completePasswordChange(data.token, data.refreshToken);
+    if (!session) {
+      // The password HAS changed, but this browser would not keep the new session.
+      clearSession();
+      throw new ApiError('Your password was changed, but this browser could not save the new session. Please sign in again with your new password.', 500);
+    }
+    return session;
   },
 };

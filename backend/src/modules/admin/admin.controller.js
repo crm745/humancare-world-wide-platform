@@ -3,10 +3,6 @@ const {
   listAdmins,
   createAdmin,
   deleteAdmin,
-  listPendingRegistrations,
-  getRegistrationForAdmin,
-  approveRegistration,
-  rejectRegistration,
   listCorporates,
   createCorporate,
   createCorporateUser,
@@ -21,6 +17,18 @@ const {
   replyToTicket,
   updateTicketStatus,
 } = require('./admin.service');
+const {
+  listPendingRegistrations,
+  getRegistrationForAdmin,
+  approveRegistration,
+  rejectRegistration,
+  provisionOwner,
+  sendMobileVerificationLink,
+  reviewContactEmail,
+  getRegistrationDocument,
+} = require('../corporate-registration/registration-review.service');
+const { passwordProblem } = require('../auth/auth.service');
+const { recordAuditEvent, ACTOR } = require('../../lib/audit-log');
 const { updateCaseStage, getCaseById, VALID_CASE_STATUSES } = require('../cases/cases.service');
 const { prisma } = require('../../db/prisma');
 const path = require('path');
@@ -48,8 +56,21 @@ async function login(req, res, next) {
   }
 }
 
-async function me(req, res) {
-  res.json({ ok: true, admin: req.user });
+async function me(req, res, next) {
+  try {
+    // adminRole and corporateReview are re-read from the admin's current DB record, not
+    // the JWT, so a deleted admin loses access immediately and a changed role or grant
+    // applies without a fresh login. Superadmins are always corporate reviewers.
+    const record = await prisma.adminUser.findUnique({
+      where: { id: Number(req.user.id) },
+      select: { role: true, corporateReview: true },
+    });
+    if (!record) return res.status(401).json({ error: 'Invalid token' });
+    const corporateReview = record.role === 'superadmin' || record.corporateReview === true;
+    res.json({ ok: true, admin: { ...req.user, adminRole: record.role, corporateReview } });
+  } catch (err) {
+    next(err);
+  }
 }
 
 async function logout(req, res) {
@@ -87,9 +108,15 @@ async function deleteAdminAccount(req, res, next) {
   }
 }
 
+// ---- corporate registrations ----
+// All of these run behind requireCorporateReviewer, which puts the verified Admin
+// ({ id, role }) on req.admin. Every change below is recorded against that individual Admin.
+const auditAdmin = (req, event, registrationId, detail) =>
+  recordAuditEvent(req, event, { actorType: ACTOR.ADMIN, actorId: req.admin.id, subject: `registration:${registrationId}`, detail });
+
 async function getPendingRegistrations(req, res, next) {
   try {
-    const registrations = await listPendingRegistrations();
+    const registrations = await listPendingRegistrations(req.admin);
     res.json({ registrations });
   } catch (err) {
     next(err);
@@ -98,7 +125,7 @@ async function getPendingRegistrations(req, res, next) {
 
 async function getRegistration(req, res, next) {
   try {
-    res.json({ registration: await getRegistrationForAdmin(req.params.id) });
+    res.json({ registration: await getRegistrationForAdmin(req.params.id, req.admin) });
   } catch (err) {
     next(err);
   }
@@ -106,7 +133,9 @@ async function getRegistration(req, res, next) {
 
 async function postApproveRegistration(req, res, next) {
   try {
-    res.json({ registration: await approveRegistration(req.params.id, req.user.id) });
+    const registration = await approveRegistration(req.params.id, req.admin);
+    auditAdmin(req, 'registration_approved', registration.id);
+    res.json({ registration });
   } catch (err) {
     next(err);
   }
@@ -114,21 +143,55 @@ async function postApproveRegistration(req, res, next) {
 
 async function postRejectRegistration(req, res, next) {
   try {
-    res.json({ registration: await rejectRegistration(req.params.id, req.body.reason) });
+    const registration = await rejectRegistration(req.params.id, req.admin, req.body?.reason);
+    auditAdmin(req, 'registration_rejected', registration.id);
+    res.json({ registration });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Creates the company and its initial Owner from an approved registration. The temporary
+// password is in this response only — it is never stored in clear or written to a log.
+async function postProvisionRegistration(req, res, next) {
+  try {
+    const { registration, email, temporaryPassword } = await provisionOwner(req.params.id, req.admin);
+    auditAdmin(req, 'registration_provisioned', registration.id, { corporateId: registration.corporateDbId });
+    res.status(201).json({ registration, credentials: { email, temporaryPassword } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function postSendMobileLink(req, res, next) {
+  try {
+    const result = await sendMobileVerificationLink(req.params.id, req.admin);
+    auditAdmin(req, 'registration_mobile_link_sent', Number(req.params.id));
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function postReviewContactEmail(req, res, next) {
+  try {
+    const { action, email, reason } = req.body || {};
+    const registration = await reviewContactEmail(req.params.id, req.admin, { action, email, reason });
+    auditAdmin(req, 'registration_email_reviewed', registration.id, { action, reason: String(reason).trim().slice(0, 500) });
+    res.json({ registration });
   } catch (err) {
     next(err);
   }
 }
 
 // Registration documents are never served as static files (same reasoning as every
-// other upload in this app) — compliance has to be authenticated to open one.
+// other upload in this app) — a reviewer has to be authenticated to open one, the bank
+// proof only a superadmin, and each download is recorded against the Admin who made it.
 async function downloadRegistrationDocument(req, res, next) {
   try {
-    const registration = await getRegistrationForAdmin(req.params.id);
-    const doc = registration.documents.find((d) => d.key === req.params.key);
-    if (!doc) return res.status(404).json({ error: 'Document not found' });
-    const filename = path.basename(doc.fileUrl);
-    res.download(path.join(UPLOAD_DIR, filename), doc.fileName);
+    const doc = await getRegistrationDocument(req.params.id, req.params.key, req.admin);
+    auditAdmin(req, 'registration_document_downloaded', Number(req.params.id), { key: req.params.key });
+    res.download(path.join(UPLOAD_DIR, path.basename(doc.fileUrl)), doc.fileName);
   } catch (err) {
     next(err);
   }
@@ -159,7 +222,15 @@ async function postCorporateUser(req, res, next) {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    const problem = passwordProblem(password);
+    if (problem) return res.status(400).json({ error: problem });
     const corporateUser = await createCorporateUser(req.params.id, { email, password });
+    recordAuditEvent(req, 'corporate_login_added', {
+      actorType: ACTOR.ADMIN,
+      actorId: req.user.id,
+      subject: `corporate:${req.params.id}`,
+      detail: { corporateUserId: corporateUser.id },
+    });
     res.status(201).json({ corporateUser });
   } catch (err) {
     next(err);
@@ -290,6 +361,9 @@ module.exports = {
   getRegistration,
   postApproveRegistration,
   postRejectRegistration,
+  postProvisionRegistration,
+  postSendMobileLink,
+  postReviewContactEmail,
   downloadRegistrationDocument,
   getCorporates,
   postCorporate,
