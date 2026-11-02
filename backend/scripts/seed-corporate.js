@@ -1,11 +1,11 @@
 // One-time script to create a test corporate account for local testing.
-// Run with: node src/seed-corporate.js
+// Run from backend/ with: node scripts/seed-corporate.js
 // Set INITIAL_CORPORATE_PASSWORD in .env to pick the password yourself — otherwise a
 // fresh random one is generated and printed below. Never hardcode a password here;
 // this file (and its history) ends up in Git.
 const bcrypt = require('bcryptjs');
-const { prisma } = require('./db/prisma');
-const { randomPassword } = require('./lib/random-password');
+const { prisma } = require('../src/db/prisma');
+const { randomPassword } = require('../src/common/utils/random-password');
 
 async function main() {
   const corporate = await prisma.corporate.upsert({

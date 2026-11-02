@@ -1,7 +1,7 @@
 // One-time migration: loads the old static service list into the real Service table.
 // Safe to re-run — skips any slug that already exists.
-const { prisma } = require('./db/prisma');
-const SERVICES = require('./modules/services/services.data');
+const { prisma } = require('../src/db/prisma');
+const SERVICES = require('../src/modules/services/services.data');
 
 async function main() {
   for (let i = 0; i < SERVICES.length; i++) {

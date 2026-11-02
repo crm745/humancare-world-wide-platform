@@ -1,6 +1,6 @@
 const { Router } = require('express');
-const { requireAuth, requireSuperAdmin } = require('../../middleware/auth.middleware');
-const { loginLimiter, otpSendIpLimiter } = require('../../middleware/rate-limit.middleware');
+const { requireAuth, requireSuperAdmin } = require('../../common/middleware/auth.middleware');
+const { loginLimiter, otpSendIpLimiter } = require('../../common/middleware/rate-limit.middleware');
 const { requireCorporateReviewer } = require('./corporate-reviewer');
 const {
   login,

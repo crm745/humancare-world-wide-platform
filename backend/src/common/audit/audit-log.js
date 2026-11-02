@@ -5,7 +5,7 @@
 //
 // Never pass a password, an OTP, a token or a full mobile number in `detail`. Writing the
 // log must not break the action it describes, so a failure is reported and swallowed.
-const { prisma } = require('../db/prisma');
+const { prisma } = require('../../db/prisma');
 
 const ACTOR = { ADMIN: 'admin', REGISTRANT: 'registrant', SYSTEM: 'system' };
 

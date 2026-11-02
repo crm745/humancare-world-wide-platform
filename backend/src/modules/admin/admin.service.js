@@ -1,8 +1,9 @@
 const { prisma } = require('../../db/prisma');
 const { hashPassword, comparePassword, signAccessToken, signRefreshToken } = require('../auth/auth.service');
 const { VALID_CASE_STATUSES } = require('../cases/cases.service');
-const { ticketIdFor, ticketDbIdFrom, TICKET_STATUS_LABEL } = require('../corporate-portal/corporate-portal.service');
-const { normalizeEmail } = require('../../lib/phone');
+const { TICKET_STATUS_LABEL } = require('../../common/constants/ticket.constants');
+const { ticketIdFor, ticketDbIdFrom } = require('../../common/utils/ticket-reference');
+const { normalizeEmail } = require('../../common/utils/phone');
 
 async function loginAdmin(email, password) {
   const admin = await prisma.adminUser.findUnique({ where: { email } });

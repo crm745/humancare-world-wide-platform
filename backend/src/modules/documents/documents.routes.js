@@ -1,5 +1,5 @@
 const { Router } = require('express');
-const { requireAuth } = require('../../middleware/auth.middleware');
+const { requireAuth } = require('../../common/middleware/auth.middleware');
 const { downloadDocument } = require('./documents.controller');
 
 const documentsRouter = Router();

@@ -1,11 +1,11 @@
 // One-time script to create the first admin account for local testing.
-// Run with: node src/seed-admin.js
+// Run from backend/ with: node scripts/seed-admin.js
 // Set INITIAL_ADMIN_PASSWORD in .env to pick the password yourself — otherwise a
 // fresh random one is generated and printed below. Never hardcode a password here;
 // this file (and its history) ends up in Git.
 const bcrypt = require('bcryptjs');
-const { prisma } = require('./db/prisma');
-const { randomPassword } = require('./lib/random-password');
+const { prisma } = require('../src/db/prisma');
+const { randomPassword } = require('../src/common/utils/random-password');
 
 async function main() {
   const email = 'admin@humancareworldwide.com';

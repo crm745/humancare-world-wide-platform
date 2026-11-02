@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const { upload } = require('../../middleware/upload.middleware');
-const { otpRequestLimiter, otpVerifyLimiter } = require('../../middleware/rate-limit.middleware');
+const { otpRequestLimiter, otpVerifyLimiter } = require('../../common/middleware/rate-limit.middleware');
 const { requireRegistrationProof } = require('./registration-proof');
 const { requirePhoneProof } = require('./phone-proof');
 const {

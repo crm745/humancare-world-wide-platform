@@ -8,6 +8,8 @@ const {
   markAllRead,
   deleteNotification,
 } = require('../notifications/notifications.service');
+const { TICKET_STATUS_LABEL } = require('../../common/constants/ticket.constants');
+const { ticketIdFor, ticketDbIdFrom } = require('../../common/utils/ticket-reference');
 
 // Our Notification.kind values don't map 1:1 onto the portal's icon/colour "type"
 // categories — this is a reasonable best-effort mapping, not an exact one.
@@ -266,16 +268,6 @@ async function addPatientCommunication(corporateId, patientId, { summary, channe
 }
 
 // ---------- support tickets ----------
-const TICKET_STATUS_LABEL = { open: 'Open', in_progress: 'In Progress', resolved: 'Resolved', closed: 'Closed' };
-
-function ticketIdFor(id) {
-  return `HCW-TKT-${String(id).padStart(5, '0')}`;
-}
-function ticketDbIdFrom(ticketId) {
-  const match = /^HCW-TKT-(\d+)$/.exec(String(ticketId));
-  return match ? Number(match[1]) : null;
-}
-
 function toPortalTicket(t) {
   return {
     id: ticketIdFor(t.id),
@@ -466,7 +458,4 @@ module.exports = {
   addCorporateDocument,
   getCorporateDocumentForDownload,
   deleteCorporateDocument,
-  ticketIdFor,
-  ticketDbIdFrom,
-  TICKET_STATUS_LABEL,
 };

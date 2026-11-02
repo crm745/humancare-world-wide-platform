@@ -4,7 +4,7 @@
 // identifier that was typed, and where from (IP, user agent). Writing the log must
 // never break the login it describes, so failures are reported and swallowed.
 const { prisma } = require('../../db/prisma');
-const { maskContact } = require('../../lib/phone');
+const { maskContact } = require('../../common/utils/phone');
 
 const EVENTS = {
   REGISTER_STARTED: 'register_started',

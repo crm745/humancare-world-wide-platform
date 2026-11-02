@@ -28,7 +28,7 @@ const {
   getRegistrationDocument,
 } = require('../corporate-registration/registration-review.service');
 const { passwordProblem } = require('../auth/auth.service');
-const { recordAuditEvent, ACTOR } = require('../../lib/audit-log');
+const { recordAuditEvent, ACTOR } = require('../../common/audit/audit-log');
 const { updateCaseStage, getCaseById, VALID_CASE_STATUSES } = require('../cases/cases.service');
 const { prisma } = require('../../db/prisma');
 const path = require('path');

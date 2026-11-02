@@ -1,6 +1,6 @@
 // Logs in once for the whole run and saves the session cookie as storage state, instead of
 // every test logging in. Real logins go through the production brute-force limiter
-// (5 per 15 min per IP, see backend/src/middleware/rate-limit.middleware.js), so a suite
+// (5 per 15 min per IP, see backend/src/common/middleware/rate-limit.middleware.js), so a suite
 // that logged in per test would trip it. Credentials come from the environment — nothing
 // is hardcoded here.
 const fs = require('fs');

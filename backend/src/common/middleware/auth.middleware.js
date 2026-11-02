@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { PASSWORD_CHANGE_REQUIRED } = require('../constants/auth.constants');
 
 // No cookie-parser dependency for the sake of one cookie — this reads it straight
 // off the raw Cookie header. Only the admin portal sets this cookie (see
@@ -10,13 +11,6 @@ function getCookieToken(req, name) {
   const match = header.split(';').map((p) => p.trim()).find((p) => p.startsWith(name + '='));
   return match ? decodeURIComponent(match.slice(name.length + 1)) : null;
 }
-
-// Sent to a corporate login that still has a temporary password (see CorporateUser.
-// mustChangePassword). The mobile app shows `error` as-is, so it says where to go.
-const PASSWORD_CHANGE_REQUIRED = {
-  error: 'You must set a new password before continuing. Please sign in to the HumanCare Corporate Portal to complete this first-time password change.',
-  code: 'password_change_required',
-};
 
 // `options.allowPasswordChangePending` lets a route be used while the token is restricted
 // by the `pwc` claim (corporate first-login password change). Every other route refuses
@@ -64,4 +58,4 @@ function requireSuperAdmin(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireSuperAdmin, PASSWORD_CHANGE_REQUIRED };
+module.exports = { requireAuth, requireSuperAdmin };

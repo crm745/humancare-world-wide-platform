@@ -9,7 +9,7 @@ const {
   toPublicRegistration,
 } = require('./corporate-registration.service');
 const { signRegistrationProof, readMobileLink } = require('./registration-proof');
-const { recordAuditEvent, ACTOR } = require('../../lib/audit-log');
+const { recordAuditEvent, ACTOR } = require('../../common/audit/audit-log');
 const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
 
 // Keys the corporate-portal's DocumentsStep uploads under — see

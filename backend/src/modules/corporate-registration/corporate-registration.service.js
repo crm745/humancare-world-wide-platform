@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const { parsePhoneNumberFromString } = require('libphonenumber-js');
 const { prisma } = require('../../db/prisma');
 const { sendMail } = require('../../lib/mailer');
-const { normalizeEmail, maskMobile } = require('../../lib/phone');
+const { normalizeEmail, maskMobile } = require('../../common/utils/phone');
 const { consumePhoneProof, PURPOSES } = require('./phone-proof');
 const { emailHash } = require('./registration-proof');
 

@@ -1,6 +1,6 @@
 const disposableDomains = require("disposable-email-domains");
 const { prisma } = require("../../db/prisma");
-const { normalizeMobile, normalizeEmail, maskContact } = require("../../lib/phone");
+const { normalizeMobile, normalizeEmail, maskContact } = require("../../common/utils/phone");
 const {
   signAccessToken,
   signRefreshToken,
@@ -21,8 +21,8 @@ const {
   SocialNoAccountError,
 } = require("./auth.service");
 const { EVENTS, recordSecurityEvent } = require("./security-events");
-const { PASSWORD_CHANGE_REQUIRED } = require("../../middleware/auth.middleware");
-const { isFirebasePhoneEnabled, verifyPhoneProof } = require("../../lib/firebase");
+const { PASSWORD_CHANGE_REQUIRED } = require("../../common/constants/auth.constants");
+const { isFirebasePhoneEnabled, verifyPhoneProof } = require("../../integrations/firebase/firebase");
 
 const disposableDomainSet = new Set(disposableDomains);
 function isDisposableEmail(email) {

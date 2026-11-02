@@ -1,12 +1,12 @@
 const { Router } = require('express');
-const { requireAuth } = require('../../middleware/auth.middleware');
+const { requireAuth } = require('../../common/middleware/auth.middleware');
 const {
   loginLimiter,
   otpRequestLimiter,
   otpSendIpLimiter,
   patientLoginLimiter,
   otpVerifyLimiter,
-} = require('../../middleware/rate-limit.middleware');
+} = require('../../common/middleware/rate-limit.middleware');
 const {
   register,
   registerVerifyOtp,

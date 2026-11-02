@@ -1,7 +1,7 @@
 // Sends the OTP codes the backend generates itself.
 //
 // Email codes go out by email (src/lib/mailer.js). Real SMS codes are sent and checked by
-// Firebase from the app (PHONE_OTP_PROVIDER=firebase, see src/lib/firebase.js), so the
+// Firebase from the app (PHONE_OTP_PROVIDER=firebase, see src/integrations/firebase/firebase.js), so the
 // backend never texts anyone: if it is asked to (Firebase mode off), it only prints the
 // code to the server log for local testing, and refuses in production.
 const { sendMail } = require('../../lib/mailer');

@@ -8,7 +8,7 @@
 // written in the same transaction as whatever the proof authorises. There is no bypass:
 // if Firebase phone verification isn't configured, these flows are unavailable.
 const crypto = require('crypto');
-const { isFirebasePhoneEnabled, verifyPhoneProofDetails, PhoneProofError } = require('../../lib/firebase');
+const { isFirebasePhoneEnabled, verifyPhoneProofDetails, PhoneProofError } = require('../../integrations/firebase/firebase');
 
 const PURPOSES = {
   REGISTER: 'corporate_registration',

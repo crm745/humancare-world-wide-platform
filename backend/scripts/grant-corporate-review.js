@@ -3,14 +3,14 @@
 // It is a script, not an API, on purpose: the permission is granted by someone with access
 // to the server, never by a request.
 //
-//   node src/grant-corporate-review.js admin@example.com          grant
-//   node src/grant-corporate-review.js admin@example.com --revoke  revoke
-const { prisma } = require('./db/prisma');
+//   node scripts/grant-corporate-review.js admin@example.com          grant
+//   node scripts/grant-corporate-review.js admin@example.com --revoke  revoke
+const { prisma } = require('../src/db/prisma');
 
 async function main() {
   const [email, flag] = process.argv.slice(2);
   if (!email || (flag && flag !== '--revoke')) {
-    console.error('Usage: node src/grant-corporate-review.js <admin email> [--revoke]');
+    console.error('Usage: node scripts/grant-corporate-review.js <admin email> [--revoke]');
     process.exit(1);
   }
   const admin = await prisma.adminUser.findUnique({ where: { email: email.trim().toLowerCase() } });

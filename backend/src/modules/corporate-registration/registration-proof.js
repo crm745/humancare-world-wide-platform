@@ -13,7 +13,7 @@
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { prisma } = require('../../db/prisma');
-const { normalizeEmail } = require('../../lib/phone');
+const { normalizeEmail } = require('../../common/utils/phone');
 
 const PROOF_AUDIENCE = 'humancare-corporate-registration';
 const LINK_AUDIENCE = 'humancare-corporate-registration-mobile-link';

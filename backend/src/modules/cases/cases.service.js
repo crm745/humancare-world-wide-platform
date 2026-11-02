@@ -1,5 +1,5 @@
 const { prisma } = require('../../db/prisma');
-const { sendExpoPush } = require('../../lib/expo-push.service');
+const { sendExpoPush } = require('../../integrations/push/expo-push.service');
 const { createLead } = require('../bitrix/bitrix.service');
 const { leadInputFromCase } = require('../bitrix/bitrix-lead');
 const { isBitrixSyncEnabled } = require('../bitrix/bitrix-config');

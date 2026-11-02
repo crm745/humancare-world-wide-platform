@@ -6,8 +6,8 @@
 // attributed to an individual account.
 const { prisma } = require('../../db/prisma');
 const { sendMail } = require('../../lib/mailer');
-const { normalizeEmail, maskEmail } = require('../../lib/phone');
-const { randomPassword } = require('../../lib/random-password');
+const { normalizeEmail, maskEmail } = require('../../common/utils/phone');
+const { randomPassword } = require('../../common/utils/random-password');
 const { hashPassword, passwordProblem } = require('../auth/auth.service');
 const { signMobileLink } = require('./registration-proof');
 const {
