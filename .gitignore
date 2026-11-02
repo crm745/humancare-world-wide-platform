@@ -23,3 +23,5 @@ serviceAccountKey*.json
 
 # Internal docs, design files and task sheets: kept on this machine only
 docs/
+
+
