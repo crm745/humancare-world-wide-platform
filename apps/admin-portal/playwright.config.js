@@ -1,29 +1,24 @@
 // @ts-check
 const { defineConfig } = require('@playwright/test');
 
-// admin.html talks directly to the backend (hardcoded to http://localhost:4000), so
-// these tests need that backend already running against whichever database it's
-// currently pointed at (there's no separate test-mode for this static page). They
-// create a clearly-named test corporate as a side effect — safe to delete manually
-// afterwards if desired.
-//
-// admin.html itself is served over http(s) here, not opened via file:// — the admin
-// session lives in a cookie now, and browsers won't set/send cookies for file://.
+// The specs drive the React app on :3000 (started by `webServer` below) and talk to the
+// centralized backend on :4000, which must already be running against whichever database
+// it is pointed at. Authentication is the backend's HTTP-only cookie: global-setup logs in
+// once and stores that cookie as Playwright storage state (no token is ever put in
+// localStorage/sessionStorage). Specs that exercise the login form override it to empty.
 module.exports = defineConfig({
-  testDir: './tests',
+  testDir: './tests/e2e',
   fullyParallel: false,
   workers: 1,
   reporter: 'list',
-  globalSetup: require.resolve('./global-setup.js'),
-  // Every test starts already logged in (see global-setup.js) — the `login`
-  // describe block overrides this back to a clean/logged-out state per test, since
-  // those specifically exercise the login form itself.
+  globalSetup: require.resolve('./tests/global-setup.js'),
   use: {
-    storageState: 'tests/.admin-auth.json',
+    baseURL: 'http://localhost:3000',
+    storageState: 'tests/.auth/admin.json',
   },
   webServer: {
-    command: 'node serve.js',
-    url: 'http://localhost:3000/admin.html',
+    command: 'npm run dev',
+    url: 'http://localhost:3000',
     reuseExistingServer: true,
   },
 });

@@ -1,4 +1,7 @@
 node_modules
+dist
+.env
+.env.local
 test-results
 playwright-report
-tests/.admin-auth.json
+tests/.auth

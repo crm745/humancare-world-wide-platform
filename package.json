@@ -7,12 +7,22 @@
     "dev:mobile": "npm run start --prefix apps/mobile",
     "dev:mobile:web": "npm run web --prefix apps/mobile -- --port 8082",
     "dev:corporate": "npm run dev --prefix apps/corporate-portal",
-    "dev:admin": "npm run serve --prefix apps/admin-portal",
+    "dev:admin": "npm run dev --prefix apps/admin-portal",
+
+    "build:corporate": "npm run build --prefix apps/corporate-portal",
+    "build:admin": "npm run build --prefix apps/admin-portal",
+
+    "preview:corporate": "npm run preview --prefix apps/corporate-portal",
+    "preview:admin": "npm run preview --prefix apps/admin-portal",
+
+    "lint:mobile": "npm run lint --prefix apps/mobile",
+    "lint:admin": "npm run lint --prefix apps/admin-portal",
+
     "test:backend": "npm test --prefix backend",
     "test:mobile": "npm test --prefix apps/mobile",
     "test:admin": "npm test --prefix apps/admin-portal",
-    "lint:mobile": "npm run lint --prefix apps/mobile",
-    "build:corporate": "npm run build --prefix apps/corporate-portal",
+    "test:admin:mocked": "npm run test --prefix apps/admin-portal -- -c tests/mocked/playwright.config.js",
+
     "migrate:dev": "npm run migrate:dev --prefix backend",
     "migrate:test": "npm run migrate:test --prefix backend"
   }
