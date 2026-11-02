@@ -16,11 +16,14 @@ const MAX_ATTEMPTS = 5;
 // original audit recommended, without hammering Bitrix24 every tick.
 const RETRY_BACKOFF_MINUTES = 6;
 
-const PENDING_WHERE = {
+// Built on every sweep, never once at load: the backoff cutoff is "now minus the backoff"
+// at the time of the sweep. A cutoff worked out when the server started would never move,
+// so a lead that failed after startup would not be picked up until the next restart.
+const pendingWhere = (now = Date.now()) => ({
   bitrixLeadId: null,
   bitrixSyncAttempts: { gt: 0, lt: MAX_ATTEMPTS },
-  bitrixSyncFailedAt: { lt: new Date(Date.now() - RETRY_BACKOFF_MINUTES * 60 * 1000) },
-};
+  bitrixSyncFailedAt: { lt: new Date(now - RETRY_BACKOFF_MINUTES * 60 * 1000) },
+});
 
 // `label` is just for log lines; `model` is the Prisma delegate (prisma.serviceRequest
 // or prisma.case) so the same retry/backoff/alert logic isn't duplicated per source.
@@ -63,7 +66,7 @@ async function retryFailedBitrixSyncs() {
   const requestsRetried = await retryModel(
     prisma.serviceRequest,
     'request',
-    () => prisma.serviceRequest.findMany({ where: PENDING_WHERE, include: { user: true, case: { include: { documents: LATEST_REPORT } } } }),
+    () => prisma.serviceRequest.findMany({ where: pendingWhere(), include: { user: true, case: { include: { documents: LATEST_REPORT } } } }),
     (request) => leadInputFromRequest(request, request.user),
     (request) => request.case?.documents[0],
   );
@@ -71,7 +74,7 @@ async function retryFailedBitrixSyncs() {
   const casesRetried = await retryModel(
     prisma.case,
     'case',
-    () => prisma.case.findMany({ where: PENDING_WHERE, include: { documents: LATEST_REPORT } }),
+    () => prisma.case.findMany({ where: pendingWhere(), include: { documents: LATEST_REPORT } }),
     (caseRecord) => leadInputFromCase(caseRecord),
     (caseRecord) => caseRecord.documents[0],
   );
