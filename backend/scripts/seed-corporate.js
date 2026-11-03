@@ -31,7 +31,7 @@ async function main() {
   const password = process.env.INITIAL_CORPORATE_PASSWORD || randomPassword();
   const passwordHash = await bcrypt.hash(password, 10);
   const corporateUser = await prisma.corporateUser.create({
-    data: { corporateId: corporate.id, email, passwordHash, role: 'admin' },
+    data: { corporateId: corporate.id, email, passwordHash },
   });
 
   console.log('Corporate login created:', { email: corporateUser.email, password });
