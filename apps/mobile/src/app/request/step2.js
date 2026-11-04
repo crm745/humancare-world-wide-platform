@@ -1,35 +1,112 @@
-import { View } from 'react-native';
-import { useApp } from '../../state/AppContext';
-import { SOURCES, SOURCE_OTHER } from '../../data/mock';
-import { RequestStep } from '../../components/RequestStep';
-import { Field, FieldLabel, Input, Text } from '../../components/ui';
+import { useState } from 'react';
+import { TextInput, View } from 'react-native';
+import { router } from 'expo-router';
+import { Accessibility, Activity, BedDouble, PersonStanding } from 'lucide-react-native';
+import { needsCareLevel, useApp } from '../../state/AppContext';
+import { EQUIPMENT_OPTIONS, MOBILITY_OPTIONS, SOURCES, SOURCE_OTHER, URGENCY_OPTIONS, isMortal } from '../../data/mock';
+import { Anchor, RequestFrame } from '../../components/request/RequestFrame';
+import { Collapsible, ChoiceChips, FieldError, FieldHeader, ReportTiles, SwitchRow } from '../../components/request/fields';
+import { CARE_LEVELS, Field, FieldLabel, Input, Text } from '../../components/ui';
 import { Select } from '../../components/widgets';
 
-// Step 2 of 3: additional information. Every field here is genuinely optional —
-// except if "Other" is picked for how they heard about us, they need to say what.
+const MOBILITY_ICONS = { bedridden: BedDouble, wheelchair: Accessibility, walking: PersonStanding };
+
+// Step 2 of 3: the medical details. Patient transport (air and ground ambulance) also asks
+// about care level, mobility and what is needed on board; every service asks how urgent it is.
+// Mortal Remains asks for "Details" and the documents (the death certificate) instead of a
+// diagnosis. The optional extra questions of the old second step sit at the bottom, closed.
 export default function RequestStep2() {
   const { t, draft, updateDraft } = useApp();
-  const otherOk = draft.source !== SOURCE_OTHER || draft.sourceOther.trim();
+  const transport = needsCareLevel(draft.service);
+  const mortal = isMortal(draft.service);
+  const [attempted, setAttempted] = useState(false);
+  const otherOk = draft.source !== SOURCE_OTHER || draft.sourceOther.trim() !== '';
+
+  const problems = [
+    ['mobility', transport && !draft.mobility],
+    ['urgency', !draft.urgency],
+    ['sourceOther', !otherOk],
+  ];
+  const firstError = () => problems.find(([, wrong]) => wrong)?.[0] || null;
 
   return (
-    <RequestStep step={2} headingKey="step3_heading" ready={otherOk}>
-      <Field multiline label={t('field_extra_info')} placeholder="Optional" value={draft.extra} onChangeText={(extra) => updateDraft({ extra })} />
-      <Field multiline label={t('field_special_req')} placeholder="e.g. oxygen support, wheelchair access" value={draft.special} onChangeText={(special) => updateDraft({ special })} />
-      <View>
-        <FieldLabel>{t('field_hear_about_us')}</FieldLabel>
-        <Select value={draft.source || 'Select an option'} options={SOURCES} onChange={(source) => updateDraft({ source })} title={t('field_hear_about_us')} />
-        {draft.source === SOURCE_OTHER && (
-          <>
-            <Input
-              className="mt-2.5"
-              placeholder={t('field_hear_about_us_other')}
-              value={draft.sourceOther}
-              onChangeText={(sourceOther) => updateDraft({ sourceOther })}
-            />
-            {!otherOk ? <Text className="mt-1 text-[12px] text-danger">Please specify.</Text> : null}
-          </>
-        )}
+    <RequestFrame
+      step={2} firstError={firstError} onInvalid={() => setAttempted(true)} onNext={() => router.push('/request/review')}
+      nextKey="req_next_review" hintKey="req_hint_step2"
+    >
+      <Text className="font-inter-black text-[16px] text-navy" accessibilityRole="header">{t(mortal ? 'req_details' : 'req_condition')}</Text>
+      <View className="-mt-2 min-h-[88px] flex-row gap-2.5 rounded-2xl border-[1.5px] border-field bg-white p-3.5">
+        <View className="pt-0.5"><Activity size={18} color="#97A4B8" strokeWidth={2} /></View>
+        <TextInput
+          multiline textAlignVertical="top" value={draft.desc} onChangeText={(desc) => updateDraft({ desc })}
+          accessibilityLabel={t(mortal ? 'req_details' : 'req_condition')}
+          placeholder={t(mortal ? 'req_details_placeholder' : 'req_condition_placeholder')} placeholderTextColor="#97A4B8"
+          className="min-h-[64px] flex-1 p-0 font-inter text-[14px] leading-[21px] text-ink"
+        />
       </View>
-    </RequestStep>
+
+      {transport && (
+        <View>
+          <FieldHeader title={t('field_care_level')} hint={t('care_level_hint')} />
+          <ChoiceChips
+            multiple columns={2} label={t('field_care_level')} value={draft.care} onChange={(care) => updateDraft({ care })}
+            options={CARE_LEVELS.map((key) => ({ value: key, label: t(key), exclusive: key === 'care_na' }))}
+          />
+        </View>
+      )}
+
+      {transport && (
+        <Anchor id="mobility">
+          <FieldHeader title={t('req_mobility')} hint={t('req_mobility_hint')} required />
+          <ChoiceChips
+            columns={3} label={t('req_mobility')} value={draft.mobility} onChange={(mobility) => updateDraft({ mobility })}
+            options={MOBILITY_OPTIONS.map((key) => ({ value: key, label: t(`mobility_${key}`), Icon: MOBILITY_ICONS[key] }))}
+          />
+          <FieldError>{attempted && !draft.mobility ? t('req_required') : null}</FieldError>
+        </Anchor>
+      )}
+
+      {transport && (
+        <View>
+          <FieldHeader title={t('req_on_board')} />
+          <View className="rounded-2xl border border-line bg-white px-4">
+            {EQUIPMENT_OPTIONS.map(([field, , labelKey], i) => (
+              <SwitchRow key={field} label={t(labelKey)} value={draft[field]} onChange={(on) => updateDraft({ [field]: on })} last={i === EQUIPMENT_OPTIONS.length - 1} />
+            ))}
+          </View>
+        </View>
+      )}
+
+      <ReportTiles title={t(mortal ? 'req_documents' : 'req_reports')} files={draft.files} onChange={(files) => updateDraft({ files })} />
+
+      <Anchor id="urgency">
+        <FieldHeader title={t('req_urgency')} required />
+        <ChoiceChips
+          columns={3} label={t('req_urgency')} value={draft.urgency} onChange={(urgency) => updateDraft({ urgency })}
+          options={URGENCY_OPTIONS.map((key) => ({ value: key, label: t(`urgency_${key}`), danger: key === 'critical_6h' }))}
+        />
+        <FieldError>{attempted && !draft.urgency ? t('req_required') : null}</FieldError>
+      </Anchor>
+
+      <Anchor id="sourceOther">
+        <Collapsible
+          title={t('req_more_details')} hint={t('req_more_details_hint')}
+          defaultOpen={!!(draft.extra || draft.special || draft.source)} forceOpen={attempted && !otherOk}
+        >
+          <Field multiline label={t('field_extra_info')} placeholder="Optional" value={draft.extra} onChangeText={(extra) => updateDraft({ extra })} />
+          <Field multiline label={t('field_special_req')} placeholder="e.g. oxygen support, wheelchair access" value={draft.special} onChangeText={(special) => updateDraft({ special })} />
+          <View>
+            <FieldLabel>{t('field_hear_about_us')}</FieldLabel>
+            <Select value={draft.source || 'Select an option'} options={SOURCES} onChange={(source) => updateDraft({ source })} title={t('field_hear_about_us')} />
+            {draft.source === SOURCE_OTHER && (
+              <>
+                <Input className="mt-2.5" placeholder={t('field_hear_about_us_other')} value={draft.sourceOther} onChangeText={(sourceOther) => updateDraft({ sourceOther })} />
+                <FieldError>{attempted && !otherOk ? 'Please specify.' : null}</FieldError>
+              </>
+            )}
+          </View>
+        </Collapsible>
+      </Anchor>
+    </RequestFrame>
   );
 }

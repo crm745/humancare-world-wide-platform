@@ -174,3 +174,17 @@ export const OPS_EMAIL = 'ops@humancareworldwide.com';
 // "How did you hear about us?" options. Picking SOURCE_OTHER asks the user to type the answer.
 export const SOURCE_OTHER = 'Other';
 export const SOURCES = ['Google Search', 'Referral', 'Insurance Provider', 'Social Media', SOURCE_OTHER];
+
+// New Request form, medical page. Same values the backend accepts (backend
+// src/common/constants/request.constants.js); the labels come from i18n (`mobility_*`, `urgency_*`).
+export const MOBILITY_OPTIONS = ['bedridden', 'wheelchair', 'walking'];
+export const URGENCY_OPTIONS = ['critical_6h', 'urgent_24h', 'planned'];
+// [draft field, API field, i18n label key]
+export const EQUIPMENT_OPTIONS = [
+  ['equipOxygen', 'equipOxygen', 'equip_oxygen'],
+  ['equipCardiac', 'equipCardiacMonitor', 'equip_cardiac_monitor'],
+  ['equipVentilator', 'equipVentilator', 'equip_ventilator'],
+];
+// Reports attached to one request (the backend takes them one upload at a time).
+export const MAX_REPORT_FILES = 10;
+export const MAX_REPORT_BYTES = 10 * 1024 * 1024;

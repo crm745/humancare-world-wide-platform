@@ -3,6 +3,7 @@ import I18N from '../data/i18n.json';
 import { apiGet } from '../lib/api';
 import { getAccessToken } from '../lib/session';
 import { profileFromUser } from '../lib/profile';
+import { draftForService, needsCareLevel } from '../lib/requestForm';
 
 const AppContext = createContext(null);
 
@@ -28,26 +29,31 @@ export const INITIAL_DRAFT = {
   country: '',
   cc: '+91',
   phone: '',
-  care: '', // single-select; only asked for air & ground ambulance (see needsCareLevel)
+  care: [], // care-level keys, one or more; only asked for air & ground ambulance (see needsCareLevel)
   airlineMode: '', // 'stretcher' | 'wheelchair'; only asked for Commercial Airlines
   // Mortal Remains only (see isMortal); `name`/`age`/`gender` are then the deceased's.
   mortalTransfer: '', // 'domestic' | 'international'
   relation: '', // the requester's relation to the deceased
   deathPlace: '',
   deathDate: '', // YYYY-MM-DD
-  desc: '',
+  desc: '', // "Condition & diagnosis" ("Details" for Mortal Remains); saved as the request's description
   dest: '',
   date: '',
-  uploadedFile: null, // { uri, name, mimeType, size } from expo-document-picker, or null
+  files: [], // medical reports: [{ uri, name, mimeType, size }], from the file picker or the camera
+  // Medical page (patient transport only: see needsCareLevel). Urgency is asked for every service.
+  mobility: '', // 'bedridden' | 'wheelchair' | 'walking'
+  equipOxygen: false,
+  equipCardiac: false,
+  equipVentilator: false,
+  urgency: '', // 'critical_6h' | 'urgent_24h' | 'planned'
+  changingService: false, // set while the person is picking another service from the request form
   extra: '',
   special: '',
   source: '',
   sourceOther: '', // free text when source is "Other"
 };
 
-// Care Level only matters for patient transport: the air ambulance options and ground ambulance.
-const CARE_LEVEL_SERVICES = ['air', 'privatecharter', 'commercialair', 'ground'];
-export const needsCareLevel = (serviceKey) => CARE_LEVEL_SERVICES.includes(serviceKey);
+export { needsCareLevel };
 
 export function initialsOf(name) {
   return name.split(' ').filter(Boolean).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || 'U';
@@ -104,7 +110,7 @@ export function AppProvider({ children }) {
       setProfile,
       draft,
       updateDraft,
-      resetDraft: (service) => setDraft({ ...INITIAL_DRAFT, service }),
+      resetDraft: (service) => setDraft((d) => draftForService(d, service, INITIAL_DRAFT)),
       toast,
       toastMsg,
     }),

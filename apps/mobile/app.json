@@ -34,6 +34,14 @@
       "expo-secure-store",
       "expo-sharing",
       [
+        "expo-image-picker",
+        {
+          "cameraPermission": "HumanCare uses your camera only when you tap Camera on the New Request form, to photograph a medical report for your coordinator.",
+          "photosPermission": "HumanCare accesses your photos only when you choose a picture of a medical report to attach to a request.",
+          "microphonePermission": false
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",

@@ -165,21 +165,6 @@ export function PasswordField({ label, value, onChangeText, placeholder, require
 }
 
 // 3-step progress dots for the request form (step 3 = review).
-export function StepWizard({ step }) {
-  return (
-    <View className="flex-row items-center gap-1.5 border-b border-line bg-white px-[18px] py-4">
-      {[1, 2, 3].map((i) => (
-        <View key={i} className={`flex-row items-center gap-1.5 ${i < 3 ? 'flex-1' : ''}`}>
-          <View className={`h-[26px] w-[26px] items-center justify-center rounded-full ${i < step ? 'bg-primary' : i === step ? 'bg-ink' : 'bg-line'}`}>
-            <Text className={`font-inter-black text-[12.5px] ${i <= step ? 'text-white' : 'text-faint'}`}>{i < step ? '✓' : i}</Text>
-          </View>
-          {i < 3 && <View className={`h-0.5 flex-1 ${i < step ? 'bg-primary' : 'bg-line'}`} />}
-        </View>
-      ))}
-    </View>
-  );
-}
-
 export function ServiceTile({ img, title, sub, onPress }) {
   return (
     <Pressable
