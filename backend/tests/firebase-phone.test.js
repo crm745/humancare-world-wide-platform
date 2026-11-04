@@ -158,4 +158,25 @@ describe('changing the mobile with Firebase', () => {
     expect(withNew.status).toBe(200);
     expect(withNew.body.user.mobile).toBe(newMobile);
   });
+
+  it('in Firebase mode too, the picked country is checked before any proof is asked for and then saved with the number', async () => {
+    const { token } = await registerViaFirebase();
+    const auth = { Authorization: `Bearer ${token}` };
+    const uae = `50${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`;
+
+    const wrong = await request(app).post('/auth/me/contact').set(auth)
+      .send({ kind: 'mobile', mobile: uae, countryCode: '+971', phoneCountry: 'IN', password: PASSWORD });
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.code).toBe('phone_country_mismatch');
+    expect(wrong.body.ticket).toBeUndefined();
+
+    const step = await request(app).post('/auth/me/contact').set(auth)
+      .send({ kind: 'mobile', mobile: uae, countryCode: '+971', phoneCountry: 'AE', password: PASSWORD });
+    expect(step.status).toBe(200);
+    expect(step.body.phoneVerification).toBe('firebase');
+    expect(step.body.phoneNumber).toBe(`+971${uae}`);
+    const done = await request(app).post('/auth/me/contact/verify-otp').set(auth).send({ ticket: step.body.ticket, firebaseIdToken: `phone:+971${uae}` });
+    expect(done.status).toBe(200);
+    expect(done.body.user).toMatchObject({ mobile: `+971${uae}`, countryCode: '+971', phoneCountry: 'AE' });
+  });
 });

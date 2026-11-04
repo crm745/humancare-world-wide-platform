@@ -31,6 +31,28 @@ function sendCount(identifier) {
   return deliverOtp.mock.calls.filter((c) => c[0] === identifier).length;
 }
 
+// UK mobiles for the +44 tests. Fixed on purpose: random digits after "79" are not always a valid
+// UK number (about 1 in 170 are not), which made those tests fail now and then. Every one is
+// checked with libphonenumber by the fixtures test below. Each test takes the next unused number.
+const UK_MOBILES = Array.from({ length: 12 }, (_, i) => `7400${String(120001 + i * 7)}`);
+let nextUkMobile = 0;
+function ukMobile() {
+  if (nextUkMobile >= UK_MOBILES.length) throw new Error('Out of UK test numbers: add more to UK_MOBILES');
+  return UK_MOBILES[nextUkMobile++];
+}
+
+describe('test fixtures', () => {
+  it('every UK test mobile is a valid +44 number', () => {
+    const { parsePhoneNumberFromString } = require('libphonenumber-js');
+    expect(new Set(UK_MOBILES).size).toBe(UK_MOBILES.length);
+    for (const national of UK_MOBILES) {
+      const parsed = parsePhoneNumberFromString(`+44${national}`);
+      expect(parsed && parsed.isValid()).toBe(true);
+      expect(parsed.countryCallingCode).toBe('44');
+    }
+  });
+});
+
 // Pushes this destination's codes past the 30s resend cooldown, so a test can trigger
 // the next OTP without waiting for real time to pass.
 async function skipCooldown(identifier) {
@@ -651,6 +673,22 @@ describe('Google/Apple sign-in', () => {
     });
   });
 
+  it('checks the phone country against the number on the Google sign-up step, and infers it for an older app', async () => {
+    const google = newGoogleUser();
+    await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
+      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const wrong = await request(gApp).post('/auth/social/register')
+        .send(socialBody(first.body.signupTicket, { mobile: `416555${Date.now().toString().slice(-4)}`, countryCode: '+1', phoneCountry: 'US' }));
+      expect(wrong.status).toBe(400);
+      expect(wrong.body.code).toBe('phone_country_mismatch');
+      expect(await gPrisma.user.findFirst({ where: { email: google.email } })).toBeNull();
+
+      const older = await request(gApp).post('/auth/social/register').send(socialBody(first.body.signupTicket));
+      expect(older.status).toBe(200);
+      expect(await gPrisma.user.findFirst({ where: { email: google.email } })).toMatchObject({ phoneCountry: 'IN', countryCode: '+91' });
+    });
+  });
+
   it('refuses a Google sign-up with a mobile number that already has an account', async () => {
     const patient = await createPatient();
     await withFakeGoogle(newGoogleUser(), async ({ app: gApp }) => {
@@ -1006,6 +1044,66 @@ describe('POST /auth/register: gender, nationality and phone country', () => {
     expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ phoneCountry, countryCode: '+1', mobile: `+1${mobile}` });
   });
 
+  it.each([
+    ['Russia', '912', 'RU'],
+    ['Kazakhstan', '701', 'KZ'],
+  ])('remembers which country shares the +7 code: %s', async (_name, prefix, phoneCountry) => {
+    const mobile = `${prefix}${rand(7)}`;
+    const email = uniqueEmail();
+    const res = await signUp({ email, mobile, countryCode: '+7', nationality: phoneCountry, phoneCountry });
+    expect(res.status).toBe(200);
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ phoneCountry, countryCode: '+7', mobile: `+7${mobile}` });
+  });
+
+  it.each([
+    ['US picked, Canadian number', 'US', '416555'],
+    ['Canada picked, US number', 'CA', '212555'],
+    ['US picked, Puerto Rican number', 'US', '787555'],
+  ])('refuses a +1 number that belongs to another country: %s', async (_name, phoneCountry, prefix) => {
+    const email = uniqueEmail();
+    const mobile = `${prefix}${rand(4)}`;
+    const res = await signUp({ email, mobile, countryCode: '+1', phoneCountry });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('phone_country_mismatch');
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+    expect(sendCount(`+1${mobile}`)).toBe(0);
+  });
+
+  it('refuses Russia picked with a Kazakh number', async () => {
+    const email = uniqueEmail();
+    const res = await signUp({ email, mobile: `701${rand(7)}`, countryCode: '+7', phoneCountry: 'RU' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('phone_country_mismatch');
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+  });
+
+  it.each(['GB', 'GG', 'JE', 'IM'])('accepts any of GB, GG, JE and IM for a UK number: %s', async (phoneCountry) => {
+    const email = uniqueEmail();
+    const mobile = ukMobile();
+    const res = await signUp({ email, mobile, countryCode: '+44', nationality: 'GB', phoneCountry });
+    expect(res.status).toBe(200);
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ phoneCountry, countryCode: '+44', mobile: `+44${mobile}` });
+  });
+
+  it.each([
+    ['an Indian number', { mobile: undefined, countryCode: '+91' }, 'IN', '+91'],
+    ['a Canadian number', { mobile: `416555${Math.floor(1000 + Math.random() * 9000)}`, countryCode: '+1' }, 'CA', '+1'],
+    ['a Russian number', { mobile: `912${Math.floor(1000000 + Math.random() * 9000000)}`, countryCode: '+7' }, 'RU', '+7'],
+  ])('works out the phone country for an older app that sends none: %s', async (_name, overrides, expected, code) => {
+    const email = uniqueEmail();
+    const res = await request(app).post('/auth/register').send(registerBody({ email, ...(overrides.mobile && { mobile: overrides.mobile }), countryCode: overrides.countryCode }));
+    expect(res.status).toBe(200);
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ phoneCountry: expected, countryCode: code });
+  });
+
+  it('leaves the phone country empty for an older app when the code is shared and the number cannot decide it (+44)', async () => {
+    const email = uniqueEmail();
+    const mobile = ukMobile();
+    const res = await request(app).post('/auth/register').send(registerBody({ email, mobile, countryCode: '+44' }));
+    expect(res.status).toBe(200);
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ phoneCountry: null, countryCode: '+44', mobile: `+44${mobile}` });
+  });
+
   it('reads the number with the phone country\'s calling code when no countryCode is sent', async () => {
     const mobile = `50${rand(7)}`;
     const res = await signUp({ mobile, countryCode: undefined, phoneCountry: 'AE' });
@@ -1013,11 +1111,11 @@ describe('POST /auth/register: gender, nationality and phone country', () => {
     expect(codeSentTo(`+971${mobile}`)).toMatch(/^\d{6}$/);
   });
 
-  it('still accepts a sign-up without them (older app versions) and leaves them empty', async () => {
+  it('still accepts a sign-up without them (older app versions): gender and nationality stay empty, the Indian number gives its phone country', async () => {
     const email = uniqueEmail();
     const res = await request(app).post('/auth/register').send(registerBody({ email }));
     expect(res.status).toBe(200);
-    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ gender: null, nationality: null, phoneCountry: null });
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ gender: null, nationality: null, phoneCountry: 'IN', countryCode: '+91' });
   });
 
   it.each([
@@ -1061,8 +1159,234 @@ describe('POST /auth/register: gender, nationality and phone country', () => {
 
   it('leaves existing accounts working: they log in and their profile has the fields empty', async () => {
     const patient = await createPatient();
+    // An account from before the sign-up form asked for these: nothing was ever saved for it.
+    await prisma.user.update({ where: { id: patient.user.id }, data: { phoneCountry: null } });
     const me = await request(app).get('/auth/me').set('Authorization', `Bearer ${patient.token}`);
     expect(me.status).toBe(200);
     expect(me.body.user).toMatchObject({ gender: null, nationality: null, phoneCountry: null });
+  });
+});
+
+describe('changing the mobile keeps mobile, country_code and phone_country together', () => {
+  const rand = (n) => String(Math.floor(Math.random() * 10 ** n)).padStart(n, '0');
+  const auth = (token) => ({ Authorization: `Bearer ${token}` });
+  const stored = (patient) => prisma.user.findUnique({ where: { id: patient.user.id } });
+  const start = (patient, body) => request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'mobile', password: patient.password, ...body });
+  const verify = (patient, ticket, e164) => request(app).post('/auth/me/contact/verify-otp').set(auth(patient.token)).send({ ticket, code: codeSentTo(e164) });
+  async function changeMobile(patient, body, e164) {
+    const step = await start(patient, body);
+    expect(step.status).toBe(200);
+    const done = await verify(patient, step.body.ticket, e164);
+    expect(done.status).toBe(200);
+    return done;
+  }
+
+  it('same country: a new Indian number keeps IN', async () => {
+    const patient = await createPatient();
+    const mobile = uniqueMobile();
+    const done = await changeMobile(patient, { mobile, countryCode: '+91', phoneCountry: 'IN' }, `+91${mobile}`);
+    expect(done.body.user).toMatchObject({ mobile: `+91${mobile}`, countryCode: '+91', phoneCountry: 'IN' });
+    expect(await stored(patient)).toMatchObject({ mobile: `+91${mobile}`, countryCode: '+91', phoneCountry: 'IN' });
+  });
+
+  it('another country: all three fields move to the UAE, and the old country is not kept', async () => {
+    const patient = await createPatient();
+    expect((await stored(patient)).phoneCountry).toBe('IN');
+    const mobile = `50${rand(7)}`;
+    const done = await changeMobile(patient, { mobile, countryCode: '+971', phoneCountry: 'AE' }, `+971${mobile}`);
+    expect(done.body.user).toMatchObject({ mobile: `+971${mobile}`, countryCode: '+971', phoneCountry: 'AE' });
+    expect(await stored(patient)).toMatchObject({ mobile: `+971${mobile}`, countryCode: '+971', phoneCountry: 'AE' });
+
+    // Logging in with the new number works exactly as before.
+    const login = await loginToOtpStep({ mobile, countryCode: '+971', password: patient.password });
+    expect(login.status).toBe(200);
+    expect(deliverOtp.mock.calls[deliverOtp.mock.calls.length - 1][0]).toBe(`+971${mobile}`);
+  });
+
+  it('within +1: US to Canada changes the country although the calling code stays', async () => {
+    const patient = await createPatient();
+    const us = `212555${rand(4)}`;
+    await changeMobile(patient, { mobile: us, countryCode: '+1', phoneCountry: 'US' }, `+1${us}`);
+    expect(await stored(patient)).toMatchObject({ countryCode: '+1', phoneCountry: 'US' });
+    const ca = `416555${rand(4)}`;
+    await changeMobile(patient, { mobile: ca, countryCode: '+1', phoneCountry: 'CA' }, `+1${ca}`);
+    expect(await stored(patient)).toMatchObject({ mobile: `+1${ca}`, countryCode: '+1', phoneCountry: 'CA' });
+  });
+
+  it.each([
+    ['US picked, Canadian number', 'US', `416555${rand(4)}`, '+1'],
+    ['Canada picked, US number', 'CA', `212555${rand(4)}`, '+1'],
+    ['India picked, UAE number', 'IN', `50${rand(7)}`, '+971'],
+  ])('refuses a country that does not match the number before any code is sent: %s', async (_name, phoneCountry, mobile, countryCode) => {
+    const patient = await createPatient();
+    const before = await stored(patient);
+    const res = await start(patient, { mobile, countryCode, phoneCountry });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('phone_country_mismatch');
+    expect(res.body.ticket).toBeUndefined();
+    expect(sendCount(`${countryCode}${mobile}`)).toBe(0);
+    // Not even an unsent code is left behind in the database.
+    expect(await prisma.otpCode.count({ where: { identifier: `${countryCode}${mobile}` } })).toBe(0);
+    expect(await stored(patient)).toMatchObject({ mobile: before.mobile, countryCode: before.countryCode, phoneCountry: before.phoneCountry });
+  });
+
+  it('refuses an unknown phone country', async () => {
+    const patient = await createPatient();
+    const res = await start(patient, { mobile: uniqueMobile(), countryCode: '+91', phoneCountry: 'ZZ' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('invalid_profile');
+  });
+
+  it('reads the number with the phone country calling code when no countryCode is sent', async () => {
+    const patient = await createPatient();
+    const mobile = `50${rand(7)}`;
+    await changeMobile(patient, { mobile, phoneCountry: 'AE' }, `+971${mobile}`);
+    expect(await stored(patient)).toMatchObject({ mobile: `+971${mobile}`, countryCode: '+971', phoneCountry: 'AE' });
+  });
+
+  it('an older app that sends only countryCode: the unshared code gives its country, the old one is not kept', async () => {
+    const patient = await createPatient();
+    const mobile = `50${rand(7)}`;
+    await changeMobile(patient, { mobile, countryCode: '+971' }, `+971${mobile}`);
+    expect(await stored(patient)).toMatchObject({ mobile: `+971${mobile}`, countryCode: '+971', phoneCountry: 'AE' });
+  });
+
+  it('an older app on a shared code: the number decides (+1 Canada), or the country becomes NULL when it cannot (+44)', async () => {
+    const patient = await createPatient();
+    const ca = `416555${rand(4)}`;
+    await changeMobile(patient, { mobile: ca, countryCode: '+1' }, `+1${ca}`);
+    expect(await stored(patient)).toMatchObject({ countryCode: '+1', phoneCountry: 'CA' });
+
+    const uk = ukMobile();
+    await changeMobile(patient, { mobile: uk, countryCode: '+44' }, `+44${uk}`);
+    expect(await stored(patient)).toMatchObject({ mobile: `+44${uk}`, countryCode: '+44', phoneCountry: null });
+  });
+
+  it('GB, GG, JE and IM are one group for a UK number', async () => {
+    const patient = await createPatient();
+    const uk = ukMobile();
+    await changeMobile(patient, { mobile: uk, countryCode: '+44', phoneCountry: 'GB' }, `+44${uk}`);
+    expect(await stored(patient)).toMatchObject({ countryCode: '+44', phoneCountry: 'GB' });
+  });
+
+  it('a ticket issued before phoneCountry existed clears the old country instead of keeping it', async () => {
+    const { signTicket } = require('../src/modules/auth/auth.service');
+    const patient = await createPatient();
+    expect((await stored(patient)).phoneCountry).toBe('IN');
+    const mobile = `50${rand(7)}`;
+    const dest = `+971${mobile}`;
+    const real = await start(patient, { mobile, countryCode: '+971', phoneCountry: 'AE' });
+    expect(real.status).toBe(200);
+    const legacyTicket = signTicket({ step: 'change_contact_otp', sub: patient.user.id, kind: 'mobile', dest, countryCode: '+971', tv: 0 });
+    const done = await verify(patient, legacyTicket, dest);
+    expect(done.status).toBe(200);
+    expect(await stored(patient)).toMatchObject({ mobile: dest, countryCode: '+971', phoneCountry: null });
+  });
+
+  it('takes the country from the signed ticket, not from the verify request', async () => {
+    const patient = await createPatient();
+    const mobile = `50${rand(7)}`;
+    const step = await start(patient, { mobile, countryCode: '+971', phoneCountry: 'AE' });
+    const done = await request(app).post('/auth/me/contact/verify-otp').set(auth(patient.token))
+      .send({ ticket: step.body.ticket, code: codeSentTo(`+971${mobile}`), phoneCountry: 'IN', countryCode: '+91' });
+    expect(done.status).toBe(200);
+    expect(await stored(patient)).toMatchObject({ countryCode: '+971', phoneCountry: 'AE' });
+  });
+
+  it('still answers 409 and changes nothing when someone else took the number in the meantime', async () => {
+    const patient = await createPatient();
+    const mobile = `50${rand(7)}`;
+    const step = await start(patient, { mobile, countryCode: '+971', phoneCountry: 'AE' });
+    const code = codeSentTo(`+971${mobile}`);
+    await prisma.user.create({ data: { name: 'Taker', email: uniqueEmail(), mobile: `+971${mobile}`, countryCode: '+971', phoneCountry: 'AE' } });
+    const before = await stored(patient);
+    const res = await request(app).post('/auth/me/contact/verify-otp').set(auth(patient.token)).send({ ticket: step.body.ticket, code });
+    expect(res.status).toBe(409);
+    expect(await stored(patient)).toMatchObject({ mobile: before.mobile, countryCode: before.countryCode, phoneCountry: before.phoneCountry });
+  });
+
+  it('keeps sending the code the way it did: same arguments to deliverOtp', async () => {
+    const patient = await createPatient();
+    const mobile = `50${rand(7)}`;
+    await start(patient, { mobile, countryCode: '+971', phoneCountry: 'AE' });
+    const call = deliverOtp.mock.calls.filter((c) => c[0] === `+971${mobile}`).pop();
+    expect(call[2]).toBe('patient_change_mobile');
+    expect(call[3]).toBe('+971');
+  });
+
+  it('changing the email leaves the phone fields alone', async () => {
+    const patient = await createPatient();
+    const before = await stored(patient);
+    const newEmail = uniqueEmail();
+    const step = await request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'email', email: newEmail, password: patient.password });
+    expect(step.status).toBe(200);
+    const done = await request(app).post('/auth/me/contact/verify-otp').set(auth(patient.token)).send({ ticket: step.body.ticket, code: codeSentTo(newEmail) });
+    expect(done.status).toBe(200);
+    expect(await stored(patient)).toMatchObject({ email: newEmail, mobile: before.mobile, countryCode: before.countryCode, phoneCountry: before.phoneCountry });
+  });
+
+  it('an email ticket carries no phone data, and even a ticket that did would not touch the phone fields', async () => {
+    const { signTicket } = require('../src/modules/auth/auth.service');
+    const patient = await createPatient();
+    const before = await stored(patient);
+    const newEmail = uniqueEmail();
+    const step = await request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'email', email: newEmail, password: patient.password });
+    expect(step.status).toBe(200);
+    const payload = require('jsonwebtoken').decode(step.body.ticket);
+    expect(payload).toMatchObject({ step: 'change_contact_otp', kind: 'email', dest: newEmail });
+    expect(payload).not.toHaveProperty('countryCode');
+    expect(payload).not.toHaveProperty('phoneCountry');
+
+    // A correctly signed email ticket that also names a phone country and calling code.
+    const withPhone = signTicket({ step: 'change_contact_otp', sub: patient.user.id, kind: 'email', dest: newEmail, countryCode: '+971', phoneCountry: 'AE', tv: 0 });
+    const done = await verify(patient, withPhone, newEmail);
+    expect(done.status).toBe(200);
+    expect(await stored(patient)).toMatchObject({ email: newEmail, mobile: before.mobile, countryCode: before.countryCode, phoneCountry: before.phoneCountry });
+  });
+
+  // A ticket is a signed JWT. Editing its payload without the signing key must not work.
+  const tampered = (ticket, changes) => {
+    const [header, payload, signature] = ticket.split('.');
+    const edited = { ...JSON.parse(Buffer.from(payload, 'base64url').toString()), ...changes };
+    return [header, Buffer.from(JSON.stringify(edited)).toString('base64url'), signature].join('.');
+  };
+
+  it.each([
+    ['the phone country', { phoneCountry: 'IN' }],
+    ['the calling code', { countryCode: '+91' }],
+    ['the number', { dest: '+919876543210' }],
+    ['the phone country removed', { phoneCountry: null }],
+  ])('rejects a ticket whose %s was edited without re-signing it', async (_name, changes) => {
+    const patient = await createPatient();
+    const before = await stored(patient);
+    const mobile = `50${rand(7)}`;
+    const step = await start(patient, { mobile, countryCode: '+971', phoneCountry: 'AE' });
+    expect(step.status).toBe(200);
+    const forged = tampered(step.body.ticket, changes);
+    expect(forged).not.toBe(step.body.ticket);
+    const res = await verify(patient, forged, `+971${mobile}`);
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('ticket_invalid');
+    expect(await stored(patient)).toMatchObject({ mobile: before.mobile, countryCode: before.countryCode, phoneCountry: before.phoneCountry });
+
+    // The real ticket still works afterwards: the rejection did not use up the code.
+    const real = await verify(patient, step.body.ticket, `+971${mobile}`);
+    expect(real.status).toBe(200);
+    expect(await stored(patient)).toMatchObject({ mobile: `+971${mobile}`, countryCode: '+971', phoneCountry: 'AE' });
+  });
+
+  it('leaves all three fields unchanged when the database refuses the update', async () => {
+    const { signTicket } = require('../src/modules/auth/auth.service');
+    const patient = await createPatient();
+    const before = await stored(patient);
+    const mobile = `50${rand(7)}`;
+    const dest = `+971${mobile}`;
+    const real = await start(patient, { mobile, countryCode: '+971', phoneCountry: 'AE' });
+    expect(real.status).toBe(200);
+    // Correctly signed, but the phone country does not fit the VARCHAR(2) column: the database rejects it.
+    const ticket = signTicket({ step: 'change_contact_otp', sub: patient.user.id, kind: 'mobile', dest, countryCode: '+971', phoneCountry: 'TOOLONG', tv: 0 });
+    const res = await verify(patient, ticket, dest);
+    expect(res.status).toBe(500);
+    expect(await stored(patient)).toMatchObject({ mobile: before.mobile, countryCode: before.countryCode, phoneCountry: before.phoneCountry });
   });
 });

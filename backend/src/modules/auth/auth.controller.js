@@ -23,7 +23,7 @@ const {
 const { EVENTS, recordSecurityEvent } = require("./security-events");
 const { PASSWORD_CHANGE_REQUIRED } = require("../../common/constants/auth.constants");
 const { isFirebasePhoneEnabled, verifyPhoneProof } = require("../../integrations/firebase/firebase");
-const { readProfileFields, callingCodeFor, phoneCountryMismatch } = require("../../common/utils/signup-profile");
+const { readProfileFields, callingCodeFor, resolvePhoneCountry } = require("../../common/utils/signup-profile");
 
 const disposableDomainSet = new Set(disposableDomains);
 function isDisposableEmail(email) {
@@ -135,6 +135,15 @@ function parseIdentifier({ email, mobile, countryCode }) {
   return parsed ? { where: { mobile: parsed.e164 }, value: parsed.e164 } : null;
 }
 
+// The picked phone country must belong to the number (+971 with "AE", not "IN"; "US" for a
+// +1 number that is really Canadian). An older app sends none, and gets the country the number
+// reliably belongs to, or none.
+function phoneCountryFailure(res, country) {
+  return country.error === "phone_country_mismatch"
+    ? res.status(400).json({ error: "The phone country does not match the mobile number.", code: "phone_country_mismatch" })
+    : res.status(400).json({ error: "Enter a valid mobile number for the selected country." });
+}
+
 // Both sign-ups (the form, and Google/Apple + mobile) refuse to go on without the two
 // required consents, and save all three as proof of what was agreed.
 function hasRequiredConsents(consents) {
@@ -178,9 +187,8 @@ async function register(req, res) {
   if (profile.error) return res.status(400).json({ error: profile.error, code: "invalid_profile" });
   const phone = normalizeMobile(mobile, callingCodeFor(req.body, profile));
   if (!phone) return res.status(400).json({ error: "Enter a valid mobile number for the selected country." });
-  if (phoneCountryMismatch(profile, phone)) {
-    return res.status(400).json({ error: "The phone country does not match the calling code.", code: "phone_country_mismatch" });
-  }
+  const country = resolvePhoneCountry(phone.e164, profile.phoneCountry);
+  if (!country.ok) return phoneCountryFailure(res, country);
   const passwordError = passwordProblem(password);
   if (passwordError) return res.status(400).json({ error: passwordError });
   const consents = req.body.consents || {};
@@ -206,7 +214,7 @@ async function register(req, res) {
         countryCode: phone.countryCode,
         gender: profile.gender,
         nationality: profile.nationality,
-        phoneCountry: profile.phoneCountry,
+        phoneCountry: country.phoneCountry,
         passwordHash: await hashPassword(password),
         isVerified: false,
         consents: { create: consentRows(req, consents) },
@@ -575,9 +583,8 @@ async function socialRegister(req, res) {
   if (profile.error) return res.status(400).json({ error: profile.error, code: "invalid_profile" });
   const phone = normalizeMobile(mobile, callingCodeFor(req.body, profile));
   if (!phone) return res.status(400).json({ error: "Enter a valid mobile number for the selected country." });
-  if (phoneCountryMismatch(profile, phone)) {
-    return res.status(400).json({ error: "The phone country does not match the calling code.", code: "phone_country_mismatch" });
-  }
+  const country = resolvePhoneCountry(phone.e164, profile.phoneCountry);
+  if (!country.ok) return phoneCountryFailure(res, country);
   const consents = req.body.consents || {};
   if (!hasRequiredConsents(consents)) return consentRequired(res);
 
@@ -608,7 +615,7 @@ async function socialRegister(req, res) {
         countryCode: phone.countryCode,
         gender: profile.gender,
         nationality: profile.nationality,
-        phoneCountry: profile.phoneCountry,
+        phoneCountry: country.phoneCountry,
         [idField]: step.providerId,
         // The provider only issues the ticket for an email it has verified.
         emailVerifiedAt: new Date(),
@@ -803,12 +810,18 @@ async function requestContactChange(req, res) {
 
   let dest;
   let countryCode;
+  let phoneCountry;
   if (kind === "mobile") {
-    const phone = normalizeMobile(req.body.mobile, req.body.countryCode);
+    const profile = readProfileFields({ phoneCountry: req.body.phoneCountry });
+    if (profile.error) return res.status(400).json({ error: profile.error, code: "invalid_profile" });
+    const phone = normalizeMobile(req.body.mobile, callingCodeFor(req.body, profile));
     if (!phone) return res.status(400).json({ error: "Enter a valid mobile number for the selected country." });
+    const country = resolvePhoneCountry(phone.e164, profile.phoneCountry);
+    if (!country.ok) return phoneCountryFailure(res, country);
     if (phone.e164 === user.mobile) return res.status(400).json({ error: "That is already your mobile number." });
     dest = phone.e164;
     countryCode = phone.countryCode;
+    phoneCountry = country.phoneCountry;
   } else {
     dest = normalizeEmail(req.body.email);
     if (!EMAIL_RE.test(dest)) return res.status(400).json({ error: "Enter a valid email address." });
@@ -826,7 +839,7 @@ async function requestContactChange(req, res) {
 
   const result = await sendCode(dest, kind === "mobile" ? "patient_change_mobile" : "patient_change_email", countryCode);
   if (result.throttled) return throttledResponse(res, result);
-  res.json(codeStep(signTicket({ step: "change_contact_otp", sub: user.id, kind, dest, countryCode, tv: user.tokenVersion }), dest));
+  res.json(codeStep(signTicket({ step: "change_contact_otp", sub: user.id, kind, dest, countryCode, phoneCountry, tv: user.tokenVersion }), dest));
 }
 
 // Change mobile/email, step 2: the code from the new number/inbox. Needs the same signed-in
@@ -850,7 +863,8 @@ async function verifyContactChange(req, res) {
     user = await prisma.user.update({
       where: { id: req.user.id },
       data: step.kind === "mobile"
-        ? { mobile: step.dest, countryCode: step.countryCode }
+        // A ticket from before phoneCountry existed has none: clear the old one rather than keep a country that no longer matches.
+        ? { mobile: step.dest, countryCode: step.countryCode, phoneCountry: step.phoneCountry ?? null }
         : { email: step.dest, emailVerifiedAt: new Date() },
       omit: { passwordHash: false },
     });
