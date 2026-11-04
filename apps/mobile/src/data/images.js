@@ -12,4 +12,6 @@ export const IMAGES = {
 };
 
 export const LOGO = require('../../assets/images/logo-full.png');
-export const WELCOME_BG = require('../../assets/images/welcome-bg.png');
+// Getting Started pages; the @2x/@3x files next to each are picked automatically.
+export const ONBOARDING_FAMILY = require('../../assets/images/onboarding-family.png');
+export const ONBOARDING_CARE = require('../../assets/images/onboarding-care.png');
