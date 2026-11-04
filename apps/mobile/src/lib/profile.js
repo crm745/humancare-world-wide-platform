@@ -11,6 +11,10 @@ export function profileFromUser(user) {
     cc: parsed ? `+${parsed.countryCallingCode}` : user.countryCode || '+91',
     phone: parsed ? parsed.nationalNumber : user.mobile || '',
     email: user.email,
+    // Empty for accounts made before the sign-up form asked for them.
+    gender: user.gender || '',
+    nationality: user.nationality || '',
+    phoneCountry: user.phoneCountry || '',
     hasPassword: user.hasPassword !== false,
   };
 }

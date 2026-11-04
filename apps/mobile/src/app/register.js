@@ -2,43 +2,56 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
 import { useApp } from '../state/AppContext';
-import { COUNTRY_CODES, COUNTRY_CODE_LABELS } from '../data/mock';
 import { BackButton, Body, Screen } from '../components/layout';
-import { Button, Field, FieldLabel, Heading, Input, Text } from '../components/ui';
+import { Button, Field, FieldLabel, Heading, Text } from '../components/ui';
 import { SignupConsents, consentsBody } from '../components/SignupConsents';
-import { PasswordField, Select } from '../components/widgets';
+import { NationalityPhoneFields } from '../components/NationalityPhone';
+import { ChoiceChips } from '../components/request/fields';
+import { PasswordField } from '../components/widgets';
 import { apiPost } from '../lib/api';
 import { codeStepFrom, setAuthStep } from '../lib/authFlow';
+import { GENDER_OPTIONS } from '../data/mock';
+import { INITIAL_PHONE_STATE, dialOf, pickNationality, pickPhoneCountry } from '../lib/phoneCountry';
 import { PASSWORD_HINT, isValidEmail, isValidMobileNumber, isValidName, passwordProblem } from '../lib/validators';
 
 // The sign-up form. Google/Apple buttons live on the Login screen only; someone new who
-// uses them finishes on complete-profile.js (mobile + consents) instead of this form.
+// uses them finishes on complete-profile.js (gender, nationality, mobile + consents) instead.
 export default function Register() {
   const { t, toast } = useApp();
   const [name, setName] = useState('');
-  const [cc, setCc] = useState('+91');
+  const [gender, setGender] = useState('');
+  // Nationality, and the phone's country: its calling code follows the nationality until the
+  // person changes the code by hand (see lib/phoneCountry.js).
+  const [where, setWhere] = useState(INITIAL_PHONE_STATE);
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const [consents, setConsents] = useState([false, false, false]);
   // Consent 0 (terms/privacy) and 1 (medical disclaimer) are required; consent 2
   // (marketing communications) is optional, like most apps treat it — grouped last.
   const passwordError = password ? passwordProblem(password) : null;
   const confirmError = confirm && confirm !== password ? 'Passwords do not match.' : null;
-  const ready = isValidName(name) && isValidMobileNumber(phone, cc) && isValidEmail(email)
+  const ready = isValidName(name) && gender && where.nationality && isValidMobileNumber(phone, dialOf(where.phoneCountry)) && isValidEmail(email)
     && password && !passwordError && confirm === password && consents[0] && consents[1];
 
   // Creates the account (unverified, password hashed server-side) and texts an OTP;
   // register-otp.js verifies it with the ticket and signs straight in.
   const submit = async () => {
-    if (!ready) { toast('Enter a valid name, mobile number, email and password, and accept the required consents.'); return; }
+    if (!ready) {
+      setAttempted(true);
+      toast('Enter your name, gender, nationality, a valid mobile number, email and password, and accept the required consents.');
+      return;
+    }
     setBusy(true);
     try {
       // The backend saves these as proof of consent and refuses sign-up without the two required ones.
       const data = await apiPost('/auth/register', {
-        name: name.trim(), email: email.trim(), mobile: phone.trim(), countryCode: cc, password,
+        name: name.trim(), email: email.trim(), mobile: phone.trim(), password,
+        countryCode: dialOf(where.phoneCountry), phoneCountry: where.phoneCountry,
+        gender, nationality: where.nationality,
         consents: consentsBody(consents),
       });
       toast('OTP sent');
@@ -63,13 +76,19 @@ export default function Register() {
             error={name && !isValidName(name) ? 'Enter a valid name.' : undefined}
           />
           <View>
-            <FieldLabel large required>{t('field_mobile_number')}</FieldLabel>
-            <View className="flex-row gap-2">
-              <Select large value={cc} options={COUNTRY_CODES} labels={COUNTRY_CODE_LABELS} onChange={setCc} title={t('field_mobile_number')} className="w-28" />
-              <Input large className="flex-1" placeholder="Mobile number" keyboardType="phone-pad" value={phone} onChangeText={setPhone} />
-            </View>
-            {phone && !isValidMobileNumber(phone, cc) ? <Text className="mt-1 text-[12px] text-danger">Enter a valid mobile number for the selected country.</Text> : null}
+            <FieldLabel large required>{t('field_gender')}</FieldLabel>
+            <ChoiceChips
+              columns={2} label={t('field_gender')} value={gender} onChange={setGender}
+              options={GENDER_OPTIONS.map((value) => ({ value, label: t(`gender_${value}`) }))}
+            />
+            {attempted && !gender ? <Text className="mt-1 text-[12px] text-danger">{t('gender_required')}</Text> : null}
           </View>
+          <NationalityPhoneFields
+            nationality={where.nationality} phoneCountry={where.phoneCountry} phone={phone} showErrors={attempted}
+            onNationality={(code) => setWhere((s) => pickNationality(s, code))}
+            onPhoneCountry={(code) => setWhere((s) => pickPhoneCountry(s, code))}
+            onPhone={setPhone}
+          />
           <Field
             large required label={t('field_email_address')} placeholder="you@example.com" keyboardType="email-address" autoCapitalize="none" value={email} onChangeText={setEmail}
             error={email && !isValidEmail(email) ? 'Enter a valid email address.' : undefined}

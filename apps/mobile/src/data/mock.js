@@ -188,3 +188,6 @@ export const EQUIPMENT_OPTIONS = [
 // Reports attached to one request (the backend takes them one upload at a time).
 export const MAX_REPORT_FILES = 10;
 export const MAX_REPORT_BYTES = 10 * 1024 * 1024;
+
+// Create Account form: gender, as the API stores it. Labels are i18n `gender_<value>`.
+export const GENDER_OPTIONS = ['male', 'female', 'other', 'prefer_not_to_say'];
