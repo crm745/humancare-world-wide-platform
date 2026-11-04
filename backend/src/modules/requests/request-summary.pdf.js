@@ -1,4 +1,5 @@
 const PDFDocument = require('pdfkit');
+const { MOBILITY_LABEL, URGENCY_LABEL, EQUIPMENT } = require('../../common/constants/request.constants');
 
 function row(doc, label, value) {
   if (value === null || value === undefined || value === '') return;
@@ -34,7 +35,11 @@ function streamRequestSummaryPdf(res, request) {
   row(doc, mortal ? 'Preferred transfer date:' : 'Date Of Service:', day(request.preferredDate));
   row(doc, 'Status:', request.status);
   row(doc, 'Submitted:', new Date(request.createdAt).toLocaleString());
-  if (request.description) row(doc, 'Description:', request.description);
+  row(doc, 'Urgency:', URGENCY_LABEL[request.urgency]);
+  if (request.description) row(doc, mortal ? 'Details:' : 'Condition & diagnosis:', request.description);
+  row(doc, 'Care level:', request.careLevel);
+  row(doc, 'Patient mobility:', MOBILITY_LABEL[request.mobility]);
+  row(doc, 'Required on board:', EQUIPMENT.filter(([field]) => request[field] === true).map(([, label]) => label).join(', '));
   if (request.specialRequirements) row(doc, 'Special Requirements:', request.specialRequirements);
 
   const stageEvents = request.case && request.case.stageEvents;

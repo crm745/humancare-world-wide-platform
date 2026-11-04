@@ -8,7 +8,7 @@
 const { isBitrixSyncEnabled } = require('./bitrix-config');
 const fs = require('fs/promises');
 const path = require('path');
-const { buildLeadFields, medicalReportFields } = require('./bitrix-lead');
+const { buildLeadFields, medicalReportFields, MEDICAL_REPORT_FIELD } = require('./bitrix-lead');
 const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
 
 const WEBHOOK_URL = process.env.BITRIX24_WEBHOOK_URL;
@@ -65,19 +65,32 @@ async function createLead(input) {
 
 // Puts an uploaded medical report (a Document row: name + /uploads/<file>) into the
 // lead's "Medical Report" field. Throws like createLead; callers treat it as best-effort.
-async function attachMedicalReport(leadId, document) {
+//
+// If that field is a multiple-file field in Bitrix, the files already on the lead are read
+// back and sent again by id next to the new one: a plain update would replace them all. If it
+// is a single-file field the new file replaces the old one, as before. `comments` (the lead
+// comment with every report's name in it) is written in the same call when given.
+async function attachMedicalReport(leadId, document, { comments } = {}) {
   const content = await fs.readFile(path.join(UPLOAD_DIR, path.basename(document.fileUrl)));
-  return callBitrix('crm.lead.update', { id: leadId, fields: medicalReportFields(document.name, content) });
+  const fields = medicalReportFields(document.name, content);
+  const lead = await callBitrix('crm.lead.get', { id: leadId });
+  const existing = lead && lead[MEDICAL_REPORT_FIELD];
+  if (Array.isArray(existing)) {
+    const kept = existing.filter((file) => file && file.id).map((file) => ({ id: file.id }));
+    fields[MEDICAL_REPORT_FIELD] = [...kept, fields[MEDICAL_REPORT_FIELD]];
+  }
+  if (comments) fields.COMMENTS = comments;
+  return callBitrix('crm.lead.update', { id: leadId, fields });
 }
 
 // Best-effort wrapper for the upload endpoints and the retry sweep: the file is already
 // saved in our system, so a Bitrix problem is logged, never passed on to the uploader.
 // Nothing happens while the switch is off or before the lead exists (the retry sweep
-// sends the latest report once it creates the lead).
-async function sendMedicalReportToBitrix(leadId, document) {
+// sends the reports once it creates the lead).
+async function sendMedicalReportToBitrix(leadId, document, options) {
   if (!leadId || !isBitrixSyncEnabled()) return false;
   try {
-    await attachMedicalReport(leadId, document);
+    await attachMedicalReport(leadId, document, options);
     return true;
   } catch (err) {
     console.error(`Bitrix24 medical report upload failed for lead ${leadId}:`, err.message);

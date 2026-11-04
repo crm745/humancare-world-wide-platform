@@ -6,7 +6,10 @@ const {
 } = require('./requests.service');
 const { addDocumentToCase } = require('../documents/documents.service');
 const { sendMedicalReportToBitrix } = require('../bitrix/bitrix.service');
+const { leadInputFromRequest, commentWithReports } = require('../bitrix/bitrix-lead');
+const { prisma } = require('../../db/prisma');
 const { streamRequestSummaryPdf } = require('./request-summary.pdf');
+const { MOBILITY, URGENCY, EQUIPMENT, isTransportKey } = require('../../common/constants/request.constants');
 
 const REQUIRED_FIELDS = ['serviceType', 'patientName', 'origin', 'destination'];
 const { REQUIRED_SERVICE_BY_KEY } = require('../bitrix/bitrix-lead');
@@ -29,6 +32,28 @@ function mortalFieldsError(body) {
   return null;
 }
 
+const present = (value) => value !== undefined && value !== null;
+
+// The medical page: only allowed values. Mobility and the equipment flags belong to patient
+// transport, so any other service refuses them. A missing value is fine (older app versions
+// don't send these), so nothing here makes them required.
+function medicalFieldsError(body) {
+  const transport = isTransportKey(body.serviceKey);
+  if (present(body.mobility)) {
+    if (!MOBILITY.includes(body.mobility)) return `Invalid mobility. Use one of: ${MOBILITY.join(', ')}`;
+    if (!transport) return 'mobility is only accepted for air and ground ambulance requests';
+  }
+  for (const [field] of EQUIPMENT) {
+    if (!present(body[field])) continue;
+    if (typeof body[field] !== 'boolean') return `${field} must be true or false`;
+    if (!transport) return `${field} is only accepted for air and ground ambulance requests`;
+  }
+  if (present(body.urgency) && !URGENCY.includes(body.urgency)) {
+    return `Invalid urgency. Use one of: ${URGENCY.join(', ')}`;
+  }
+  return null;
+}
+
 //the function for submitting the request
 async function submitRequest(req, res, next) {
   try {
@@ -41,6 +66,8 @@ async function submitRequest(req, res, next) {
     }
     const mortalError = mortalFieldsError(req.body);
     if (mortalError) return res.status(400).json({ error: mortalError });
+    const medicalError = medicalFieldsError(req.body);
+    if (medicalError) return res.status(400).json({ error: medicalError });
     const request = await createRequest(req.user.id, req.body);
     res.status(201).json({ request });
   } catch (err) {
@@ -95,7 +122,17 @@ async function uploadRequestDocument(req, res, next) {
       fileUrl: `/uploads/${req.file.filename}`,
       fileSizeBytes: req.file.size,
     });
-    if (!mortal) await sendMedicalReportToBitrix(request.bitrixLeadId, document);
+    if (!mortal && request.bitrixLeadId) {
+      // The request form takes several reports, and the lead's Medical Report field may only
+      // keep one of them: the lead comment lists the names of all of them.
+      const reports = await prisma.document.findMany({
+        where: { caseId: request.case.id, type: 'Medical Report' },
+        orderBy: { uploadedAt: 'asc' },
+      });
+      const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+      const comments = commentWithReports(leadInputFromRequest(request, user).comments, reports.map((r) => r.name));
+      await sendMedicalReportToBitrix(request.bitrixLeadId, document, { comments });
+    }
     res.status(201).json({ document });
   } catch (err) {
     next(err);

@@ -77,6 +77,36 @@ describe('Bitrix lead from a patient request', () => {
   });
 });
 
+describe('Bitrix lead: medical page details', () => {
+  const medical = { ...request, serviceKey: 'privatecharter', mobility: 'bedridden', equipOxygen: true, equipCardiacMonitor: true, equipVentilator: false, urgency: 'critical_6h' };
+
+  it('adds mobility, equipment on board and urgency to the comment, and urgency to Transfer Urgency', () => {
+    const fields = buildLeadFields(leadInputFromRequest(medical, user));
+    expect(fields.COMMENTS).toBe(
+      'Requirement: Needs oxygen on board\nCare level: Basic\nMobility: Bedridden\nOn board: Oxygen, Cardiac monitor\nUrgency: Critical (within 6h)',
+    );
+    expect(fields.UF_CRM_1775637825406).toBe(380); // Transfer Urgency: Urgent
+  });
+
+  it('maps a planned request to Transfer Urgency: Planned', () => {
+    expect(buildLeadFields(leadInputFromRequest({ ...medical, urgency: 'planned' }, user)).UF_CRM_1775637825406).toBe(382);
+  });
+
+  it('says nothing about equipment when none was asked for, and sends no urgency when there is none', () => {
+    const fields = buildLeadFields(leadInputFromRequest({ ...medical, equipOxygen: false, equipCardiacMonitor: false, urgency: null }, user));
+    expect(fields.COMMENTS).not.toContain('On board');
+    expect(fields.COMMENTS).not.toContain('Urgency');
+    expect(fields.UF_CRM_1775637825406).toBeUndefined();
+  });
+
+  it('adds the report names to the comment', () => {
+    const { commentWithReports } = require('../src/modules/bitrix/bitrix-lead');
+    expect(commentWithReports('Requirement: x', ['a.pdf', 'b.jpg'])).toBe('Requirement: x\nMedical reports (2): a.pdf, b.jpg');
+    expect(commentWithReports('-', ['a.pdf'])).toBe('Medical reports (1): a.pdf');
+    expect(commentWithReports('Requirement: x', [])).toBe('Requirement: x');
+  });
+});
+
 describe('Bitrix lead from a corporate case', () => {
   it('is B2B, carries the urgency, and says it came from the portal', () => {
     const fields = buildLeadFields(leadInputFromCase({

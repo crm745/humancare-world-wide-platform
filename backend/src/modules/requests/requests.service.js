@@ -2,6 +2,7 @@ const { prisma } = require('../../db/prisma');
 const { createLead } = require('../bitrix/bitrix.service');
 const { leadInputFromRequest } = require('../bitrix/bitrix-lead');
 const { isBitrixSyncEnabled } = require('../bitrix/bitrix-config');
+const { URGENCY_TO_CASE } = require('../../common/constants/request.constants');
 
 const VALID_STATUSES = ['submitted', 'in_progress', 'completed', 'cancelled'];
 
@@ -27,6 +28,11 @@ async function createRequest(userId, data) {
     placeOfDeath,
     dateOfDeath,
     referralSource,
+    mobility,
+    equipOxygen,
+    equipCardiacMonitor,
+    equipVentilator,
+    urgency,
     documentUrl,
   } = data;
 
@@ -54,6 +60,11 @@ async function createRequest(userId, data) {
       placeOfDeath: placeOfDeath || null,
       dateOfDeath: dateOfDeath ? new Date(dateOfDeath) : null,
       referralSource: referralSource || null,
+      mobility: mobility || null,
+      equipOxygen: equipOxygen ?? null,
+      equipCardiacMonitor: equipCardiacMonitor ?? null,
+      equipVentilator: equipVentilator ?? null,
+      urgency: urgency || null,
       documentUrl: documentUrl || null,
       referenceNumber: `TEMP-${Date.now()}`,
       status: 'submitted',
@@ -80,6 +91,8 @@ async function createRequest(userId, data) {
       origin: request.origin,
       destination: request.destination,
       country: request.country,
+      // Left out when the request has none, so the Case keeps its own 'routine' default.
+      ...(request.urgency && { urgency: URGENCY_TO_CASE[request.urgency] }),
       status: 'submitted',
     },
   });

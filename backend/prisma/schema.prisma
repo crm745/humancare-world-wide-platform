@@ -301,6 +301,14 @@ model ServiceRequest {
   placeOfDeath      String?   @map("place_of_death")
   dateOfDeath       DateTime? @map("date_of_death")
   referralSource    String?   @map("referral_source")
+  // The medical page of the New Request form. Mobility and the equipment flags are only set
+  // for patient-transport services (null otherwise, and on requests made before the page
+  // existed); urgency is null on those older requests too.
+  mobility          String?   @db.VarChar(16) // "bedridden" | "wheelchair" | "walking"
+  equipOxygen       Boolean?  @map("equip_oxygen")
+  equipCardiacMonitor Boolean? @map("equip_cardiac_monitor")
+  equipVentilator   Boolean?  @map("equip_ventilator")
+  urgency           String?   @db.VarChar(16) // "critical_6h" | "urgent_24h" | "planned"
   documentUrl       String?   @map("document_url")
   referenceNumber   String    @unique @map("reference_number")
   status            String    @default("submitted")

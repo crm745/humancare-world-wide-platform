@@ -127,7 +127,24 @@ describe('Bitrix24 on/off switch', () => {
     const upload = await request(app).post(`/requests/me/${created.body.request.id}/documents`).set('Authorization', `Bearer ${token}`)
       .attach('file', Buffer.from('%PDF-1.4 test'), { filename: 'report.pdf', contentType: 'application/pdf' });
     expect(upload.status).toBe(201);
-    expect(sendMedicalReportToBitrix).toHaveBeenCalledWith(12345, expect.objectContaining({ type: 'Medical Report', name: 'report.pdf' }));
+    expect(sendMedicalReportToBitrix).toHaveBeenCalledWith(
+      12345,
+      expect.objectContaining({ type: 'Medical Report', name: 'report.pdf' }),
+      { comments: expect.stringContaining('Medical reports (1): report.pdf') },
+    );
+  });
+
+  it('lists the names of every report in the lead comment, so none is lost when the field keeps one', async () => {
+    sendMedicalReportToBitrix.mockClear();
+    process.env.BITRIX_SYNC_ENABLED = 'true';
+    const { token } = await createPatient();
+    const created = await request(app).post('/requests').set('Authorization', `Bearer ${token}`).send(baseRequestBody);
+    const send = (filename) => request(app).post(`/requests/me/${created.body.request.id}/documents`).set('Authorization', `Bearer ${token}`)
+      .attach('file', Buffer.from('%PDF-1.4 test'), { filename, contentType: 'application/pdf' });
+    expect((await send('discharge.pdf')).status).toBe(201);
+    expect((await send('ct-report.pdf')).status).toBe(201);
+    expect(sendMedicalReportToBitrix).toHaveBeenCalledTimes(2);
+    expect(sendMedicalReportToBitrix.mock.calls[1][2].comments).toContain('Medical reports (2): discharge.pdf, ct-report.pdf');
   });
 
   it('keeps a death certificate with us and does not send it to the lead as a medical report', async () => {
@@ -227,5 +244,101 @@ describe('request lifecycle for the patient who submitted it', () => {
       .set('Authorization', `Bearer ${token}`)
       .attach('file', Buffer.from('bad'), { filename: 'virus.exe', contentType: 'application/x-msdownload' });
     expect(uploadRes.status).toBe(400);
+  });
+});
+
+describe('POST /requests: medical page fields', () => {
+  const airBody = { ...baseRequestBody, serviceType: 'Private Charter Air Ambulance', serviceKey: 'privatecharter' };
+  const post = (token, body) => request(app).post('/requests').set('Authorization', `Bearer ${token}`).send(body);
+
+  it('saves mobility, equipment and urgency for an air ambulance request', async () => {
+    const { token } = await createPatient();
+    const res = await post(token, {
+      ...airBody, mobility: 'bedridden', equipOxygen: true, equipCardiacMonitor: true, equipVentilator: false, urgency: 'critical_6h',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.request).toMatchObject({
+      mobility: 'bedridden', equipOxygen: true, equipCardiacMonitor: true, equipVentilator: false, urgency: 'critical_6h',
+    });
+  });
+
+  it('copies the urgency to the Case on the older critical / urgent / routine scale', async () => {
+    const { token } = await createPatient();
+    const cases = {};
+    for (const urgency of ['critical_6h', 'urgent_24h', 'planned']) {
+      const res = await post(token, { ...airBody, urgency });
+      cases[urgency] = (await prisma.case.findUnique({ where: { serviceRequestId: res.body.request.id } })).urgency;
+    }
+    expect(cases).toEqual({ critical_6h: 'critical', urgent_24h: 'urgent', planned: 'routine' });
+  });
+
+  it('accepts a request without them (older app versions) and leaves them empty', async () => {
+    const { token } = await createPatient();
+    const res = await post(token, airBody);
+    expect(res.status).toBe(201);
+    expect(res.body.request).toMatchObject({ mobility: null, equipOxygen: null, equipCardiacMonitor: null, equipVentilator: null, urgency: null });
+    const saved = await prisma.case.findUnique({ where: { serviceRequestId: res.body.request.id } });
+    expect(saved.urgency).toBe('routine');
+  });
+
+  it('refuses a mobility, equipment or urgency value that is not on the list', async () => {
+    const { token } = await createPatient();
+    const mobility = await post(token, { ...airBody, mobility: 'flying' });
+    expect(mobility.status).toBe(400);
+    expect(mobility.body.error).toMatch(/Invalid mobility/);
+    const urgency = await post(token, { ...airBody, urgency: 'asap' });
+    expect(urgency.status).toBe(400);
+    expect(urgency.body.error).toMatch(/Invalid urgency/);
+    const equipment = await post(token, { ...airBody, equipOxygen: 'yes' });
+    expect(equipment.status).toBe(400);
+    expect(equipment.body.error).toMatch(/equipOxygen must be true or false/);
+  });
+
+  it('accepts mobility and equipment for ground ambulance and commercial airline too', async () => {
+    const { token } = await createPatient();
+    for (const serviceKey of ['ground', 'commercialair_stretcher', 'commercialair_wheelchair']) {
+      const res = await post(token, { ...baseRequestBody, serviceKey, mobility: 'wheelchair', equipVentilator: false });
+      expect(res.status).toBe(201);
+    }
+  });
+
+  it.each([['hospital'], ['homecare'], ['tele'], ['mortal_domestic']])('refuses mobility and equipment for %s', async (serviceKey) => {
+    const { token } = await createPatient();
+    const extra = serviceKey === 'mortal_domestic' ? { deceasedRelation: 'Son', placeOfDeath: 'Pune', dateOfDeath: '2026-10-20' } : {};
+    const mobility = await post(token, { ...baseRequestBody, ...extra, serviceKey, mobility: 'walking' });
+    expect(mobility.status).toBe(400);
+    expect(mobility.body.error).toMatch(/only accepted for air and ground/);
+    const equipment = await post(token, { ...baseRequestBody, ...extra, serviceKey, equipOxygen: false });
+    expect(equipment.status).toBe(400);
+  });
+
+  it('still takes an urgency on a service that has no mobility or equipment', async () => {
+    const { token } = await createPatient();
+    const res = await post(token, { ...baseRequestBody, serviceKey: 'hospital', urgency: 'urgent_24h' });
+    expect(res.status).toBe(201);
+    expect(res.body.request.urgency).toBe('urgent_24h');
+  });
+
+  it('sends the urgency, mobility and equipment to Bitrix', async () => {
+    createLead.mockClear();
+    process.env.BITRIX_SYNC_ENABLED = 'true';
+    const { token } = await createPatient();
+    await post(token, { ...airBody, mobility: 'wheelchair', equipOxygen: true, equipCardiacMonitor: false, equipVentilator: true, urgency: 'urgent_24h' });
+    const { buildLeadFields } = jest.requireActual('../src/modules/bitrix/bitrix-lead');
+    const fields = buildLeadFields(createLead.mock.calls[0][0]);
+    expect(fields.UF_CRM_1775637825406).toBe(380); // Transfer Urgency: Urgent
+    expect(fields.COMMENTS).toContain('Mobility: Wheelchair');
+    expect(fields.COMMENTS).toContain('On board: Oxygen, Ventilator');
+    expect(fields.COMMENTS).toContain('Urgency: Urgent (24h)');
+    delete process.env.BITRIX_SYNC_ENABLED;
+  });
+
+  it('returns the new fields wherever a request is returned', async () => {
+    const { token } = await createPatient();
+    const created = await post(token, { ...airBody, mobility: 'walking', equipOxygen: false, equipCardiacMonitor: false, equipVentilator: false, urgency: 'planned' });
+    const one = await request(app).get(`/requests/me/${created.body.request.id}`).set('Authorization', `Bearer ${token}`);
+    expect(one.body.request).toMatchObject({ mobility: 'walking', urgency: 'planned', equipOxygen: false });
+    const list = await request(app).get('/requests/me').set('Authorization', `Bearer ${token}`);
+    expect(list.body.requests[0]).toMatchObject({ mobility: 'walking', urgency: 'planned' });
   });
 });
