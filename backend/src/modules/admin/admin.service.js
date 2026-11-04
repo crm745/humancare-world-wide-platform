@@ -1,68 +1,47 @@
 const { prisma } = require('../../db/prisma');
-const { hashPassword, comparePassword, signAccessToken, signRefreshToken } = require('../auth/auth.service');
+const { hashPassword, comparePassword, signAccessToken, signRefreshToken, DUMMY_PASSWORD_HASH } = require('../auth/auth.service');
+const { loadAdminLockConfig } = require('./auth/admin-lock.config');
 const { VALID_CASE_STATUSES } = require('../cases/cases.service');
 const { TICKET_STATUS_LABEL } = require('../../common/constants/ticket.constants');
 const { ticketIdFor, ticketDbIdFrom } = require('../../common/utils/ticket-reference');
 const { normalizeEmail } = require('../../common/utils/phone');
 
+// Legacy password-only Admin login, kept only as a transition path until passkey login exists.
+// Every refusal returns null (the controller's one generic 401), so a caller cannot tell a
+// wrong password from an unknown email, a missing password, an account that is not active, an
+// Admin who has a passkey, or enforcement being on.
 async function loginAdmin(email, password) {
   const admin = await prisma.adminUser.findUnique({ where: { email } });
-  if (!admin) return null;
-  const matches = await comparePassword(password, admin.passwordHash);
-  if (!matches) return null;
+  // Always run one bcrypt comparison, against a dummy hash when there is no usable one (no such
+  // account, or an invited account that has no password yet), so timing does not give it away.
+  const matches = await comparePassword(password, admin?.passwordHash || DUMMY_PASSWORD_HASH);
+  if (!admin || !admin.passwordHash || !matches) return null;
+
+  // Only a fully provisioned account may use a password alone: invited, pending_passkey and
+  // disabled accounts (and any future status) are refused.
+  if (admin.status !== 'active') return null;
+
+  // With enforcement on, a password is never enough.
+  if (loadAdminLockConfig().passkeyEnforcement) return null;
+
+  // An Admin who has registered a usable passkey must sign in with it, not bypass it with the
+  // password. Revoked passkeys do not count.
+  const passkeys = await prisma.adminPasskey.count({ where: { adminId: admin.id, revokedAt: null } });
+  if (passkeys > 0) return null;
 
   // role stays the generic 'admin' tier for requireAuth(['admin']) — adminRole carries
   // the actual admin/superadmin distinction, checked separately by requireSuperAdmin.
   const token = signAccessToken({ sub: admin.id, role: 'admin', adminRole: admin.role });
   const refreshToken = signRefreshToken({ sub: admin.id, role: 'admin', adminRole: admin.role });
-  const { passwordHash: _omit, ...safeAdmin } = admin;
-  return { token, refreshToken, admin: safeAdmin };
+  // An explicit allowlist (never the whole row): what the admin portal reads is name and email.
+  return { token, refreshToken, admin: { id: admin.id, name: admin.name, email: admin.email, role: admin.role } };
 }
-
-const VALID_ADMIN_ROLES = ['admin', 'superadmin'];
 
 async function listAdmins() {
   return prisma.adminUser.findMany({
     select: { id: true, name: true, email: true, role: true, createdAt: true },
     orderBy: { createdAt: 'asc' },
   });
-}
-
-async function createAdmin({ name, email, password, role }) {
-  if (role && !VALID_ADMIN_ROLES.includes(role)) {
-    const err = new Error(`role must be one of: ${VALID_ADMIN_ROLES.join(', ')}`);
-    err.statusCode = 400;
-    throw err;
-  }
-  const existing = await prisma.adminUser.findUnique({ where: { email } });
-  if (existing) {
-    const err = new Error('An admin with that email already exists.');
-    err.statusCode = 409;
-    throw err;
-  }
-  const passwordHash = await hashPassword(password);
-  const admin = await prisma.adminUser.create({
-    data: { name, email, passwordHash, role: role || 'admin' },
-  });
-  const { passwordHash: _omit, ...safeAdmin } = admin;
-  return safeAdmin;
-}
-
-// A superadmin can't demote/delete themselves — otherwise the last person able to
-// manage admin accounts could accidentally lock themselves (and everyone else) out.
-async function deleteAdmin(adminId, requestingAdminId) {
-  if (Number(adminId) === Number(requestingAdminId)) {
-    const err = new Error('You cannot remove your own admin account.');
-    err.statusCode = 400;
-    throw err;
-  }
-  const admin = await prisma.adminUser.findUnique({ where: { id: Number(adminId) } });
-  if (!admin) {
-    const err = new Error('Admin not found');
-    err.statusCode = 404;
-    throw err;
-  }
-  await prisma.adminUser.delete({ where: { id: admin.id } });
 }
 
 // Corporate logins don't have a password-value history (never store old passwords —
@@ -365,8 +344,6 @@ async function updateTicketStatus(ticketId, status) {
 module.exports = {
   loginAdmin,
   listAdmins,
-  createAdmin,
-  deleteAdmin,
   listCorporates,
   createCorporate,
   createCorporateUser,

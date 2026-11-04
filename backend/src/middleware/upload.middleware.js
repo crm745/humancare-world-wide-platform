@@ -2,7 +2,12 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
+// Real uploads live in backend/uploads. In the test environment, and only there, UPLOAD_DIR moves
+// them to backend/.e2e-uploads (the one value the safety guard accepts), so tests never write to,
+// or delete from, the shared development folder.
+const UPLOAD_DIR = process.env.NODE_ENV === 'test' && process.env.UPLOAD_DIR
+  ? require('../common/safety/test-database-guard').resolveTestUploadsDir(process.env.UPLOAD_DIR)
+  : path.join(__dirname, '..', '..', 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const ALLOWED_MIME_TYPES = [

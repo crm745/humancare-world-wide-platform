@@ -7,6 +7,10 @@ import { ForbiddenPage, NotFoundPage } from './StatusPages';
 
 // Pages are code-split so the login screen doesn't download the whole portal.
 const LoginPage = lazy(() => import('@/features/auth/pages/LoginPage'));
+const AcceptInvitePage = lazy(() => import('@/features/auth/pages/AcceptInvitePage'));
+const EnrollPasskeyPage = lazy(() => import('@/features/auth/pages/EnrollPasskeyPage'));
+const RecoverPasskeyPage = lazy(() => import('@/features/recovery/pages/RecoverPasskeyPage'));
+const RecoveryApprovalsPage = lazy(() => import('@/features/recovery/pages/RecoveryApprovalsPage'));
 const DashboardPage = lazy(() => import('@/features/dashboard/pages/DashboardPage'));
 const CorporatesPage = lazy(() => import('@/features/corporates/pages/CorporatesPage'));
 const RegistrationsPage = lazy(() => import('@/features/registrations/pages/RegistrationsPage'));
@@ -30,6 +34,12 @@ export function AppRoutes() {
             </PublicOnlyRoute>
           }
         />
+
+        {/* Emailed links. Public on purpose (the person has no session yet) and NOT wrapped in
+            PublicOnlyRoute: the one-time token in the URL fragment is what authorises them. */}
+        <Route path="/accept-invite" element={<AcceptInvitePage />} />
+        <Route path="/enroll-passkey" element={<EnrollPasskeyPage />} />
+        <Route path="/recover-passkey" element={<RecoverPasskeyPage />} />
 
         <Route
           element={
@@ -58,6 +68,14 @@ export function AppRoutes() {
             element={
               <RequireAccess access="superadmin">
                 <AdminsPage />
+              </RequireAccess>
+            }
+          />
+          <Route
+            path="/recovery"
+            element={
+              <RequireAccess access="superadmin">
+                <RecoveryApprovalsPage />
               </RequireAccess>
             }
           />

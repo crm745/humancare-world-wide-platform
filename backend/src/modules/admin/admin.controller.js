@@ -1,8 +1,6 @@
 const {
   loginAdmin,
   listAdmins,
-  createAdmin,
-  deleteAdmin,
   listCorporates,
   createCorporate,
   createCorporateUser,
@@ -67,42 +65,20 @@ async function me(req, res, next) {
     });
     if (!record) return res.status(401).json({ error: 'Invalid token' });
     const corporateReview = record.role === 'superadmin' || record.corporateReview === true;
-    res.json({ ok: true, admin: { ...req.user, adminRole: record.role, corporateReview } });
+    // An explicit allowlist, not the whole of req.user: the session id is never sent to the client.
+    res.json({
+      ok: true,
+      admin: { id: req.user.id, role: req.user.role, corporateId: req.user.corporateId, adminRole: record.role, corporateReview },
+    });
   } catch (err) {
     next(err);
   }
-}
-
-async function logout(req, res) {
-  res.clearCookie('hc_admin_token');
-  res.json({ message: 'Logged out.' });
 }
 
 async function getAdmins(req, res, next) {
   try {
     const admins = await listAdmins();
     res.json({ admins });
-  } catch (err) {
-    next(err);
-  }
-}
-
-async function postAdmin(req, res, next) {
-  try {
-    const { name, email, password, role } = req.body;
-    if (!name || !email || !password) return res.status(400).json({ error: 'name, email and password are required' });
-    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    const admin = await createAdmin({ name, email, password, role });
-    res.status(201).json({ admin });
-  } catch (err) {
-    next(err);
-  }
-}
-
-async function deleteAdminAccount(req, res, next) {
-  try {
-    await deleteAdmin(req.params.id, req.user.id);
-    res.status(204).send();
   } catch (err) {
     next(err);
   }
@@ -353,10 +329,7 @@ async function patchTicketStatus(req, res, next) {
 module.exports = {
   login,
   me,
-  logout,
   getAdmins,
-  postAdmin,
-  deleteAdminAccount,
   getPendingRegistrations,
   getRegistration,
   postApproveRegistration,

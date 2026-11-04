@@ -5,6 +5,7 @@ import logoMark from '@/assets/logo-mark.png';
 import { cn } from '@/utils/cn';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Alert';
 import { Drawer } from '@/components/ui/Drawer';
 import { PageLoader } from '@/components/ui/Loading';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -122,7 +123,7 @@ export function AppLayout() {
         <div className="hidden lg:block" />
         <div className="flex items-center gap-3">
           <AccountBadge admin={auth.admin} isSuperadmin={auth.isSuperadmin} />
-          <Button variant="secondary" size="sm" onClick={auth.logout}>
+          <Button variant="secondary" size="sm" onClick={auth.logout} disabled={auth.loggingOut}>
             <LogOut className="h-4 w-4" />
             Log out
           </Button>
@@ -130,6 +131,7 @@ export function AppLayout() {
       </header>
 
       <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
+        {auth.logoutError && <Alert className="mb-6">{auth.logoutError}</Alert>}
         {/* A crash or failed page load stays inside the content area; the shell keeps working. */}
         <ErrorBoundary resetKey={location.pathname}>
           <Suspense fallback={<PageLoader />}>

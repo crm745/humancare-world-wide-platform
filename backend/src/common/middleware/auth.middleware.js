@@ -35,6 +35,14 @@ function requireAuth(allowedRoles, options = {}) {
       return res.status(401).json({ error: message });
     }
 
+    // Admin sessions are authenticated by requireAdminSession / requireAdminAuth, never here. A
+    // legacy password-only Admin token (role 'admin', signed with the shared secret) is refused
+    // even when no role list is given, so routes open to any role (/auth/me, /notifications)
+    // cannot be reached with one.
+    if (payload.role === 'admin') {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
     if (allowedRoles && !allowedRoles.includes(payload.role)) {
       return res.status(403).json({ error: 'Not authorized for this action' });
     }

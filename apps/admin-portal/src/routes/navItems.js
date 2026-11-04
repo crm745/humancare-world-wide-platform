@@ -8,6 +8,7 @@ import {
   Users,
   LifeBuoy,
   ShieldCheck,
+  KeyRound,
 } from 'lucide-react';
 
 // `access` mirrors the backend: 'any' (every admin), 'corporateReview' (superadmin or an
@@ -23,6 +24,7 @@ export const NAV_ITEMS = [
   { label: 'Patients', path: '/patients', icon: Users, access: 'any' },
   { label: 'Support Tickets', path: '/support', icon: LifeBuoy, access: 'any' },
   { label: 'Admins', path: '/admins', icon: ShieldCheck, access: 'superadmin' },
+  { label: 'Recovery', path: '/recovery', icon: KeyRound, access: 'superadmin' },
 ];
 
 export function canAccess(access, auth) {

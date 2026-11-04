@@ -4,3 +4,7 @@ node_modules
 .env.test
 
 /src/generated/prisma
+
+# Test-only folders (isolated uploads and captured mail; mail holds one-time tokens)
+.e2e-uploads/
+.e2e-mail/

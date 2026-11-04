@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "playwright test",
+    "test:real": "playwright test -c playwright.real.config.js",
     "test:config": "node --test build/apiUrl.test.mjs",
     "verify:dist": "node scripts/verify-dist.mjs"
   },
