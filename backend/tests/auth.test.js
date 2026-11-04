@@ -622,6 +622,35 @@ describe('Google/Apple sign-in', () => {
     });
   });
 
+  it('saves gender, nationality and phone country from the Google sign-up step', async () => {
+    const google = newGoogleUser();
+    await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
+      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const res = await request(gApp).post('/auth/social/register')
+        .send(socialBody(first.body.signupTicket, { gender: 'male', nationality: 'AE', phoneCountry: 'IN' }));
+      expect(res.status).toBe(200);
+      expect(await gPrisma.user.findFirst({ where: { email: google.email } })).toMatchObject({
+        gender: 'male', nationality: 'AE', phoneCountry: 'IN', countryCode: '+91',
+      });
+    });
+  });
+
+  it('refuses bad gender, nationality or phone country on the Google sign-up step, and creates nothing', async () => {
+    const google = newGoogleUser();
+    await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
+      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      for (const bad of [{ gender: 'Male' }, { nationality: 'india' }, { phoneCountry: 'ZZ' }]) {
+        const res = await request(gApp).post('/auth/social/register').send(socialBody(first.body.signupTicket, bad));
+        expect(res.status).toBe(400);
+        expect(res.body.code).toBe('invalid_profile');
+      }
+      const mismatch = await request(gApp).post('/auth/social/register')
+        .send(socialBody(first.body.signupTicket, { mobile: `50${Date.now().toString().slice(-7)}`, countryCode: '+971', phoneCountry: 'IN' }));
+      expect(mismatch.body.code).toBe('phone_country_mismatch');
+      expect(await gPrisma.user.findFirst({ where: { email: google.email } })).toBeNull();
+    });
+  });
+
   it('refuses a Google sign-up with a mobile number that already has an account', async () => {
     const patient = await createPatient();
     await withFakeGoogle(newGoogleUser(), async ({ app: gApp }) => {
@@ -929,5 +958,111 @@ describe('POST /auth/corporate/logout', () => {
   it('always succeeds (JWTs are stateless, there is nothing server-side to clear)', async () => {
     const res = await request(app).post('/auth/corporate/logout');
     expect(res.status).toBe(200);
+  });
+});
+
+describe('POST /auth/register: gender, nationality and phone country', () => {
+  const rand = (n) => String(Math.floor(Math.random() * 10 ** n)).padStart(n, '0');
+  const profileBody = (overrides = {}) => registerBody({ gender: 'female', nationality: 'IN', phoneCountry: 'IN', ...overrides });
+  const signUp = (overrides) => request(app).post('/auth/register').send(profileBody(overrides));
+
+  it('saves them for an Indian number, texts the OTP to the full E.164 number, and returns them after sign-up', async () => {
+    const email = uniqueEmail();
+    const mobile = uniqueMobile();
+    const reg = await signUp({ email, mobile });
+    expect(reg.status).toBe(200);
+    expect(codeSentTo(`+91${mobile}`)).toMatch(/^\d{6}$/);
+
+    const stored = await prisma.user.findUnique({ where: { email } });
+    expect(stored).toMatchObject({ gender: 'female', nationality: 'IN', phoneCountry: 'IN', countryCode: '+91', mobile: `+91${mobile}` });
+
+    const done = await request(app).post('/auth/register/verify-otp').send({ ticket: reg.body.ticket, code: codeSentTo(`+91${mobile}`) });
+    expect(done.status).toBe(201);
+    expect(done.body.user).toMatchObject({ gender: 'female', nationality: 'IN', phoneCountry: 'IN' });
+    const me = await request(app).get('/auth/me').set('Authorization', `Bearer ${done.body.token}`);
+    expect(me.body.user).toMatchObject({ gender: 'female', nationality: 'IN', phoneCountry: 'IN' });
+  });
+
+  it('keeps nationality and phone country apart: an Indian living in the UAE with a UAE number', async () => {
+    const mobile = `50${rand(7)}`;
+    const email = uniqueEmail();
+    const res = await signUp({ email, mobile, countryCode: '+971', nationality: 'IN', phoneCountry: 'AE' });
+    expect(res.status).toBe(200);
+    expect(codeSentTo(`+971${mobile}`)).toMatch(/^\d{6}$/);
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({
+      nationality: 'IN', phoneCountry: 'AE', countryCode: '+971', mobile: `+971${mobile}`,
+    });
+  });
+
+  it.each([
+    ['US', '212555'],
+    ['CA', '416555'],
+  ])('remembers which country shares the +1 code: %s', async (phoneCountry, prefix) => {
+    const mobile = `${prefix}${rand(4)}`;
+    const email = uniqueEmail();
+    const res = await signUp({ email, mobile, countryCode: '+1', nationality: phoneCountry, phoneCountry });
+    expect(res.status).toBe(200);
+    expect(codeSentTo(`+1${mobile}`)).toMatch(/^\d{6}$/);
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ phoneCountry, countryCode: '+1', mobile: `+1${mobile}` });
+  });
+
+  it('reads the number with the phone country\'s calling code when no countryCode is sent', async () => {
+    const mobile = `50${rand(7)}`;
+    const res = await signUp({ mobile, countryCode: undefined, phoneCountry: 'AE' });
+    expect(res.status).toBe(200);
+    expect(codeSentTo(`+971${mobile}`)).toMatch(/^\d{6}$/);
+  });
+
+  it('still accepts a sign-up without them (older app versions) and leaves them empty', async () => {
+    const email = uniqueEmail();
+    const res = await request(app).post('/auth/register').send(registerBody({ email }));
+    expect(res.status).toBe(200);
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ gender: null, nationality: null, phoneCountry: null });
+  });
+
+  it.each([
+    ['gender in the wrong case', { gender: 'Female' }, /Invalid gender/],
+    ['a gender that is not on the list', { gender: 'robot' }, /Invalid gender/],
+    ['a lower-case nationality code', { nationality: 'in' }, /Invalid nationality/],
+    ['a nationality that is a name, not a code', { nationality: 'India' }, /Invalid nationality/],
+    ['a country code that does not exist', { nationality: 'XX' }, /Invalid nationality/],
+    ['a phone country that does not exist', { phoneCountry: 'ZZ' }, /Invalid phoneCountry/],
+  ])('refuses %s, and creates nothing', async (_label, overrides, message) => {
+    const email = uniqueEmail();
+    const res = await signUp({ email, ...overrides });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('invalid_profile');
+    expect(res.body.error).toMatch(message);
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+  });
+
+  it('refuses a phone country that does not match the calling code', async () => {
+    const email = uniqueEmail();
+    const res = await signUp({ email, mobile: `50${rand(7)}`, countryCode: '+971', phoneCountry: 'IN' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('phone_country_mismatch');
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+  });
+
+  it('refuses a number that is not valid for the phone country', async () => {
+    const res = await signUp({ mobile: '12345', phoneCountry: 'IN' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/mobile/i);
+  });
+
+  it('does not put gender or nationality in the security log', async () => {
+    const email = uniqueEmail();
+    await signUp({ email, gender: 'prefer_not_to_say', nationality: 'NZ', phoneCountry: 'IN' });
+    const user = await prisma.user.findUnique({ where: { email } });
+    const events = await prisma.securityEvent.findMany({ where: { userId: user.id } });
+    expect(events.length).toBeGreaterThan(0);
+    expect(JSON.stringify(events)).not.toMatch(/prefer_not_to_say|"NZ"/);
+  });
+
+  it('leaves existing accounts working: they log in and their profile has the fields empty', async () => {
+    const patient = await createPatient();
+    const me = await request(app).get('/auth/me').set('Authorization', `Bearer ${patient.token}`);
+    expect(me.status).toBe(200);
+    expect(me.body.user).toMatchObject({ gender: null, nationality: null, phoneCountry: null });
   });
 });

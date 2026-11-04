@@ -23,6 +23,7 @@ const {
 const { EVENTS, recordSecurityEvent } = require("./security-events");
 const { PASSWORD_CHANGE_REQUIRED } = require("../../common/constants/auth.constants");
 const { isFirebasePhoneEnabled, verifyPhoneProof } = require("../../integrations/firebase/firebase");
+const { readProfileFields, callingCodeFor, phoneCountryMismatch } = require("../../common/utils/signup-profile");
 
 const disposableDomainSet = new Set(disposableDomains);
 function isDisposableEmail(email) {
@@ -160,7 +161,7 @@ function consentRows(req, consents) {
 // checks it and only then flips isVerified, so nothing can log in to it before the
 // mobile is proven. The email is verified later, on first use (markEmailVerified).
 async function register(req, res) {
-  const { name, email, mobile, countryCode, password } = req.body;
+  const { name, email, mobile, password } = req.body;
   if (!name || !email || !mobile || !password) {
     return res.status(400).json({ error: "name, email, mobile and password are required" });
   }
@@ -173,8 +174,13 @@ async function register(req, res) {
       .status(400)
       .json({ error: "Please use a permanent email address, not a temporary/disposable one." });
   }
-  const phone = normalizeMobile(mobile, countryCode);
+  const profile = readProfileFields(req.body);
+  if (profile.error) return res.status(400).json({ error: profile.error, code: "invalid_profile" });
+  const phone = normalizeMobile(mobile, callingCodeFor(req.body, profile));
   if (!phone) return res.status(400).json({ error: "Enter a valid mobile number for the selected country." });
+  if (phoneCountryMismatch(profile, phone)) {
+    return res.status(400).json({ error: "The phone country does not match the calling code.", code: "phone_country_mismatch" });
+  }
   const passwordError = passwordProblem(password);
   if (passwordError) return res.status(400).json({ error: passwordError });
   const consents = req.body.consents || {};
@@ -198,6 +204,9 @@ async function register(req, res) {
         email: cleanEmail,
         mobile: phone.e164,
         countryCode: phone.countryCode,
+        gender: profile.gender,
+        nationality: profile.nationality,
+        phoneCountry: profile.phoneCountry,
         passwordHash: await hashPassword(password),
         isVerified: false,
         consents: { create: consentRows(req, consents) },
@@ -554,7 +563,7 @@ async function appleLogin(req, res) {
 // mobile gets a code; registerVerifyOtp finishes it. No password: they sign in with
 // Google/Apple, and are asked to set one if they ever log in with mobile/email instead.
 async function socialRegister(req, res) {
-  const { signupTicket, name, mobile, countryCode } = req.body;
+  const { signupTicket, name, mobile } = req.body;
   if (!signupTicket || !name || !mobile) {
     return res.status(400).json({ error: "signupTicket, name and mobile are required" });
   }
@@ -562,8 +571,13 @@ async function socialRegister(req, res) {
   if (!step) return ticketFailure(res);
   const cleanName = String(name).trim();
   if (cleanName.length < 2) return res.status(400).json({ error: "Enter a valid name." });
-  const phone = normalizeMobile(mobile, countryCode);
+  const profile = readProfileFields(req.body);
+  if (profile.error) return res.status(400).json({ error: profile.error, code: "invalid_profile" });
+  const phone = normalizeMobile(mobile, callingCodeFor(req.body, profile));
   if (!phone) return res.status(400).json({ error: "Enter a valid mobile number for the selected country." });
+  if (phoneCountryMismatch(profile, phone)) {
+    return res.status(400).json({ error: "The phone country does not match the calling code.", code: "phone_country_mismatch" });
+  }
   const consents = req.body.consents || {};
   if (!hasRequiredConsents(consents)) return consentRequired(res);
 
@@ -592,6 +606,9 @@ async function socialRegister(req, res) {
         email: step.email,
         mobile: phone.e164,
         countryCode: phone.countryCode,
+        gender: profile.gender,
+        nationality: profile.nationality,
+        phoneCountry: profile.phoneCountry,
         [idField]: step.providerId,
         // The provider only issues the ticket for an email it has verified.
         emailVerifiedAt: new Date(),

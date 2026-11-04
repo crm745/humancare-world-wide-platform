@@ -17,6 +17,13 @@ model User {
   // E.164 (e.g. "+919876543210") so the same number can't be stored two ways.
   mobile       String?  @unique
   countryCode  String   @default("+91") @map("country_code")
+  // Asked on the sign-up form; null for accounts made before it did. Personal data: never
+  // written to a log.
+  gender       String?  @db.VarChar(20) // "male" | "female" | "other" | "prefer_not_to_say"
+  nationality  String?  @db.VarChar(2) // ISO 3166-1 alpha-2 code, e.g. "IN"
+  // The country picked for the phone's calling code. countryCode above is only the code
+  // ("+1"), which several countries share, so this says which one it was.
+  phoneCountry String?  @db.VarChar(2) @map("phone_country")
   // Null for accounts created before passwords were introduced (OTP-only) and for
   // Google/Apple accounts — the login flow makes the former set one on next login.
   passwordHash String?  @map("password_hash")
