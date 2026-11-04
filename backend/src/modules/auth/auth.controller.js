@@ -84,9 +84,9 @@ function viaFirebase(dest) {
 }
 
 // Step 1. In Firebase mode there's nothing to send from here for a mobile: the app does it.
-async function sendCode(dest, purpose, countryCode) {
+async function sendCode(dest, purpose) {
   if (viaFirebase(dest)) return { throttled: false };
-  return issueOtp(dest, purpose, countryCode);
+  return issueOtp(dest, purpose);
 }
 
 // What the code screen needs. The full number is only handed back in Firebase mode, and
@@ -227,7 +227,7 @@ async function register(req, res) {
   }
 
   await recordSecurityEvent(req, EVENTS.REGISTER_STARTED, { userId: user.id, identifier: phone.e164 });
-  const result = await sendCode(phone.e164, "patient_register", phone.countryCode);
+  const result = await sendCode(phone.e164, "patient_register");
   if (result.throttled) return throttledResponse(res, result);
   res.json(codeStep(signTicket({ step: "register_otp", sub: user.id, dest: phone.e164 }), phone.e164));
 }
@@ -316,7 +316,7 @@ async function login(req, res) {
 
   if (user && !user.passwordHash) {
     if (req.body.email && viaFirebase(dest)) return useMobileInstead(res, "Please log in with your mobile number.");
-    const result = await sendCode(dest, "patient_login", user.countryCode);
+    const result = await sendCode(dest, "patient_login");
     if (result.throttled) return throttledResponse(res, result);
     return res.json({
       ...codeStep(signTicket({ step: "login_otp", sub: user.id, dest, needsPassword: true }), dest),
@@ -344,7 +344,7 @@ async function login(req, res) {
 
   // Only possible for an email login whose account has no email on file — not today.
   if (req.body.email && viaFirebase(dest)) return useMobileInstead(res, "Please log in with your mobile number.");
-  const result = await sendCode(dest, "patient_login", user.countryCode);
+  const result = await sendCode(dest, "patient_login");
   if (result.throttled) return throttledResponse(res, result);
   res.json(codeStep(signTicket({ step: "login_otp", sub: user.id, dest }), dest));
 }
@@ -397,7 +397,7 @@ async function forgotPassword(req, res) {
     return useMobileInstead(res, "Your email isn't verified yet. Please reset your password with your mobile number.");
   }
   if (user) {
-    const result = await sendCode(dest, "patient_password_reset", user.countryCode);
+    const result = await sendCode(dest, "patient_password_reset");
     if (result.throttled) return throttledResponse(res, result);
   }
   await recordSecurityEvent(req, EVENTS.PASSWORD_RESET_REQUESTED, {
@@ -489,7 +489,7 @@ async function resendOtp(req, res) {
     && (step.tv === undefined || step.tv === user.tokenVersion);
   if (!stillValid) return ticketFailure(res);
 
-  const result = await issueOtp(step.dest, purposeFor(step), step.countryCode || user.countryCode);
+  const result = await issueOtp(step.dest, purposeFor(step));
   if (result.throttled) return throttledResponse(res, result);
   res.json(sent);
 }
@@ -633,7 +633,7 @@ async function socialRegister(req, res) {
     identifier: phone.e164,
     detail: { provider: step.provider },
   });
-  const result = await sendCode(phone.e164, "patient_register", phone.countryCode);
+  const result = await sendCode(phone.e164, "patient_register");
   if (result.throttled) return throttledResponse(res, result);
   res.json(codeStep(signTicket({ step: "register_otp", sub: user.id, dest: phone.e164 }), phone.e164));
 }
@@ -837,7 +837,7 @@ async function requestContactChange(req, res) {
     });
   }
 
-  const result = await sendCode(dest, kind === "mobile" ? "patient_change_mobile" : "patient_change_email", countryCode);
+  const result = await sendCode(dest, kind === "mobile" ? "patient_change_mobile" : "patient_change_email");
   if (result.throttled) return throttledResponse(res, result);
   res.json(codeStep(signTicket({ step: "change_contact_otp", sub: user.id, kind, dest, countryCode, phoneCountry, tv: user.tokenVersion }), dest));
 }

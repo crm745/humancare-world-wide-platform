@@ -155,7 +155,9 @@ describe('POST /auth/register', () => {
     const res = await request(app).post('/auth/register').send(registerBody({ mobile: uaeMobile, countryCode: '+971' }));
     expect(res.status).toBe(200);
     const call = deliverOtp.mock.calls.filter((c) => c[0] === `+971${uaeMobile}`).pop();
-    expect(call[3]).toBe('+971'); // deliverOtp(identifier, code, purpose, countryCode)
+    expect(call[0]).toBe(`+971${uaeMobile}`); // deliverOtp(identifier, code, purpose): the full E.164 number
+    expect(call[2]).toBe('patient_register');
+    expect(call).toHaveLength(3);
   });
 });
 
@@ -1310,8 +1312,9 @@ describe('changing the mobile keeps mobile, country_code and phone_country toget
     const mobile = `50${rand(7)}`;
     await start(patient, { mobile, countryCode: '+971', phoneCountry: 'AE' });
     const call = deliverOtp.mock.calls.filter((c) => c[0] === `+971${mobile}`).pop();
+    expect(call[0]).toBe(`+971${mobile}`);
     expect(call[2]).toBe('patient_change_mobile');
-    expect(call[3]).toBe('+971');
+    expect(call).toHaveLength(3);
   });
 
   it('changing the email leaves the phone fields alone', async () => {
