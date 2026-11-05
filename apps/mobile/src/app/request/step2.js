@@ -4,12 +4,19 @@ import { router } from 'expo-router';
 import { Accessibility, Activity, BedDouble, PersonStanding } from 'lucide-react-native';
 import { needsCareLevel, useApp } from '../../state/AppContext';
 import { EQUIPMENT_OPTIONS, MOBILITY_OPTIONS, SOURCES, SOURCE_OTHER, URGENCY_OPTIONS, isMortal } from '../../data/mock';
-import { Anchor, RequestFrame } from '../../components/request/RequestFrame';
+import { Anchor, RequestFrame, useScrollToEnd } from '../../components/request/RequestFrame';
 import { Collapsible, ChoiceChips, FieldError, FieldHeader, ReportTiles, SwitchRow } from '../../components/request/fields';
-import { CARE_LEVELS, Field, FieldLabel, Input, Text } from '../../components/ui';
+import { CARE_LEVELS, Field, FieldLabel, Input } from '../../components/ui';
 import { Select } from '../../components/widgets';
 
 const MOBILITY_ICONS = { bedridden: BedDouble, wheelchair: Accessibility, walking: PersonStanding };
+
+// "More details" is the last thing on the page, so its fields open below the pinned button.
+// Opening it scrolls the page down to show them.
+function MoreDetails(props) {
+  const scrollToEnd = useScrollToEnd();
+  return <Collapsible {...props} onOpen={scrollToEnd} />;
+}
 
 // Step 2 of 3: the medical details. Patient transport (air and ground ambulance) also asks
 // about care level, mobility and what is needed on board; every service asks how urgent it is.
@@ -32,22 +39,24 @@ export default function RequestStep2() {
   return (
     <RequestFrame
       step={2} firstError={firstError} onInvalid={() => setAttempted(true)} onNext={() => router.push('/request/review')}
-      nextKey="req_next_review" hintKey="req_hint_step2"
+      nextKey="req_next_review"
     >
-      <Text className="font-inter-black text-[16px] text-navy" accessibilityRole="header">{t(mortal ? 'req_details' : 'req_condition')}</Text>
-      <View className="-mt-2 min-h-[88px] flex-row gap-2.5 rounded-2xl border-[1.5px] border-field bg-white p-3.5">
-        <View className="pt-0.5"><Activity size={18} color="#97A4B8" strokeWidth={2} /></View>
-        <TextInput
-          multiline textAlignVertical="top" value={draft.desc} onChangeText={(desc) => updateDraft({ desc })}
-          accessibilityLabel={t(mortal ? 'req_details' : 'req_condition')}
-          placeholder={t(mortal ? 'req_details_placeholder' : 'req_condition_placeholder')} placeholderTextColor="#97A4B8"
-          className="min-h-[64px] flex-1 p-0 font-inter text-[14px] leading-[21px] text-ink"
-        />
+      <View>
+        <FieldHeader title={t(mortal ? 'req_details' : 'req_condition')} />
+        <View className="min-h-[88px] flex-row gap-2.5 rounded-2xl border-[1.5px] border-field bg-white p-3.5">
+          <View className="pt-0.5"><Activity size={18} color="#97A4B8" strokeWidth={2} /></View>
+          <TextInput
+            multiline textAlignVertical="top" value={draft.desc} onChangeText={(desc) => updateDraft({ desc })}
+            accessibilityLabel={t(mortal ? 'req_details' : 'req_condition')}
+            placeholder={t(mortal ? 'req_details_placeholder' : 'req_condition_placeholder')} placeholderTextColor="#97A4B8"
+            className="min-h-[64px] flex-1 p-0 font-inter text-[14px] leading-[21px] text-ink"
+          />
+        </View>
       </View>
 
       {transport && (
         <View>
-          <FieldHeader title={t('field_care_level')} hint={t('care_level_hint')} />
+          <FieldHeader title={t('field_care_level')} />
           <ChoiceChips
             multiple columns={2} label={t('field_care_level')} value={draft.care} onChange={(care) => updateDraft({ care })}
             options={CARE_LEVELS.map((key) => ({ value: key, label: t(key), exclusive: key === 'care_na' }))}
@@ -57,7 +66,7 @@ export default function RequestStep2() {
 
       {transport && (
         <Anchor id="mobility">
-          <FieldHeader title={t('req_mobility')} hint={t('req_mobility_hint')} required />
+          <FieldHeader title={t('req_mobility')} required />
           <ChoiceChips
             columns={3} label={t('req_mobility')} value={draft.mobility} onChange={(mobility) => updateDraft({ mobility })}
             options={MOBILITY_OPTIONS.map((key) => ({ value: key, label: t(`mobility_${key}`), Icon: MOBILITY_ICONS[key] }))}
@@ -89,7 +98,7 @@ export default function RequestStep2() {
       </Anchor>
 
       <Anchor id="sourceOther">
-        <Collapsible
+        <MoreDetails
           title={t('req_more_details')} hint={t('req_more_details_hint')}
           defaultOpen={!!(draft.extra || draft.special || draft.source)} forceOpen={attempted && !otherOk}
         >
@@ -105,7 +114,7 @@ export default function RequestStep2() {
               </>
             )}
           </View>
-        </Collapsible>
+        </MoreDetails>
       </Anchor>
     </RequestFrame>
   );

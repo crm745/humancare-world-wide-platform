@@ -21,6 +21,10 @@ export const goToStep = (step) => router.dismissTo(STEP_PATHS[step]);
 
 // Fields register their position so a failed Continue can scroll to the first wrong one.
 const AnchorContext = createContext(null);
+// Scrolls the form down to its end; for a section that opens at the bottom and would otherwise
+// open out of sight behind the pinned button.
+const ScrollContext = createContext(() => {});
+export const useScrollToEnd = () => useContext(ScrollContext);
 
 // Wrap a field (or a section) in this to make it a scroll target. Must sit directly inside
 // the frame's field list.
@@ -80,13 +84,15 @@ function ServiceCard() {
 
 // `firstError()` returns the id of the first wrong field on this step (or null); a Continue
 // with an error scrolls to that field and runs `onInvalid` so the step starts showing errors.
-export function RequestFrame({ step, children, firstError, onInvalid, onNext, nextKey, hintKey, hint, busy, showService = true }) {
+export function RequestFrame({ step, children, firstError, onInvalid, onNext, nextKey, label, busy, showService = true }) {
   const { t, toast, updateDraft } = useApp();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef(null);
   const anchors = useRef({});
   const listY = useRef(0);
   const register = useCallback((id, y) => { anchors.current[id] = y; }, []);
+  // A moment later, so the section that just opened has been laid out first.
+  const scrollToEnd = useCallback(() => { setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60); }, []);
 
   // Coming back from the service list (with or without picking one) ends the swap.
   useFocusEffect(useCallback(() => {
@@ -119,13 +125,14 @@ export function RequestFrame({ step, children, firstError, onInvalid, onNext, ne
           contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 24 }}
         >
           {showService && <View className="mb-5"><ServiceCard /></View>}
-          <AnchorContext.Provider value={register}>
-            <View onLayout={(e) => { listY.current = e.nativeEvent.layout.y; }} className="gap-5">{children}</View>
-          </AnchorContext.Provider>
+          <ScrollContext.Provider value={scrollToEnd}>
+            <AnchorContext.Provider value={register}>
+              <View onLayout={(e) => { listY.current = e.nativeEvent.layout.y; }} className="gap-5">{children}</View>
+            </AnchorContext.Provider>
+          </ScrollContext.Provider>
         </ScrollView>
         <View className="border-t border-line bg-white px-[18px] pt-3" style={{ paddingBottom: Math.max(insets.bottom, 12) }}>
-          <Button title={t(nextKey)} onPress={next} loading={busy} />
-          <Text className="mt-2 text-center text-[11.5px] text-faint">{hint ?? t(hintKey)}</Text>
+          <Button title={label ?? t(nextKey)} onPress={next} loading={busy} />
         </View>
       </KeyboardAvoidingView>
     </Screen>

@@ -151,7 +151,7 @@ export default function RequestStep1() {
   return (
     <RequestFrame
       step={1} firstError={firstError} onInvalid={() => setAttempted(true)} onNext={() => router.push('/request/step2')}
-      nextKey="req_next_medical" hintKey="req_hint_step1"
+      nextKey="req_next_medical"
     >
       <SectionHeading first>{t(mortal ? 'step1_heading_mortal' : 'step1_heading')}</SectionHeading>
       <Anchor id="name">

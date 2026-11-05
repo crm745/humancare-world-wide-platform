@@ -99,12 +99,13 @@ export default function RequestReview() {
   };
 
   const edit = t('req_edit');
-  const hint = uploading
+  // While files upload the button itself says how far it is: nothing sits under the button.
+  const label = uploading
     ? t('req_uploading').replace('{i}', uploading.index).replace('{n}', uploading.total).replace('{p}', Math.round(uploading.progress * 100))
     : undefined;
 
   return (
-    <RequestFrame step={3} showService={false} onNext={submit} busy={busy} nextKey="req_submit" hintKey="req_hint_step3" hint={hint}>
+    <RequestFrame step={3} showService={false} onNext={submit} busy={busy} nextKey="req_submit" label={label}>
       <Text className="text-center text-[13.5px] text-muted">{t('review_sub')}</Text>
       <Section title={t('lbl_service')} onEdit={changeService} editLabel={t('req_change')} rows={[[t('lbl_service'), serviceTitle]]} />
       <Section

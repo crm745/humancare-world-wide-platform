@@ -23,15 +23,13 @@ export function FieldError({ children }) {
   return children ? <Text className="mt-1.5 text-[12px] text-danger">{children}</Text> : null;
 }
 
-/// Chips for one choice (a radio group) or several (checkboxes). `label` names the group for
+// Chips for one choice (a radio group) or several (checkboxes). `label` names the group for
 // screen readers and each chip says whether it is chosen. `options` is
 // [{ value, label, Icon?, danger?, exclusive? }]; a `danger` option takes the light red tint when
-// chosen. `columns` lays the chips out in equal-width columns so the rows line up; without it
-// they flow left to right. Single mode: tapping the chosen chip again clears it when
-// `clearable`. `multiple` mode: `value` and `onChange` use arrays, and an `exclusive` option
-// ("Not applicable") replaces the others instead of joining them.
-const COLUMN_WIDTH = { 2: 'w-[48.5%]', 3: 'w-[31.8%]' };
-
+// chosen. `columns` puts the chips in rows of that many, all the same width, so they line up and
+// sit centred; without it they flow left to right. Single mode: tapping the chosen chip again
+// clears it when `clearable`. `multiple` mode: `value` and `onChange` use arrays, and an
+// `exclusive` option ("Not applicable") replaces the others instead of joining them.
 export function ChoiceChips({ label, options, value, onChange, clearable, multiple, columns }) {
   const chosen = multiple ? value : [value];
   const choose = (option) => {
@@ -40,29 +38,45 @@ export function ChoiceChips({ label, options, value, onChange, clearable, multip
     const exclusive = options.filter((o) => o.exclusive).map((o) => o.value);
     onChange(option.exclusive ? [option.value] : [...value.filter((v) => !exclusive.includes(v)), option.value]);
   };
-  const width = columns ? COLUMN_WIDTH[columns] : '';
+
+  const chip = (option) => {
+    const { value: v, label: text, Icon, danger } = option;
+    const on = chosen.includes(v);
+    const box = on ? (danger ? 'border-danger bg-danger-soft' : 'border-primary bg-primary-soft') : 'border-field bg-white';
+    const tone = on ? (danger ? 'text-danger-dark' : 'text-primary-dark') : 'text-slate';
+    const iconColor = on ? (danger ? '#B02A2A' : '#1A5FC4') : '#5B6B84';
+    return (
+      <Pressable
+        key={v} onPress={() => choose(option)}
+        accessibilityRole={multiple ? 'checkbox' : 'radio'} accessibilityState={{ checked: on }} accessibilityLabel={text}
+        className={`min-h-[44px] items-center justify-center gap-1.5 rounded-full border-[1.5px] px-3 py-2 active:opacity-80 ${columns ? 'flex-1 flex-row' : 'flex-row'} ${box}`}
+      >
+        {Icon ? <Icon size={15} color={iconColor} strokeWidth={2} /> : null}
+        <Text className={`flex-shrink text-center font-inter-bold text-[12.5px] leading-4 ${tone}`}>{text}</Text>
+      </Pressable>
+    );
+  };
+
+  if (!columns) {
+    return (
+      <View accessibilityRole={multiple ? undefined : 'radiogroup'} accessibilityLabel={label} className="flex-row flex-wrap gap-2">
+        {options.map(chip)}
+      </View>
+    );
+  }
+
+  // Rows of `columns` chips. A short last row gets empty spacers so its chips are the same
+  // width as the rest instead of stretching across the row.
+  const rows = [];
+  for (let i = 0; i < options.length; i += columns) rows.push(options.slice(i, i + columns));
   return (
-    <View
-      accessibilityRole={multiple ? undefined : 'radiogroup'} accessibilityLabel={label}
-      className={`flex-row flex-wrap gap-2 ${columns ? 'justify-between gap-y-2' : ''}`}
-    >
-      {options.map((option) => {
-        const { value: v, label: text, Icon, danger } = option;
-        const on = chosen.includes(v);
-        const box = on ? (danger ? 'border-danger bg-danger-soft' : 'border-primary bg-primary-soft') : 'border-field bg-white';
-        const tone = on ? (danger ? 'text-danger-dark' : 'text-primary-dark') : 'text-slate';
-        const iconColor = on ? (danger ? '#B02A2A' : '#1A5FC4') : '#5B6B84';
-        return (
-          <Pressable
-            key={v} onPress={() => choose(option)}
-            accessibilityRole={multiple ? 'checkbox' : 'radio'} accessibilityState={{ checked: on }} accessibilityLabel={text}
-            className={`min-h-[44px] flex-row items-center justify-center gap-1.5 rounded-full border-[1.5px] px-3 py-2 active:opacity-80 ${width} ${box}`}
-          >
-            {Icon ? <Icon size={15} color={iconColor} strokeWidth={2} /> : null}
-            <Text className={`flex-shrink text-center font-inter-bold text-[12.5px] leading-4 ${tone}`}>{text}</Text>
-          </Pressable>
-        );
-      })}
+    <View accessibilityRole={multiple ? undefined : 'radiogroup'} accessibilityLabel={label} className="gap-2">
+      {rows.map((row) => (
+        <View key={row[0].value} className="flex-row gap-2">
+          {row.map(chip)}
+          {Array.from({ length: columns - row.length }, (_, i) => <View key={`pad${i}`} className="flex-1" />)}
+        </View>
+      ))}
     </View>
   );
 }
@@ -84,15 +98,20 @@ export function SwitchRow({ label, value, onChange, last }) {
 
 // Optional extra questions, closed until the person opens them. `defaultOpen` starts it open
 // (when it already holds answers); `forceOpen` keeps it open while one of them has an error,
-// so the error is never hidden.
-export function Collapsible({ title, hint, children, defaultOpen = false, forceOpen = false }) {
+// so the error is never hidden. `onOpen` runs after it opens, so the page can scroll the
+// newly shown fields into view.
+export function Collapsible({ title, hint, children, defaultOpen = false, forceOpen = false, onOpen }) {
   const [opened, setOpened] = useState(defaultOpen);
   const open = opened || forceOpen;
   const Chevron = open ? ChevronUp : ChevronDown;
+  const toggle = () => {
+    setOpened(!open);
+    if (!open) onOpen?.();
+  };
   return (
     <View className="rounded-2xl border border-line bg-white">
       <Pressable
-        onPress={() => setOpened(!open)} accessibilityRole="button" accessibilityState={{ expanded: open }}
+        onPress={toggle} accessibilityRole="button" accessibilityState={{ expanded: open }}
         className="min-h-[52px] flex-row items-center justify-between gap-3 px-4 py-3 active:opacity-80"
       >
         <View className="flex-1">
