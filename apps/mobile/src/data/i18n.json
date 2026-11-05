@@ -393,7 +393,10 @@
   "country_picker_close": "Close",
   "phone_invalid_for_country": "Enter a valid mobile number for the selected country.",
   "phone_required": "This field is required.",
-  "complete_profile_signing_as": "Signing up as {name}"
+  "complete_profile_signing_as": "Signing up as {name}",
+  "field_first_name": "First Name",
+  "field_last_name": "Last Name",
+  "gender_placeholder": "Select gender"
  },
  "HI": {
   "greeting": "नमस्ते,",
@@ -724,7 +727,10 @@
   "country_picker_close": "Close",
   "phone_invalid_for_country": "Enter a valid mobile number for the selected country.",
   "phone_required": "This field is required.",
-  "complete_profile_signing_as": "Signing up as {name}"
+  "complete_profile_signing_as": "Signing up as {name}",
+  "field_first_name": "First Name",
+  "field_last_name": "Last Name",
+  "gender_placeholder": "Select gender"
  },
  "MR": {
   "greeting": "नमस्कार,",
@@ -1055,7 +1061,10 @@
   "country_picker_close": "Close",
   "phone_invalid_for_country": "Enter a valid mobile number for the selected country.",
   "phone_required": "This field is required.",
-  "complete_profile_signing_as": "Signing up as {name}"
+  "complete_profile_signing_as": "Signing up as {name}",
+  "field_first_name": "First Name",
+  "field_last_name": "Last Name",
+  "gender_placeholder": "Select gender"
  },
  "GU": {
   "greeting": "નમસ્તે,",
@@ -1386,7 +1395,10 @@
   "country_picker_close": "Close",
   "phone_invalid_for_country": "Enter a valid mobile number for the selected country.",
   "phone_required": "This field is required.",
-  "complete_profile_signing_as": "Signing up as {name}"
+  "complete_profile_signing_as": "Signing up as {name}",
+  "field_first_name": "First Name",
+  "field_last_name": "Last Name",
+  "gender_placeholder": "Select gender"
  },
  "TE": {
   "greeting": "నమస్తే,",
@@ -1717,7 +1729,10 @@
   "country_picker_close": "Close",
   "phone_invalid_for_country": "Enter a valid mobile number for the selected country.",
   "phone_required": "This field is required.",
-  "complete_profile_signing_as": "Signing up as {name}"
+  "complete_profile_signing_as": "Signing up as {name}",
+  "field_first_name": "First Name",
+  "field_last_name": "Last Name",
+  "gender_placeholder": "Select gender"
  },
  "AR": {
   "greeting": "مرحباً,",
@@ -2048,6 +2063,9 @@
   "country_picker_close": "Close",
   "phone_invalid_for_country": "Enter a valid mobile number for the selected country.",
   "phone_required": "This field is required.",
-  "complete_profile_signing_as": "Signing up as {name}"
+  "complete_profile_signing_as": "Signing up as {name}",
+  "field_first_name": "First Name",
+  "field_last_name": "Last Name",
+  "gender_placeholder": "Select gender"
  }
 }
