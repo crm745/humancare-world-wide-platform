@@ -171,9 +171,6 @@ export const EMERGENCY_TEL = '+919699999065';
 export const EMERGENCY_DISPLAY = '+91 96999 99065';
 export const OPS_EMAIL = 'ops@humancareworldwide.com';
 
-// "How did you hear about us?" options. Picking SOURCE_OTHER asks the user to type the answer.
-export const SOURCE_OTHER = 'Other';
-export const SOURCES = ['Google Search', 'Referral', 'Insurance Provider', 'Social Media', SOURCE_OTHER];
 
 // New Request form, medical page. Same values the backend accepts (backend
 // src/common/constants/request.constants.js); the labels come from i18n (`mobility_*`, `urgency_*`).

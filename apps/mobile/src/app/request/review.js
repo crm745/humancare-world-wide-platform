@@ -3,7 +3,7 @@ import { Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 import { needsCareLevel, useApp } from '../../state/AppContext';
 import SERVICES from '../../data/services.json';
-import { EQUIPMENT_OPTIONS, SOURCE_OTHER, isMortal, requestService } from '../../data/mock';
+import { EQUIPMENT_OPTIONS, isMortal, requestService } from '../../data/mock';
 import { navReplace } from '../../lib/nav';
 import { apiPost, apiUpload } from '../../lib/api';
 import { goToStep, RequestFrame } from '../../components/request/RequestFrame';
@@ -33,7 +33,6 @@ export default function RequestReview() {
   const [busy, setBusy] = useState(false);
   // null while the files are not uploading; otherwise which file, out of how many, and how far.
   const [uploading, setUploading] = useState(null);
-  const source = d.source === SOURCE_OTHER && d.sourceOther.trim() ? `${SOURCE_OTHER}: ${d.sourceOther.trim()}` : d.source;
   const { title: serviceTitle, key: serviceKey } = requestService(d, SERVICES);
   const mortal = isMortal(d.service);
   const transport = needsCareLevel(d.service);
@@ -61,8 +60,6 @@ export default function RequestReview() {
         preferredDate: d.date || undefined,
         careLevel: transport && d.care.length ? d.care.map(t).join(', ') : undefined,
         description: d.desc || undefined, // "Condition & diagnosis" (or the Mortal Remains details)
-        additionalInfo: d.extra || undefined, // kept in our database only, not sent to Bitrix
-        specialRequirements: d.special || undefined,
         // Only patient transport has these; the server refuses them for any other service.
         ...(transport ? {
           mobility: d.mobility,
@@ -72,7 +69,6 @@ export default function RequestReview() {
         } : {}),
         urgency: d.urgency || undefined,
         ...(mortal ? { deceasedRelation: d.relation, placeOfDeath: d.deathPlace, dateOfDeath: d.deathDate } : {}),
-        referralSource: source || undefined,
       });
 
       // The request is saved, so a file that fails to upload must not undo it: carry on with
@@ -142,16 +138,6 @@ export default function RequestReview() {
         title={t(mortal ? 'req_documents' : 'req_reports')} onEdit={() => goToStep(2)} editLabel={edit}
         rows={[[t(mortal ? 'lbl_death_certificate' : 'lbl_medical_report'), d.files.length ? d.files.map((f) => f.name).join(', ') : t('req_not_attached')]]}
       />
-      {(d.extra || d.special || source) ? (
-        <Section
-          title={t('req_more_details')} onEdit={() => goToStep(2)} editLabel={edit}
-          rows={[
-            ...(d.extra ? [[t('lbl_extra_info'), d.extra]] : []),
-            ...(d.special ? [[t('lbl_special_requirements'), d.special]] : []),
-            ...(source ? [[t('lbl_heard_about_us'), source]] : []),
-          ]}
-        />
-      ) : null}
     </RequestFrame>
   );
 }

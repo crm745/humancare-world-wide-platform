@@ -1,8 +1,7 @@
-import { useState } from 'react';
 import { Platform, Pressable, Switch, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import { Camera, ChevronDown, ChevronUp, FileText, Upload, X } from 'lucide-react-native';
+import { Camera, FileText, Upload, X } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
 import { MAX_REPORT_BYTES, MAX_REPORT_FILES } from '../../data/mock';
 import { Text } from '../ui';
@@ -93,35 +92,6 @@ export function SwitchRow({ label, value, onChange, last }) {
         <Switch value={value} trackColor={{ false: '#E1E7F0', true: '#0D2340' }} thumbColor="#FFFFFF" ios_backgroundColor="#E1E7F0" />
       </View>
     </Pressable>
-  );
-}
-
-// Optional extra questions, closed until the person opens them. `defaultOpen` starts it open
-// (when it already holds answers); `forceOpen` keeps it open while one of them has an error,
-// so the error is never hidden. `onOpen` runs after it opens, so the page can scroll the
-// newly shown fields into view.
-export function Collapsible({ title, hint, children, defaultOpen = false, forceOpen = false, onOpen }) {
-  const [opened, setOpened] = useState(defaultOpen);
-  const open = opened || forceOpen;
-  const Chevron = open ? ChevronUp : ChevronDown;
-  const toggle = () => {
-    setOpened(!open);
-    if (!open) onOpen?.();
-  };
-  return (
-    <View className="rounded-2xl border border-line bg-white">
-      <Pressable
-        onPress={toggle} accessibilityRole="button" accessibilityState={{ expanded: open }}
-        className="min-h-[52px] flex-row items-center justify-between gap-3 px-4 py-3 active:opacity-80"
-      >
-        <View className="flex-1">
-          <Text className="font-inter-bold text-[14px] text-navy">{title}</Text>
-          {hint ? <Text className="mt-0.5 text-[11.5px] text-faint">{hint}</Text> : null}
-        </View>
-        <Chevron size={18} color="#5B6B84" />
-      </Pressable>
-      {open ? <View className="gap-5 border-t border-divider px-4 pb-4 pt-4">{children}</View> : null}
-    </View>
   );
 }
 

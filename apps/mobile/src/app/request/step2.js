@@ -3,36 +3,26 @@ import { TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { Accessibility, Activity, BedDouble, PersonStanding } from 'lucide-react-native';
 import { needsCareLevel, useApp } from '../../state/AppContext';
-import { EQUIPMENT_OPTIONS, MOBILITY_OPTIONS, SOURCES, SOURCE_OTHER, URGENCY_OPTIONS, isMortal } from '../../data/mock';
-import { Anchor, RequestFrame, useScrollToEnd } from '../../components/request/RequestFrame';
-import { Collapsible, ChoiceChips, FieldError, FieldHeader, ReportTiles, SwitchRow } from '../../components/request/fields';
-import { CARE_LEVELS, Field, FieldLabel, Input } from '../../components/ui';
-import { Select } from '../../components/widgets';
+import { EQUIPMENT_OPTIONS, MOBILITY_OPTIONS, URGENCY_OPTIONS, isMortal } from '../../data/mock';
+import { Anchor, RequestFrame } from '../../components/request/RequestFrame';
+import { ChoiceChips, FieldError, FieldHeader, ReportTiles, SwitchRow } from '../../components/request/fields';
+import { CARE_LEVELS } from '../../components/ui';
 
 const MOBILITY_ICONS = { bedridden: BedDouble, wheelchair: Accessibility, walking: PersonStanding };
-
-// "More details" is the last thing on the page, so its fields open below the pinned button.
-// Opening it scrolls the page down to show them.
-function MoreDetails(props) {
-  const scrollToEnd = useScrollToEnd();
-  return <Collapsible {...props} onOpen={scrollToEnd} />;
-}
 
 // Step 2 of 3: the medical details. Patient transport (air and ground ambulance) also asks
 // about care level, mobility and what is needed on board; every service asks how urgent it is.
 // Mortal Remains asks for "Details" and the documents (the death certificate) instead of a
-// diagnosis. The optional extra questions of the old second step sit at the bottom, closed.
+// diagnosis.
 export default function RequestStep2() {
   const { t, draft, updateDraft } = useApp();
   const transport = needsCareLevel(draft.service);
   const mortal = isMortal(draft.service);
   const [attempted, setAttempted] = useState(false);
-  const otherOk = draft.source !== SOURCE_OTHER || draft.sourceOther.trim() !== '';
 
   const problems = [
     ['mobility', transport && !draft.mobility],
     ['urgency', !draft.urgency],
-    ['sourceOther', !otherOk],
   ];
   const firstError = () => problems.find(([, wrong]) => wrong)?.[0] || null;
 
@@ -95,26 +85,6 @@ export default function RequestStep2() {
           options={URGENCY_OPTIONS.map((key) => ({ value: key, label: t(`urgency_${key}`), danger: key === 'critical_6h' }))}
         />
         <FieldError>{attempted && !draft.urgency ? t('req_required') : null}</FieldError>
-      </Anchor>
-
-      <Anchor id="sourceOther">
-        <MoreDetails
-          title={t('req_more_details')} hint={t('req_more_details_hint')}
-          defaultOpen={!!(draft.extra || draft.special || draft.source)} forceOpen={attempted && !otherOk}
-        >
-          <Field multiline label={t('field_extra_info')} placeholder="Optional" value={draft.extra} onChangeText={(extra) => updateDraft({ extra })} />
-          <Field multiline label={t('field_special_req')} placeholder="e.g. oxygen support, wheelchair access" value={draft.special} onChangeText={(special) => updateDraft({ special })} />
-          <View>
-            <FieldLabel>{t('field_hear_about_us')}</FieldLabel>
-            <Select value={draft.source || 'Select an option'} options={SOURCES} onChange={(source) => updateDraft({ source })} title={t('field_hear_about_us')} />
-            {draft.source === SOURCE_OTHER && (
-              <>
-                <Input className="mt-2.5" placeholder={t('field_hear_about_us_other')} value={draft.sourceOther} onChangeText={(sourceOther) => updateDraft({ sourceOther })} />
-                <FieldError>{attempted && !otherOk ? 'Please specify.' : null}</FieldError>
-              </>
-            )}
-          </View>
-        </MoreDetails>
       </Anchor>
     </RequestFrame>
   );

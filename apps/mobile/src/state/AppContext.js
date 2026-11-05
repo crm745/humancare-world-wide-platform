@@ -50,10 +50,6 @@ export const INITIAL_DRAFT = {
   equipVentilator: false,
   urgency: '', // 'critical_6h' | 'urgent_24h' | 'planned'
   changingService: false, // set while the person is picking another service from the request form
-  extra: '',
-  special: '',
-  source: '',
-  sourceOther: '', // free text when source is "Other"
 };
 
 export { needsCareLevel };
