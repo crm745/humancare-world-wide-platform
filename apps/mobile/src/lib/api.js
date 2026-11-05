@@ -124,9 +124,18 @@ export async function apiUpload(path, file, isRetry = false, onProgress) {
         else reject(new Error(data.error || 'Upload failed. Please try again.'));
       };
       xhr.onerror = () => reject(new Error('Upload failed. Please try again.'));
-      const form = new FormData();
-      form.append('file', { uri: file.uri, name: file.name, type: file.mimeType || 'application/octet-stream' });
-      xhr.send(form);
+      // A browser needs the file itself in the form: the { uri, name, type } object that React
+      // Native accepts there turns into the text "[object Object]" and the server sees no file.
+      // The picked file's uri is a blob: URL, so fetch it back into a Blob.
+      fetch(file.uri)
+        .then((res) => res.blob())
+        .then((blob) => {
+          const form = new FormData();
+          const typed = blob.type ? blob : blob.slice(0, blob.size, file.mimeType || 'application/octet-stream');
+          form.append('file', typed, file.name);
+          xhr.send(form);
+        })
+        .catch(() => reject(new Error('Upload failed. Please try again.')));
     });
   }
 
