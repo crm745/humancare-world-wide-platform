@@ -26,8 +26,11 @@ export const INITIAL_DRAFT = {
   age: '',
   gender: '',
   location: '',
-  country: '',
-  cc: '+91',
+  country: '', // the country's name, as it is sent to the backend
+  countryIso: '', // its ISO code, which the phone code follows (see pickRequestCountry)
+  cc: '+91', // the calling code sent with the contact number: always the dial code of phoneCountry
+  phoneCountry: 'IN', // the country picked for the contact number's code (+1 and +7 are shared)
+  ccEdited: false, // true once the person has changed the code by hand
   phone: '',
   care: [], // care-level keys, one or more; only asked for air & ground ambulance (see needsCareLevel)
   airlineMode: '', // 'stretcher' | 'wheelchair'; only asked for Commercial Airlines

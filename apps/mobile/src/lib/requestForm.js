@@ -1,5 +1,8 @@
+import { dialOf, nameOf, pickNationality, pickPhoneCountry } from './phoneCountry';
+
 // Pure rules of the New Request form (no React, no native modules), kept apart so they can be
-// unit-tested: which services are patient transport, and what changing service keeps.
+// unit-tested: which services are patient transport, what changing service keeps, and how the
+// contact number's country code follows the country.
 
 // Care level, mobility and equipment only matter for patient transport: the air ambulance
 // options and ground ambulance.
@@ -22,4 +25,21 @@ export function draftForService(previous, service, initial) {
     service,
     changingService: false,
   };
+}
+
+// Picking the Country sets the contact number's country code to that country's own, until the
+// person has changed the code by hand: after that the code is theirs and the country no longer
+// moves it. Digits already typed stay; only the code changes. Returns what to put in the draft.
+// `country` stays the country's name and `cc` the dial code ("+971"): the formats the backend
+// and Bitrix already get.
+export function pickRequestCountry(draft, isoCode) {
+  const next = pickNationality({ nationality: draft.countryIso, phoneCountry: draft.phoneCountry, codeEdited: draft.ccEdited }, isoCode);
+  return { country: nameOf(isoCode), countryIso: isoCode, phoneCountry: next.phoneCountry, cc: dialOf(next.phoneCountry), ccEdited: next.codeEdited };
+}
+
+// Picking the code by hand: remember which country it was (so +1 stays US or Canada) and stop
+// the Country from moving it.
+export function pickRequestPhoneCountry(draft, isoCode) {
+  const next = pickPhoneCountry({ nationality: draft.countryIso, phoneCountry: draft.phoneCountry, codeEdited: draft.ccEdited }, isoCode);
+  return { phoneCountry: next.phoneCountry, cc: dialOf(next.phoneCountry), ccEdited: true };
 }

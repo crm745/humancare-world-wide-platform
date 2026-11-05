@@ -120,8 +120,8 @@ export default function RequestReview() {
       <Section
         title={t('req_trip')} onEdit={() => goToStep(1)} editLabel={edit}
         rows={[
-          [t('lbl_location'), d.location],
           [t('field_country'), d.country],
+          [t('lbl_location'), d.location],
           [t('field_destination'), d.dest],
           [t(mortal ? 'field_transfer_date' : 'field_preferred_date'), d.date],
         ]}

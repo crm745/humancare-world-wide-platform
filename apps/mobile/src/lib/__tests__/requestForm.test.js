@@ -38,3 +38,58 @@ describe('draftForService', () => {
     expect(next.urgency).toBe('planned'); // urgency is asked for every service
   });
 });
+
+describe('contact number code follows the Country', () => {
+  const { pickRequestCountry, pickRequestPhoneCountry } = require('../requestForm');
+  const fresh = { country: '', countryIso: '', cc: '+91', phoneCountry: 'IN', ccEdited: false, phone: '8691930716' };
+  const apply = (draft, patch) => ({ ...draft, ...patch });
+
+  it('starts on India +91 before a Country is picked', () => {
+    expect(fresh).toMatchObject({ phoneCountry: 'IN', cc: '+91', ccEdited: false });
+  });
+
+  it('picking UAE sets the code to +971, and India sets it back to +91', () => {
+    let draft = apply(fresh, pickRequestCountry(fresh, 'AE'));
+    expect(draft).toMatchObject({ country: 'United Arab Emirates', countryIso: 'AE', phoneCountry: 'AE', cc: '+971', ccEdited: false });
+    draft = apply(draft, pickRequestCountry(draft, 'IN'));
+    expect(draft).toMatchObject({ country: 'India', phoneCountry: 'IN', cc: '+91' });
+    draft = apply(draft, pickRequestCountry(draft, 'GB'));
+    expect(draft).toMatchObject({ country: 'United Kingdom', phoneCountry: 'GB', cc: '+44' });
+  });
+
+  it('keeps the digits already typed: only the code changes', () => {
+    const draft = apply(fresh, pickRequestCountry(fresh, 'AE'));
+    expect(draft.phone).toBe('8691930716');
+  });
+
+  it('never overwrites a code the person picked by hand', () => {
+    let draft = apply(fresh, pickRequestPhoneCountry(fresh, 'AE')); // a UAE number for an Indian patient
+    expect(draft).toMatchObject({ phoneCountry: 'AE', cc: '+971', ccEdited: true });
+    draft = apply(draft, pickRequestCountry(draft, 'IN'));
+    expect(draft).toMatchObject({ country: 'India', countryIso: 'IN', phoneCountry: 'AE', cc: '+971', ccEdited: true });
+    draft = apply(draft, pickRequestCountry(draft, 'GB'));
+    expect(draft).toMatchObject({ country: 'United Kingdom', phoneCountry: 'AE', cc: '+971' });
+  });
+
+  it('remembers which country shares a code, not just the code', () => {
+    const canada = apply(fresh, pickRequestCountry(fresh, 'CA'));
+    const us = apply(fresh, pickRequestCountry(fresh, 'US'));
+    expect([canada.cc, us.cc]).toEqual(['+1', '+1']);
+    expect([canada.phoneCountry, us.phoneCountry]).toEqual(['CA', 'US']);
+    const byHand = apply(fresh, pickRequestPhoneCountry(fresh, 'CA'));
+    expect(byHand).toMatchObject({ phoneCountry: 'CA', cc: '+1' });
+  });
+
+  it('sends the country as its name and the code as the dial code, as before', () => {
+    const draft = apply(fresh, pickRequestCountry(fresh, 'AE'));
+    expect(typeof draft.country).toBe('string');
+    expect(draft.cc).toMatch(/^\+\d+$/);
+    expect(`${draft.cc} ${draft.phone}`).toBe('+971 8691930716');
+  });
+
+  it('survives a change of service: the country and code are kept', () => {
+    const draft = { ...INITIAL, ...fresh, ...pickRequestCountry(fresh, 'AE'), service: 'privatecharter', changingService: true };
+    const next = draftForService(draft, 'ground', INITIAL);
+    expect(next).toMatchObject({ country: 'United Arab Emirates', countryIso: 'AE', phoneCountry: 'AE', cc: '+971' });
+  });
+});

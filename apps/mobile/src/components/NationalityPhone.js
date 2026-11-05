@@ -10,7 +10,7 @@ import { FieldLabel, Input, Text } from './ui';
 // A full-height list of every country with a search box. Typing a name ("emir") or a dial code
 // ("971", "+1") narrows it. `selected` is an ISO code, and the row for it is ticked; countries
 // that share a dial code (+1, +7, +44) are separate rows, so the choice is a country, not a code.
-function CountryPicker({ visible, title, selected, onPick, onClose }) {
+export function CountryPicker({ visible, title, selected, onPick, onClose }) {
   const { t, isRTL } = useApp();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');

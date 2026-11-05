@@ -396,7 +396,8 @@
   "complete_profile_signing_as": "Signing up as {name}",
   "field_first_name": "First Name",
   "field_last_name": "Last Name",
-  "gender_placeholder": "Select gender"
+  "gender_placeholder": "Select gender",
+  "phone_country_code_label": "Phone country code"
  },
  "HI": {
   "greeting": "नमस्ते,",
@@ -730,7 +731,8 @@
   "complete_profile_signing_as": "Signing up as {name}",
   "field_first_name": "First Name",
   "field_last_name": "Last Name",
-  "gender_placeholder": "Select gender"
+  "gender_placeholder": "Select gender",
+  "phone_country_code_label": "Phone country code"
  },
  "MR": {
   "greeting": "नमस्कार,",
@@ -1064,7 +1066,8 @@
   "complete_profile_signing_as": "Signing up as {name}",
   "field_first_name": "First Name",
   "field_last_name": "Last Name",
-  "gender_placeholder": "Select gender"
+  "gender_placeholder": "Select gender",
+  "phone_country_code_label": "Phone country code"
  },
  "GU": {
   "greeting": "નમસ્તે,",
@@ -1398,7 +1401,8 @@
   "complete_profile_signing_as": "Signing up as {name}",
   "field_first_name": "First Name",
   "field_last_name": "Last Name",
-  "gender_placeholder": "Select gender"
+  "gender_placeholder": "Select gender",
+  "phone_country_code_label": "Phone country code"
  },
  "TE": {
   "greeting": "నమస్తే,",
@@ -1732,7 +1736,8 @@
   "complete_profile_signing_as": "Signing up as {name}",
   "field_first_name": "First Name",
   "field_last_name": "Last Name",
-  "gender_placeholder": "Select gender"
+  "gender_placeholder": "Select gender",
+  "phone_country_code_label": "Phone country code"
  },
  "AR": {
   "greeting": "مرحباً,",
@@ -2066,6 +2071,7 @@
   "complete_profile_signing_as": "Signing up as {name}",
   "field_first_name": "First Name",
   "field_last_name": "Last Name",
-  "gender_placeholder": "Select gender"
+  "gender_placeholder": "Select gender",
+  "phone_country_code_label": "Phone country code"
  }
 }
