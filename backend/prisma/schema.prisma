@@ -305,14 +305,11 @@ model ServiceRequest {
   preferredDate     DateTime? @map("preferred_date")
   careLevel         String?   @map("care_level")
   description       String?   @db.Text
-  additionalInfo    String?   @map("additional_info")
-  specialRequirements String? @db.Text @map("special_requirements")
   // Mortal Remains only (patientName then holds the deceased's name): who is asking,
   // and where and when the death happened.
   deceasedRelation  String?   @map("deceased_relation")
   placeOfDeath      String?   @map("place_of_death")
   dateOfDeath       DateTime? @map("date_of_death")
-  referralSource    String?   @map("referral_source")
   // The medical page of the New Request form. Mobility and the equipment flags are only set
   // for patient-transport services (null otherwise, and on requests made before the page
   // existed); urgency is null on those older requests too.

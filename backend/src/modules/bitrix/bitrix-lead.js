@@ -130,7 +130,6 @@ function leadInputFromRequest(request, user) {
     destination: request.destination,
     dateOfService: request.preferredDate,
     serviceKey: request.serviceKey,
-    specialRequirements: request.specialRequirements,
     urgency: URGENCY_TO_CASE[request.urgency],
     industry: INDUSTRY.patientApp,
     comments: commentLines([
@@ -163,7 +162,6 @@ function mortalLeadInput(request, user) {
     destination: request.destination,
     dateOfService: request.preferredDate,
     serviceKey: request.serviceKey,
-    specialRequirements: request.specialRequirements,
     urgency: URGENCY_TO_CASE[request.urgency],
     industry: INDUSTRY.patientApp,
     comments: commentLines([

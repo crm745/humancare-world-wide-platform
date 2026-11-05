@@ -40,7 +40,6 @@ function streamRequestSummaryPdf(res, request) {
   row(doc, 'Care level:', request.careLevel);
   row(doc, 'Patient mobility:', MOBILITY_LABEL[request.mobility]);
   row(doc, 'Required on board:', EQUIPMENT.filter(([field]) => request[field] === true).map(([, label]) => label).join(', '));
-  if (request.specialRequirements) row(doc, 'Special Requirements:', request.specialRequirements);
 
   const stageEvents = request.case && request.case.stageEvents;
   if (stageEvents && stageEvents.length) {

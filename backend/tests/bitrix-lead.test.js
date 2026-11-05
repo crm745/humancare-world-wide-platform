@@ -16,8 +16,6 @@ const request = {
   preferredDate: new Date('2026-11-02T00:00:00Z'),
   careLevel: 'Basic',
   description: 'Needs oxygen on board',
-  specialRequirements: 'Oxygen support',
-  referralSource: 'Google Search',
 };
 const user = { name: 'Rohan Patil', mobile: '+919000000000', email: 'rohan@example.com' };
 
@@ -47,9 +45,9 @@ describe('Bitrix lead from a patient request', () => {
     expect(fields.UF_CRM_1768812329423).toBe('Delhi'); // Drop City
   });
 
-  it('puts special requirements in Current Medical Conditions and never sends "heard about us"', () => {
-    expect(fields.UF_CRM_1784283904).toBe('Oxygen support');
-    expect(JSON.stringify(fields)).not.toContain('Google Search');
+  it('leaves Current Medical Conditions empty for a patient request: the condition goes in the comment', () => {
+    expect(fields.UF_CRM_1784283904).toBeUndefined();
+    expect(fields.COMMENTS).toContain('Needs oxygen on board');
   });
 
   it('keeps the comment to the requirement and care level', () => {
@@ -118,6 +116,16 @@ describe('Bitrix lead from a corporate case', () => {
     expect(fields.UF_CRM_1775637825406).toBe(380); // Transfer Urgency: Urgent
     expect(fields.UF_CRM_1775637565398).toBe(362); // Gender: Male
     expect(fields.COMMENTS).toBe('Service: Air Ambulance');
+  });
+});
+
+describe('Bitrix lead from a corporate case: special requirements', () => {
+  it('still puts them in Current Medical Conditions', () => {
+    const fields = buildLeadFields(leadInputFromCase({
+      referenceNumber: 'CASE-9', patientName: 'Asha Rao', origin: 'Pune', destination: 'Dubai', serviceType: 'Air Ambulance',
+      specialRequirements: 'Oxygen support',
+    }));
+    expect(fields.UF_CRM_1784283904).toBe('Oxygen support');
   });
 });
 

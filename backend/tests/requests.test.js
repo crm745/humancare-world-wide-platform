@@ -107,16 +107,19 @@ describe('Bitrix24 on/off switch', () => {
     expect(createLead.mock.calls[0][0]).toMatchObject({ serviceKey: 'commercialair_wheelchair', industry: 712, origin: 'Mumbai, India' });
   });
 
-  it('saves "any additional information" in our database but never sends it to Bitrix', async () => {
+  it('ignores the optional "More details" answers an older app version may still send', async () => {
     createLead.mockClear();
     process.env.BITRIX_SYNC_ENABLED = 'true';
     const { token } = await createPatient();
     const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`)
-      .send({ ...baseRequestBody, additionalInfo: 'Prefers a female nurse' });
-    const saved = await prisma.serviceRequest.findUnique({ where: { id: res.body.request.id } });
-    expect(saved.additionalInfo).toBe('Prefers a female nurse');
+      .send({ ...baseRequestBody, additionalInfo: 'Prefers a female nurse', specialRequirements: 'Oxygen', referralSource: 'Google Search' });
+    expect(res.status).toBe(201);
+    expect(res.body.request).not.toHaveProperty('additionalInfo');
+    expect(res.body.request).not.toHaveProperty('specialRequirements');
+    expect(res.body.request).not.toHaveProperty('referralSource');
     const { buildLeadFields } = jest.requireActual('../src/modules/bitrix/bitrix-lead');
-    expect(JSON.stringify(buildLeadFields(createLead.mock.calls[0][0]))).not.toContain('female nurse');
+    const sent = JSON.stringify(buildLeadFields(createLead.mock.calls[0][0]));
+    expect(sent).not.toMatch(/female nurse|Google Search/);
   });
 
   it('sends an uploaded medical report to the Bitrix lead of the request', async () => {
