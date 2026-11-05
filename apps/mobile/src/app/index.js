@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Animated, Easing, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Image, Platform, Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state/AppContext';
 import { LOGO, SPLASH_BG } from '../data/images';
@@ -14,7 +14,13 @@ const SESSION_TIMEOUT_MS = 4000;
 // Sampled from the logo itself, so the loading line matches it.
 const LOGO_RED = '#B41C2D';
 const LOGO_BLUE = '#2F3A8D';
-const LOGO_STYLE = { width: '62%', maxWidth: 320, aspectRatio: 2440 / 1405 };
+// The logo is 62% of the screen width, at most 320. Its height is worked out here instead of left
+// to aspectRatio, which the browser preview ignores (the box came out as tall as the picture).
+const LOGO_RATIO = 2440 / 1405;
+const logoSize = (screenWidth) => {
+  const width = Math.min(screenWidth * 0.62, 320);
+  return { width, height: width / LOGO_RATIO };
+};
 // The moving part of the line, as a share of the track.
 const SEGMENT = 0.38;
 // Shown behind the globe picture until it has loaded, so nothing flashes white or dark.
@@ -32,6 +38,7 @@ const TAGLINE_STYLE = { marginTop: 14, paddingHorizontal: 28, textAlign: 'center
 export default function Splash() {
   const { t } = useApp();
   const insets = useSafeAreaInsets();
+  const { width: screenW, height: screenH } = useWindowDimensions();
   const [intro] = useState(() => new Animated.Value(0));
   const [sweep] = useState(() => new Animated.Value(0));
   const [trackWidth, setTrackWidth] = useState(0);
@@ -67,7 +74,8 @@ export default function Splash() {
 
   return (
     <Pressable className="flex-1" style={{ backgroundColor: BG_COLOR }} onPress={() => navReplace('/welcome')}>
-      <Image source={SPLASH_BG} accessible={false} resizeMode="cover" style={StyleSheet.absoluteFill} />
+      {/* Sized to the screen: in the browser an image given only top/left/right/bottom shows at its own size. */}
+      <Image source={SPLASH_BG} accessible={false} resizeMode="cover" style={{ position: 'absolute', top: 0, left: 0, width: screenW, height: screenH }} />
       <View className="flex-1 items-center justify-center" style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
         <Animated.View
           style={{
@@ -77,7 +85,7 @@ export default function Splash() {
             transform: [{ scale: intro.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }],
           }}
         >
-          <Image source={LOGO} style={LOGO_STYLE} resizeMode="contain" />
+          <Image source={LOGO} style={logoSize(screenW)} resizeMode="contain" />
           <Text style={TAGLINE_STYLE} maxFontSizeMultiplier={1.3}>{t('splash_tagline')}</Text>
           <View style={{ width: '50%', maxWidth: 200, marginTop: 28 }}>
             <View
