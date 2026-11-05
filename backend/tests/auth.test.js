@@ -691,6 +691,27 @@ describe('Google/Apple sign-in', () => {
     });
   });
 
+  it('keeps the provider\'s single name as the full name, with first and last name empty', async () => {
+    const google = newGoogleUser();
+    await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
+      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const res = await request(gApp).post('/auth/social/register').send(socialBody(first.body.signupTicket));
+      expect(res.status).toBe(200);
+      expect(await gPrisma.user.findFirst({ where: { email: google.email } })).toMatchObject({ name: 'New Person', firstName: null, lastName: null });
+    });
+  });
+
+  it('takes first and last name when the provider gave none', async () => {
+    const google = newGoogleUser();
+    await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
+      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const res = await request(gApp).post('/auth/social/register')
+        .send(socialBody(first.body.signupTicket, { name: undefined, firstName: 'Kiran', lastName: 'Shah' }));
+      expect(res.status).toBe(200);
+      expect(await gPrisma.user.findFirst({ where: { email: google.email } })).toMatchObject({ name: 'Kiran Shah', firstName: 'Kiran', lastName: 'Shah' });
+    });
+  });
+
   it('refuses a Google sign-up with a mobile number that already has an account', async () => {
     const patient = await createPatient();
     await withFakeGoogle(newGoogleUser(), async ({ app: gApp }) => {
@@ -1391,5 +1412,78 @@ describe('changing the mobile keeps mobile, country_code and phone_country toget
     const res = await verify(patient, ticket, dest);
     expect(res.status).toBe(500);
     expect(await stored(patient)).toMatchObject({ mobile: before.mobile, countryCode: before.countryCode, phoneCountry: before.phoneCountry });
+  });
+});
+
+describe('POST /auth/register: first name and last name', () => {
+  const signUp = (overrides) => request(app).post('/auth/register').send(registerBody({ name: undefined, firstName: 'Asha', lastName: 'Rao', ...overrides }));
+
+  it('stores first and last name, and builds the full name from them', async () => {
+    const email = uniqueEmail();
+    const mobile = uniqueMobile();
+    const reg = await signUp({ email, mobile });
+    expect(reg.status).toBe(200);
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ name: 'Asha Rao', firstName: 'Asha', lastName: 'Rao' });
+
+    const done = await request(app).post('/auth/register/verify-otp').send({ ticket: reg.body.ticket, code: codeSentTo(`+91${mobile}`) });
+    expect(done.body.user).toMatchObject({ name: 'Asha Rao', firstName: 'Asha', lastName: 'Rao' });
+    const me = await request(app).get('/auth/me').set('Authorization', `Bearer ${done.body.token}`);
+    expect(me.body.user).toMatchObject({ name: 'Asha Rao', firstName: 'Asha', lastName: 'Rao' });
+  });
+
+  it('trims the names and squeezes spaces inside them', async () => {
+    const email = uniqueEmail();
+    await signUp({ email, firstName: '  Mary   Ann ', lastName: ' van  der Berg ' });
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ name: 'Mary Ann van der Berg', firstName: 'Mary Ann', lastName: 'van der Berg' });
+  });
+
+  it('uses first and last name over a single name when both are sent', async () => {
+    const email = uniqueEmail();
+    await signUp({ email, name: 'Someone Else' });
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ name: 'Asha Rao', firstName: 'Asha' });
+  });
+
+  it('still takes a single name (older app versions) and leaves first and last name empty', async () => {
+    const email = uniqueEmail();
+    const res = await request(app).post('/auth/register').send(registerBody({ email, name: 'Old Version' }));
+    expect(res.status).toBe(200);
+    expect(await prisma.user.findUnique({ where: { email } })).toMatchObject({ name: 'Old Version', firstName: null, lastName: null });
+  });
+
+  it.each([
+    ['a missing last name', { lastName: '' }],
+    ['a missing first name', { firstName: '' }],
+    ['a first name with no letters', { firstName: '1234' }],
+    ['a last name that is too long', { lastName: 'x'.repeat(51) }],
+  ])('refuses %s, and creates nothing', async (_label, overrides) => {
+    const email = uniqueEmail();
+    const res = await signUp({ email, ...overrides });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/first name|last name|valid name/i);
+    expect(await prisma.user.findUnique({ where: { email } })).toBeNull();
+  });
+
+  it('refuses a sign-up with no name at all', async () => {
+    const res = await request(app).post('/auth/register').send(registerBody({ name: undefined }));
+    expect(res.status).toBe(400);
+  });
+
+  it('leaves existing accounts with first and last name empty', async () => {
+    const patient = await createPatient();
+    const me = await request(app).get('/auth/me').set('Authorization', `Bearer ${patient.token}`);
+    expect(me.body.user).toMatchObject({ firstName: null, lastName: null });
+  });
+
+  it('clears first and last name when the full name is edited, and keeps them when it is not', async () => {
+    const mobile = uniqueMobile();
+    const reg = await signUp({ mobile });
+    const done = await request(app).post('/auth/register/verify-otp').send({ ticket: reg.body.ticket, code: codeSentTo(`+91${mobile}`) });
+    const auth = { Authorization: `Bearer ${done.body.token}` };
+
+    const same = await request(app).patch('/auth/me').set(auth).send({ name: 'Asha Rao' });
+    expect(same.body.user).toMatchObject({ name: 'Asha Rao', firstName: 'Asha', lastName: 'Rao' });
+
+    const changed = await request(app).patch('/auth/me').set(auth).send({ name: 'Asha Kulkarni' });
+    expect(changed.body.user).toMatchObject({ name: 'Asha Kulkarni', firstName: null, lastName: null });
   });
 });

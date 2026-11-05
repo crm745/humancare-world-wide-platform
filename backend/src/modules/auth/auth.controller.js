@@ -23,6 +23,7 @@ const {
 const { EVENTS, recordSecurityEvent } = require("./security-events");
 const { PASSWORD_CHANGE_REQUIRED } = require("../../common/constants/auth.constants");
 const { isFirebasePhoneEnabled, verifyPhoneProof } = require("../../integrations/firebase/firebase");
+const { readNameFields } = require("../../common/utils/person-name");
 const { readProfileFields, callingCodeFor, resolvePhoneCountry } = require("../../common/utils/signup-profile");
 
 const disposableDomainSet = new Set(disposableDomains);
@@ -170,12 +171,12 @@ function consentRows(req, consents) {
 // checks it and only then flips isVerified, so nothing can log in to it before the
 // mobile is proven. The email is verified later, on first use (markEmailVerified).
 async function register(req, res) {
-  const { name, email, mobile, password } = req.body;
-  if (!name || !email || !mobile || !password) {
+  const { email, mobile, password } = req.body;
+  const names = readNameFields(req.body);
+  if (names.missing || !email || !mobile || !password) {
     return res.status(400).json({ error: "name, email, mobile and password are required" });
   }
-  const cleanName = String(name).trim();
-  if (cleanName.length < 2) return res.status(400).json({ error: "Enter a valid name." });
+  if (names.error) return res.status(400).json({ error: names.error });
   const cleanEmail = normalizeEmail(email);
   if (!EMAIL_RE.test(cleanEmail)) return res.status(400).json({ error: "Enter a valid email address." });
   if (isDisposableEmail(cleanEmail)) {
@@ -208,7 +209,9 @@ async function register(req, res) {
   try {
     user = await prisma.user.create({
       data: {
-        name: cleanName,
+        name: names.name,
+        firstName: names.firstName,
+        lastName: names.lastName,
         email: cleanEmail,
         mobile: phone.e164,
         countryCode: phone.countryCode,
@@ -571,14 +574,14 @@ async function appleLogin(req, res) {
 // mobile gets a code; registerVerifyOtp finishes it. No password: they sign in with
 // Google/Apple, and are asked to set one if they ever log in with mobile/email instead.
 async function socialRegister(req, res) {
-  const { signupTicket, name, mobile } = req.body;
-  if (!signupTicket || !name || !mobile) {
+  const { signupTicket, mobile } = req.body;
+  const names = readNameFields(req.body);
+  if (!signupTicket || names.missing || !mobile) {
     return res.status(400).json({ error: "signupTicket, name and mobile are required" });
   }
   const step = readTicket(signupTicket, "social_signup");
   if (!step) return ticketFailure(res);
-  const cleanName = String(name).trim();
-  if (cleanName.length < 2) return res.status(400).json({ error: "Enter a valid name." });
+  if (names.error) return res.status(400).json({ error: names.error });
   const profile = readProfileFields(req.body);
   if (profile.error) return res.status(400).json({ error: profile.error, code: "invalid_profile" });
   const phone = normalizeMobile(mobile, callingCodeFor(req.body, profile));
@@ -609,7 +612,9 @@ async function socialRegister(req, res) {
   try {
     user = await prisma.user.create({
       data: {
-        name: cleanName,
+        name: names.name,
+        firstName: names.firstName,
+        lastName: names.lastName,
         email: step.email,
         mobile: phone.e164,
         countryCode: phone.countryCode,
@@ -775,9 +780,11 @@ async function updateMe(req, res) {
   const name = req.body.name === undefined ? undefined : String(req.body.name).trim();
   if (name !== undefined && name.length < 2) return res.status(400).json({ error: "Enter a valid name." });
 
+  const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { name: true } });
+  const renamed = !!name && name !== current?.name;
   const user = await prisma.user.update({
     where: { id: req.user.id },
-    data: { ...(name && { name }) },
+    data: renamed ? { name, firstName: null, lastName: null } : {},
     omit: { passwordHash: false },
   });
   res.json({ user: publicUser(user) });

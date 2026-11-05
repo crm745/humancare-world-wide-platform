@@ -13,6 +13,12 @@ datasource db {
 model User {
   id           Int      @id @default(autoincrement())
   name         String
+  // The Create Account form asks for these two. `name` stays the full name ("first last") that
+  // the rest of the app shows and sends; these are null for accounts made before the split and
+  // for Google/Apple sign-ups, whose provider only gives one name. Nothing splits `name` to fill
+  // them in, because that would be a guess.
+  firstName    String?  @db.VarChar(50) @map("first_name")
+  lastName     String?  @db.VarChar(50) @map("last_name")
   email        String   @unique
   // E.164 (e.g. "+919876543210") so the same number can't be stored two ways.
   mobile       String?  @unique
