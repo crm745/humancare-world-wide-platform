@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Animated, Easing, Image, Pressable, View } from 'react-native';
+import { Animated, Easing, Image, Platform, Pressable, View } from 'react-native';
 import { LOGO } from '../data/images';
 import { navReplace } from '../lib/nav';
 import { getAccessToken } from '../lib/session';
 
 const MIN_SPLASH_MS = 5000; // kept at 5 s for now
+// The native animation driver exists on phones only; the browser preview animates in JS.
+const NATIVE = Platform.OS !== 'web';
 // If reading the saved session ever hangs, give up and land on Welcome rather than
 // leaving the splash up forever.
 const SESSION_TIMEOUT_MS = 4000;
@@ -38,18 +40,26 @@ export default function Splash() {
       navReplace(token ? '/home' : '/welcome');
     });
 
-    const fadeIn = Animated.timing(intro, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true });
-    const loop = Animated.loop(
-      Animated.timing(sweep, { toValue: 1, duration: 1300, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }),
-    );
+    const fadeIn = Animated.timing(intro, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: NATIVE });
     fadeIn.start();
-    loop.start();
+
+    // The line sweeps again and again until the splash ends: each sweep starts the next one
+    // when it finishes. (Animated.loop is not used: with the native driver it is not
+    // available in the browser preview, and the line moved only once there.)
+    let sweeping = null;
+    const sweepOnce = () => {
+      if (cancelled) return;
+      sweep.setValue(0);
+      sweeping = Animated.timing(sweep, { toValue: 1, duration: 1300, easing: Easing.inOut(Easing.cubic), useNativeDriver: NATIVE });
+      sweeping.start(({ finished }) => { if (finished) sweepOnce(); });
+    };
+    sweepOnce();
 
     return () => {
       cancelled = true;
       timers.forEach(clearTimeout);
       fadeIn.stop();
-      loop.stop();
+      sweeping?.stop();
     };
   }, [intro, sweep]);
 
