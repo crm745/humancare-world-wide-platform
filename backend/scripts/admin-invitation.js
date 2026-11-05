@@ -2,23 +2,25 @@
 //   node scripts/admin-invitation.js resend --email "admin@example.com"              new activation link (Admin still "invited")
 //   node scripts/admin-invitation.js revoke --email "admin@example.com"              cancel outstanding activation links
 //   node scripts/admin-invitation.js resend-enrollment --email "admin@example.com"   new passkey-setup link (Admin accepted but has no passkey)
+//   node scripts/admin-invitation.js begin-enrollment --email "admin@example.com"    existing ACTIVE Admin with a password and no passkey -> "pending_passkey" + passkey-setup link
 // Links are only ever emailed, never printed, and no password is ever given on the command line.
 // Account creation is scripts/admin-create.js.
 const { prisma } = require('../src/db/prisma');
 const { ProvisioningError, normalizeAdminEmail } = require('../src/modules/admin/auth/admin-provisioning.service');
 const {
+  beginPasskeyEnrollment,
   resendActivationInvitation,
   resendPasskeyEnrollmentInvitation,
   revokeActivationInvitation,
   InvitationOperatorError,
 } = require('../src/modules/admin/auth/admin-invitation-operator.service');
 
-const USAGE = 'Usage: node scripts/admin-invitation.js <resend|revoke|resend-enrollment> --email "admin@example.com"';
-const COMMANDS = ['resend', 'revoke', 'resend-enrollment'];
+const USAGE = 'Usage: node scripts/admin-invitation.js <resend|revoke|resend-enrollment|begin-enrollment> --email "admin@example.com"';
+const COMMANDS = ['resend', 'revoke', 'resend-enrollment', 'begin-enrollment'];
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  if (!COMMANDS.includes(command)) throw new ProvisioningError('bad_arguments', 'The first argument must be "resend", "revoke" or "resend-enrollment".');
+  if (!COMMANDS.includes(command)) throw new ProvisioningError('bad_arguments', 'The first argument must be "resend", "revoke", "resend-enrollment" or "begin-enrollment".');
   let email;
   for (let i = 0; i < rest.length; i += 1) {
     const match = /^--email(?:=(.*))?$/.exec(rest[i]);
@@ -42,6 +44,22 @@ async function main() {
     const { admin, revokedCount } = await revokeActivationInvitation({ email });
     console.log(`Revoked ${revokedCount} outstanding activation invitation(s) for`, { id: admin.id, email: admin.email });
     console.log('The account was kept. Run "resend" to send a new invitation.');
+    return;
+  }
+
+  if (command === 'begin-enrollment') {
+    const outcome = await beginPasskeyEnrollment({ email });
+    console.log('Passkey enrollment started:', { id: outcome.admin.id, email: outcome.admin.email, role: outcome.admin.role, status: outcome.admin.status });
+    console.log(`Sessions ended: ${outcome.revokedSessions}; refresh tokens revoked: ${outcome.revokedRefreshTokens}. Password unchanged; password timestamp initialised: ${outcome.passwordChangedAtInitialized ? 'yes' : 'no (already set)'}.`);
+    console.log(`Passkey-setup invitation created; expires ${outcome.invitation.expiresAt.toISOString()}`);
+    if (outcome.emailDelivered) {
+      console.log('Invitation email sent. The admin will also need their current password to use it.');
+    } else {
+      console.error('The account is now waiting for a passkey and the invitation was created, but the email could not be sent.');
+      console.error(`Reason: ${outcome.emailError}`);
+      console.error('Nothing was rolled back. Fix email delivery, then run "resend-enrollment" to send a new link.');
+      process.exitCode = 3;
+    }
     return;
   }
 
