@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Animated, Easing, Image, Pressable, View } from 'react-native';
-import { LOGO } from '../data/images';
+import { Animated, Easing, Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useApp } from '../state/AppContext';
+import { LOGO, SPLASH_BG } from '../data/images';
 import { navReplace } from '../lib/nav';
 import { getAccessToken } from '../lib/session';
 
@@ -15,6 +17,11 @@ const LOGO_BLUE = '#2F3A8D';
 const LOGO_STYLE = { width: '62%', maxWidth: 320, aspectRatio: 2440 / 1405 };
 // The moving part of the line, as a share of the track.
 const SEGMENT = 0.38;
+// Shown behind the globe picture until it has loaded, so nothing flashes white or dark.
+const BG_COLOR = '#EEF6FD';
+// The tagline uses the phone's own serif font: no font file to add or load before the splash.
+const SERIF = Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia, "Times New Roman", serif' });
+const TAGLINE_STYLE = { marginTop: 14, paddingHorizontal: 28, textAlign: 'center', color: '#0D2340', fontSize: 21, fontFamily: SERIF };
 
 // Splash: the logo centred on white with a thin line sweeping left to right under it,
 // shown for at least 2s (tap to skip) while we check for a saved session. A saved token
@@ -23,6 +30,8 @@ const SEGMENT = 0.38;
 // just need to decide where to land: Home if there's a token to try, Welcome if there's
 // none.
 export default function Splash() {
+  const { t } = useApp();
+  const insets = useSafeAreaInsets();
   const [intro] = useState(() => new Animated.Value(0));
   const [sweep] = useState(() => new Animated.Value(0));
   const [trackWidth, setTrackWidth] = useState(0);
@@ -57,8 +66,9 @@ export default function Splash() {
   const translateX = sweep.interpolate({ inputRange: [0, 1], outputRange: [-segmentWidth, trackWidth] });
 
   return (
-    <Pressable className="flex-1 bg-white" onPress={() => navReplace('/welcome')}>
-      <View className="flex-1 items-center justify-center">
+    <Pressable className="flex-1" style={{ backgroundColor: BG_COLOR }} onPress={() => navReplace('/welcome')}>
+      <Image source={SPLASH_BG} accessible={false} resizeMode="cover" style={StyleSheet.absoluteFill} />
+      <View className="flex-1 items-center justify-center" style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
         <Animated.View
           style={{
             width: '100%',
@@ -68,7 +78,8 @@ export default function Splash() {
           }}
         >
           <Image source={LOGO} style={LOGO_STYLE} resizeMode="contain" />
-          <View style={{ width: '50%', maxWidth: 200, marginTop: 20 }}>
+          <Text style={TAGLINE_STYLE} maxFontSizeMultiplier={1.3}>{t('splash_tagline')}</Text>
+          <View style={{ width: '50%', maxWidth: 200, marginTop: 28 }}>
             <View
               className="h-[3px] overflow-hidden rounded-full bg-line"
               onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
