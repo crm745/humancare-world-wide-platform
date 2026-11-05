@@ -21,7 +21,6 @@ async function createRequest(userId, data) {
     preferredDate,
     careLevel,
     description,
-    medicalSummary,
     additionalInfo,
     specialRequirements,
     deceasedRelation,
@@ -33,7 +32,6 @@ async function createRequest(userId, data) {
     equipCardiacMonitor,
     equipVentilator,
     urgency,
-    documentUrl,
   } = data;
 
   // Create first so we have an id, then stamp a human-friendly reference number onto it.
@@ -53,7 +51,6 @@ async function createRequest(userId, data) {
       preferredDate: preferredDate ? new Date(preferredDate) : null,
       careLevel: careLevel || null,
       description: description || null,
-      medicalSummary: medicalSummary || null,
       additionalInfo: additionalInfo || null,
       specialRequirements: specialRequirements || null,
       deceasedRelation: deceasedRelation || null,
@@ -65,7 +62,6 @@ async function createRequest(userId, data) {
       equipCardiacMonitor: equipCardiacMonitor ?? null,
       equipVentilator: equipVentilator ?? null,
       urgency: urgency || null,
-      documentUrl: documentUrl || null,
       referenceNumber: `TEMP-${Date.now()}`,
       status: 'submitted',
     },

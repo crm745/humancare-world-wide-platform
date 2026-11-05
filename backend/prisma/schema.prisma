@@ -299,7 +299,6 @@ model ServiceRequest {
   preferredDate     DateTime? @map("preferred_date")
   careLevel         String?   @map("care_level")
   description       String?   @db.Text
-  medicalSummary    String?   @db.Text @map("medical_summary")
   additionalInfo    String?   @map("additional_info")
   specialRequirements String? @db.Text @map("special_requirements")
   // Mortal Remains only (patientName then holds the deceased's name): who is asking,
@@ -316,7 +315,6 @@ model ServiceRequest {
   equipCardiacMonitor Boolean? @map("equip_cardiac_monitor")
   equipVentilator   Boolean?  @map("equip_ventilator")
   urgency           String?   @db.VarChar(16) // "critical_6h" | "urgent_24h" | "planned"
-  documentUrl       String?   @map("document_url")
   referenceNumber   String    @unique @map("reference_number")
   status            String    @default("submitted")
   bitrixLeadId      Int?      @map("bitrix_lead_id")
