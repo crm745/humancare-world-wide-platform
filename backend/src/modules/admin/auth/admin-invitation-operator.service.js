@@ -227,32 +227,177 @@ async function resendPasskeyEnrollmentInvitation({ email, now = new Date() } = {
   };
 
   // Committed: a failed email keeps the new invitation (the earlier ones are already revoked).
+  Object.assign(result, await deliverEnrollmentInvitation({ admin: done.admin, invitation: done.invitation, token, expiresAt, config, operator }));
+  return result;
+}
+
+// Emails a passkey-enrollment link AFTER the transaction that created it has committed, so a mail
+// failure can never undo or corrupt the stored state. Returns { emailDelivered, emailError }. The
+// link and token exist only in memory here; on failure only ids are audited, never the error
+// text, the link or the token.
+async function deliverEnrollmentInvitation({ admin, invitation, token, expiresAt, config, operator }) {
   try {
     await sendMail(enrollmentInvitationMessage({
-      to: done.admin.email,
-      name: done.admin.name,
+      to: admin.email,
+      name: admin.name,
       url: buildInvitationUrl(config.portalUrl, token, ENROLLMENT_PATH),
       expiresAt,
     }));
-    result.emailDelivered = true;
+    return { emailDelivered: true, emailError: null };
   } catch (err) {
-    result.emailError = String(err?.message || 'unknown error').slice(0, 200);
-    // Best-effort trail of the failure: ids only, never the error text, the link or the token.
+    const emailError = String(err?.message || 'unknown error').slice(0, 200);
     try {
       await recordAdminAuditEvent({
         actorType: 'operator',
         event: 'admin_passkey_enrollment_invitation_delivery_failed',
-        identifier: done.admin.email,
-        detail: { adminId: done.admin.id, invitationId: done.invitation.id, operator },
+        identifier: admin.email,
+        detail: { adminId: admin.id, invitationId: invitation.id, operator },
       });
     } catch (auditErr) {
       console.error(`Could not record the delivery failure (${auditErr.code || auditErr.name}).`);
     }
+    return { emailDelivered: false, emailError };
   }
+}
+
+const BEGIN_ENROLLMENT_SESSION_REVOKE_REASON = 'passkey_enrollment_required';
+const OPEN_RECOVERY_STATUSES = ['pending', 'approved'];
+
+// For an EXISTING Admin or Superadmin who is "active" with a password but no passkey (for example an
+// account created before passkeys existed): moves them to "pending_passkey" and issues a
+// passkey-enrollment invitation, in one transaction with its audit event; then emails the link.
+// Operator-only (scripts/admin-invitation.js begin-enrollment) - there is no HTTP route, and no
+// authenticated Admin is needed or possible: this Admin cannot hold a dashboard session.
+//
+//   - Requires status "active", a non-empty password hash and ZERO live passkeys; anything else is
+//     refused (an Admin who already has a passkey must use passkey sign-in or recovery; an Admin
+//     already "pending_passkey" uses "resend-enrollment").
+//   - Changes only status, and passwordChangedAt when it is NULL (the enrollment and sign-in steps
+//     need it; it is set to now and never overwritten). The password hash, id, name, email and
+//     role are untouched.
+//   - Ends every live session and refresh token of the Admin, so no earlier credential outlives the
+//     status change.
+//   - Refuses while a passkey-recovery request is open (it needs an active Admin and would be
+//     orphaned): cancel it first with scripts/admin-recovery.js.
+//   - Concurrency: the Admin row is locked FIRST, by a conditional UPDATE on "active" that is the
+//     transaction's first statement; the preconditions (password, passkeys, recovery requests) are
+//     read only afterwards, and the status change is conditional on "active" and the same password
+//     hash. Two simultaneous runs cannot both succeed - the loser finds a "pending_passkey" Admin
+//     and is refused - and only one invitation exists.
+//   - The redemption still requires the link PLUS the current password, and the Admin is "active"
+//     again only when a passkey is registered.
+// Returns { admin, invitation, revokedSessions, revokedRefreshTokens, passwordChangedAtInitialized,
+// emailDelivered, emailError }.
+async function beginPasskeyEnrollment({ email, now = new Date() } = {}) {
+  const cleanEmail = normalizeAdminEmail(email);
+  const config = loadAdminLockConfig();
+  assertPortalUrlConfig(config); // fail before changing anything
+
+  const token = crypto.randomBytes(32).toString('base64url');
+  const tokenHash = hashToken(token);
+  const expiresAt = new Date(now.getTime() + config.recoveryInvitationTtlMs);
+  const operator = operatorIdentity();
+
+  // Resolving the id is a plain read OUTSIDE the transaction: it only chooses which row to lock (an
+  // Admin's id never changes). Nothing decided here is trusted - every fact is re-read under the lock.
+  const target = await prisma.adminUser.findUnique({ where: { email: cleanEmail }, select: { id: true } });
+  if (!target) throw new InvitationOperatorError('admin_not_found', 'No admin with that email.');
+
+  const done = await prisma.$transaction(async (tx) => {
+    // LOCK FIRST. The very first statement is the conditional UPDATE: a current read that takes the
+    // Admin row lock only while the Admin is still "active" (the same order recovery request
+    // creation and recovery registration use: Admin row first, no plain read before it). InnoDB
+    // starts this transaction's read snapshot at its first plain read, so every read below happens
+    // AFTER the lock and sees everything any other transaction committed before it. Anything that
+    // could change what is read - a recovery request being created, a recovery passkey being
+    // registered, a disable, a password change - needs this same Admin lock, so none can interleave.
+    const held = await tx.adminUser.updateMany({ where: { id: target.id, status: 'active' }, data: { updatedAt: now } });
+    if (held.count !== 1) {
+      const current = await tx.adminUser.findUnique({ where: { id: target.id } });
+      if (!current) throw new InvitationOperatorError('admin_not_found', 'No admin with that email.');
+      throw new InvitationOperatorError(
+        'not_active',
+        current.status === PASSKEY_ENROLLMENT_STATUS
+          ? 'That admin is already waiting to register a passkey; use "resend-enrollment" to send a new link.'
+          : 'Only an active admin can begin passkey enrollment.',
+      );
+    }
+    const notActive = () => new InvitationOperatorError('not_active', 'Only an active admin can begin passkey enrollment.');
+    const admin = await tx.adminUser.findUnique({ where: { id: target.id } });
+    if (!admin || admin.status !== 'active') throw notActive();
+    if (typeof admin.passwordHash !== 'string' || !admin.passwordHash) {
+      throw new InvitationOperatorError('no_password', 'That admin has no password; it cannot begin passkey enrollment.');
+    }
+
+    if ((await tx.adminPasskey.count({ where: { adminId: admin.id, revokedAt: null } })) > 0) {
+      throw new InvitationOperatorError('has_passkey', 'That admin already has a passkey; they sign in with it, and lost-passkey recovery is a separate process.');
+    }
+    if ((await tx.adminRecoveryRequest.count({ where: { adminId: admin.id, status: { in: OPEN_RECOVERY_STATUSES } } })) > 0) {
+      throw new InvitationOperatorError('recovery_open', 'That admin has an open passkey-recovery request; cancel it first.');
+    }
+
+    const initializePasswordChangedAt = !(admin.passwordChangedAt instanceof Date);
+    const changed = await tx.adminUser.updateMany({
+      where: { id: admin.id, status: 'active', passwordHash: admin.passwordHash },
+      data: { status: PASSKEY_ENROLLMENT_STATUS, ...(initializePasswordChangedAt ? { passwordChangedAt: now } : {}) },
+    });
+    if (changed.count !== 1) throw notActive();
+
+    // Updated first (a current read), then listed, so a sign-in that committed while this waited
+    // for the Admin lock is not missed.
+    const revokedSessions = await tx.adminSession.updateMany({
+      where: { adminId: admin.id, revokedAt: null },
+      data: { revokedAt: now, revokedReason: BEGIN_ENROLLMENT_SESSION_REVOKE_REASON, revokedBy: null },
+    });
+    const sessionIds = (await tx.adminSession.findMany({ where: { adminId: admin.id } })).map((s) => s.id);
+    let revokedRefreshTokens = 0;
+    if (sessionIds.length > 0) {
+      revokedRefreshTokens = (await tx.adminRefreshToken.updateMany({ where: { sessionId: { in: sessionIds }, revokedAt: null }, data: { revokedAt: now } })).count;
+    }
+
+    const revokedInvitations = await tx.adminInvitation.updateMany({ where: { adminId: admin.id, ...OPEN_ENROLLMENT }, data: { revokedAt: now } });
+    const invitation = await tx.adminInvitation.create({
+      data: { adminId: admin.id, purpose: PASSKEY_ENROLLMENT, tokenHash, sentToEmail: admin.email, expiresAt },
+    });
+    await recordAdminAuditEvent({
+      actorType: 'operator',
+      event: 'admin_passkey_enrollment_begun',
+      identifier: admin.email,
+      detail: {
+        adminId: admin.id,
+        invitationId: invitation.id,
+        previousStatus: 'active',
+        newStatus: PASSKEY_ENROLLMENT_STATUS,
+        timestampInitialized: initializePasswordChangedAt,
+        revokedSessionCount: revokedSessions.count,
+        revokedRefreshCount: revokedRefreshTokens,
+        revokedInvitationCount: revokedInvitations.count,
+        invitationExpiresAt: expiresAt.toISOString(),
+        operator,
+      },
+      db: tx,
+    });
+    return {
+      admin, invitation, initializePasswordChangedAt, revokedSessions: revokedSessions.count, revokedRefreshTokens,
+    };
+  });
+
+  const result = {
+    admin: { id: done.admin.id, name: done.admin.name, email: done.admin.email, role: done.admin.role, status: PASSKEY_ENROLLMENT_STATUS },
+    invitation: { id: done.invitation.id, expiresAt },
+    revokedSessions: done.revokedSessions,
+    revokedRefreshTokens: done.revokedRefreshTokens,
+    passwordChangedAtInitialized: done.initializePasswordChangedAt,
+    emailDelivered: false,
+    emailError: null,
+  };
+  // Committed: a failed email keeps the new state and invitation; "resend-enrollment" can resend.
+  Object.assign(result, await deliverEnrollmentInvitation({ admin: done.admin, invitation: done.invitation, token, expiresAt, config, operator }));
   return result;
 }
 
 module.exports = {
+  beginPasskeyEnrollment,
   resendActivationInvitation,
   resendPasskeyEnrollmentInvitation,
   revokeActivationInvitation,
