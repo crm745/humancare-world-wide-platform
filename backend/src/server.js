@@ -9,6 +9,10 @@ const server = app.listen(port, () => {
   console.log(`HumanCare backend listening on http://localhost:${port}`);
 });
 
+// The city data for Private Charter must be refreshed every 90 days (refused after 180): this logs a
+// reminder at start-up when it is due. It never blocks or stops the server.
+require('./modules/geo/geo.service').checkDatasetAge({ force: true }).catch(() => {});
+
 server.on('error', (err) => {
   console.error(`HumanCare backend could not listen on port ${port}:`, err.message);
   process.exit(1);

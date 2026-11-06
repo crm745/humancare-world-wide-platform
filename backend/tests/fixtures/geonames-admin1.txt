@@ -1,0 +1,7 @@
+AE.03	Dubai	Dubai	292224
+CH.ZH	Zurich	Zurich	2657895
+IN.16	Maharashtra	Maharashtra	1264418
+NZ.G2	Wellington Region	Wellington Region	2179538
+US.NY	New York	New York	5128638
+US.CA	California	California	5332921
+DE.02	Bavaria	Bavaria	2951839

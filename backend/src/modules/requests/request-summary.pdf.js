@@ -1,6 +1,18 @@
 const PDFDocument = require('pdfkit');
 const { MOBILITY_LABEL, URGENCY_LABEL, EQUIPMENT } = require('../../common/constants/request.constants');
 
+// A date-only value (a preferred date, a date of death) is stored as that calendar day at 00:00 UTC.
+// Read it in UTC: toDateString() uses the server's own timezone, so on a server west of UTC it
+// printed the day before. Same layout as before ("Tue Nov 10 2026").
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function formatDateOnly(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${WEEKDAYS[date.getUTCDay()]} ${MONTHS[date.getUTCMonth()]} ${day} ${date.getUTCFullYear()}`;
+}
+
 function row(doc, label, value) {
   if (value === null || value === undefined || value === '') return;
   doc.fontSize(11).fillColor('#5B6B84').text(label, { continued: true });
@@ -23,7 +35,7 @@ function streamRequestSummaryPdf(res, request) {
 
   // Mortal Remains: the name on the request is the deceased's.
   const mortal = /^mortal(_|$)/.test(request.serviceKey || '');
-  const day = (value) => (value ? new Date(value).toDateString() : null);
+  const day = (value) => (value ? formatDateOnly(value) : null);
   row(doc, mortal ? 'Deceased Name:' : 'Patient Name:', request.patientName);
   row(doc, 'Age / Gender:', [request.patientAge, request.patientGender].filter(Boolean).join(' / '));
   row(doc, 'Relation to the deceased:', request.deceasedRelation);
@@ -58,4 +70,4 @@ function streamRequestSummaryPdf(res, request) {
   doc.end();
 }
 
-module.exports = { streamRequestSummaryPdf };
+module.exports = { streamRequestSummaryPdf, formatDateOnly };

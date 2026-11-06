@@ -66,4 +66,16 @@ const otpVerifyLimiter = rateLimit({
   message: { error: 'Too many attempts. Please try again in a few minutes.' },
 });
 
-module.exports = { loginLimiter, otpRequestLimiter, otpSendIpLimiter, patientLoginLimiter, otpVerifyLimiter };
+// City type-ahead (GET /geo/cities): per signed-in account, since a person typing sends a request
+// every few letters. The lookup is a local database query, so this only stops scraping.
+const geoSearchLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user ? `user:${req.user.id}` : ipKeyGenerator(req.ip)),
+  skip: skipInTest,
+  message: { error: 'Too many searches. Please wait a moment and try again.' },
+});
+
+module.exports = { loginLimiter, otpRequestLimiter, otpSendIpLimiter, patientLoginLimiter, otpVerifyLimiter, geoSearchLimiter };

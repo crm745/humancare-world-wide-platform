@@ -251,7 +251,9 @@ describe('request lifecycle for the patient who submitted it', () => {
 });
 
 describe('POST /requests: medical page fields', () => {
-  const airBody = { ...baseRequestBody, serviceType: 'Private Charter Air Ambulance', serviceKey: 'privatecharter' };
+  // A patient-transport service on the shared (legacy) rules. Private Charter has its own strict
+  // validation, tested in private-charter-validation.test.js and in the persistence test below.
+  const airBody = { ...baseRequestBody, serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground' };
   const post = (token, body) => request(app).post('/requests').set('Authorization', `Bearer ${token}`).send(body);
 
   it('saves mobility, equipment and urgency for an air ambulance request', async () => {
@@ -343,5 +345,71 @@ describe('POST /requests: medical page fields', () => {
     expect(one.body.request).toMatchObject({ mobility: 'walking', urgency: 'planned', equipOxygen: false });
     const list = await request(app).get('/requests/me').set('Authorization', `Bearer ${token}`);
     expect(list.body.requests[0]).toMatchObject({ mobility: 'walking', urgency: 'planned' });
+  });
+});
+
+// Needs the test database (like the rest of this file). The validation rules themselves are
+// tested without a database in private-charter-validation.test.js.
+describe('POST /requests: Private Charter persistence', () => {
+  // The cities are looked up in the local GeoNames table: put the fixtures in it (and take them out).
+  const { IDS, ROWS } = require('./fixtures/geo-cities');
+  beforeAll(async () => {
+    await prisma.geonamesCity.deleteMany();
+    await prisma.geonamesCity.createMany({ data: ROWS.map((row) => ({ ...row, verifiedAt: new Date() })) });
+  });
+  afterAll(() => prisma.geonamesCity.deleteMany());
+
+  it('saves the validated, normalised values and copies the urgency to the Case', async () => {
+    const { token } = await createPatient();
+    const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`).send({
+      serviceKey: 'privatecharter',
+      patientName: '  Maria Fernandez ',
+      patientAge: '47',
+      patientGender: 'Female', // legacy capitalised value, stored lowercase
+      country: 'AE',
+      origin: { geonameId: IDS.DUBAI },
+      destination: { geonameId: IDS.MUMBAI },
+      patientContact: '+971 50 123 4567', // legacy spaced format, stored as E.164
+      preferredDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      careLevel: 'ICU / Critical', // legacy label, stored as the key
+      description: ' BP <90/60 ',
+      mobility: 'bedridden',
+      urgency: 'urgent_24h',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.request).toMatchObject({
+      serviceType: 'Private Charter Air Ambulance Service',
+      serviceKey: 'privatecharter',
+      patientName: 'Maria Fernandez',
+      patientAge: 47,
+      patientGender: 'female',
+      country: 'AE',
+      patientContact: '+971501234567',
+      careLevel: 'care_icu',
+      description: 'BP <90/60',
+      urgency: 'urgent_24h',
+      // the cities as the server verified them, and the readable labels everything else shows
+      origin: 'Dubai, United Arab Emirates',
+      originGeonameId: IDS.DUBAI,
+      originCityName: 'Dubai',
+      originCountryCode: 'AE',
+      originTimezone: 'Asia/Dubai',
+      destination: 'Mumbai, Maharashtra, India',
+      destinationGeonameId: IDS.MUMBAI,
+      destinationCountryCode: 'IN',
+    });
+    const saved = await prisma.case.findUnique({ where: { serviceRequestId: res.body.request.id } });
+    expect(saved.urgency).toBe('urgent');
+    expect(saved).toMatchObject({ origin: 'Dubai, United Arab Emirates', destination: 'Mumbai, Maharashtra, India' });
+  });
+
+  it('writes nothing when a Private Charter request is refused', async () => {
+    const { token } = await createPatient();
+    const before = await prisma.serviceRequest.count();
+    const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`)
+      .send({ serviceKey: 'privatecharter', patientName: 'Maria Fernandez' });
+    expect(res.status).toBe(400);
+    expect(res.body.fields).toBeDefined();
+    expect(await prisma.serviceRequest.count()).toBe(before);
   });
 });

@@ -302,7 +302,9 @@ model ServiceRequest {
   origin            String
   destination       String
   country           String?
-  preferredDate     DateTime? @map("preferred_date")
+  // A calendar day, no time of day (SQL DATE). Written as a "YYYY-MM-DD" date at 00:00 UTC, which
+  // Prisma stores as exactly that day and reads back as 00:00 UTC of it: never shifted by a timezone.
+  preferredDate     DateTime? @map("preferred_date") @db.Date
   careLevel         String?   @map("care_level")
   description       String?   @db.Text
   // Mortal Remains only (patientName then holds the deceased's name): who is asking,
@@ -318,6 +320,18 @@ model ServiceRequest {
   equipCardiacMonitor Boolean? @map("equip_cardiac_monitor")
   equipVentilator   Boolean?  @map("equip_ventilator")
   urgency           String?   @db.VarChar(16) // "critical_6h" | "urgent_24h" | "planned"
+  // Private Charter only (null for every other service and for older requests): the cities the
+  // patient picked, as the server verified them against the GeoNames table (geonames_cities).
+  // `origin` / `destination` above keep the readable label ("Mumbai, Maharashtra, India") that
+  // every other part of the system shows. The timezone is the origin city's own, as used for the
+  // "no past date" check.
+  originGeonameId       Int?    @map("origin_geoname_id")
+  originCityName        String? @db.VarChar(200) @map("origin_city_name")
+  originCountryCode     String? @db.VarChar(2) @map("origin_country_code")
+  originTimezone        String? @db.VarChar(64) @map("origin_timezone")
+  destinationGeonameId  Int?    @map("destination_geoname_id")
+  destinationCityName   String? @db.VarChar(200) @map("destination_city_name")
+  destinationCountryCode String? @db.VarChar(2) @map("destination_country_code")
   referenceNumber   String    @unique @map("reference_number")
   status            String    @default("submitted")
   bitrixLeadId      Int?      @map("bitrix_lead_id")
@@ -466,4 +480,52 @@ model Notification {
 
   @@index([recipientType, recipientId, readAt])
   @@map("notifications")
+}
+
+// The local GeoNames populated-place table that Private Charter origin and destination cities are
+// searched and verified against (no GeoNames account or network call at runtime). Filled by
+// scripts/import-geonames.js from the free GeoNames dump; see backend/GEONAMES-DATASET.md.
+//
+// Data: GeoNames (https://www.geonames.org), licensed CC BY 4.0. Only populated places (feature
+// class P) are loaded, without the historical, abandoned and destroyed ones, and the columns are
+// reduced to the ones below.
+//
+// `verifiedAt` is when an import last saw the record. A record older than GEONAMES_MAX_AGE_DAYS
+// (180 by default) is not accepted any more, so a dataset that is not refreshed fails closed.
+model GeonamesCity {
+  geonameId   Int      @id @map("geoname_id")
+  name        String   @db.VarChar(200)
+  asciiName   String   @db.VarChar(200) @map("ascii_name")
+  admin1Name  String?  @db.VarChar(200) @map("admin1_name")
+  countryCode String   @db.VarChar(2) @map("country_code")
+  featureCode String   @db.VarChar(10) @map("feature_code")
+  population  Int      @default(0)
+  timezone    String   @db.VarChar(64)
+  verifiedAt  DateTime @map("verified_at")
+  names       GeonamesCityName[]
+
+  // Covering indexes for the city search: a prefix range on the name carries each place's
+  // population too, so the biggest matches are found without reading the table rows (the search
+  // would otherwise take seconds on a short prefix over 5 million places).
+  @@index([name, population])
+  @@index([asciiName, population])
+  @@index([verifiedAt])
+  @@map("geonames_cities")
+}
+
+// Other names of a city in geonames_cities (translations, local spellings in other scripts, old
+// names, ASCII spellings: "München" for Munich), so the picker finds a city by any of them. The
+// city's own name and its id stay the canonical ones in every result: this table is only used to
+// FIND the city. Comes from the same dump line as the city, so it is refreshed with it, and goes
+// when the city goes. `population` repeats the city's, so a short query can be limited to bigger
+// places inside the index.
+model GeonamesCityName {
+  geonameId  Int          @map("geoname_id")
+  name       String       @db.VarChar(200)
+  population Int          @default(0)
+  city       GeonamesCity @relation(fields: [geonameId], references: [geonameId], onDelete: Cascade)
+
+  @@id([geonameId, name])
+  @@index([name, population])
+  @@map("geonames_city_names")
 }

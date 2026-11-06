@@ -9,7 +9,11 @@ const { sendMedicalReportToBitrix } = require('../bitrix/bitrix.service');
 const { leadInputFromRequest, commentWithReports } = require('../bitrix/bitrix-lead');
 const { prisma } = require('../../db/prisma');
 const { streamRequestSummaryPdf } = require('./request-summary.pdf');
-const { MOBILITY, URGENCY, EQUIPMENT, isTransportKey } = require('../../common/constants/request.constants');
+const {
+  MOBILITY, URGENCY, EQUIPMENT, isTransportKey, PRIVATE_CHARTER_KEY, PRIVATE_CHARTER_SERVICE_TYPE,
+} = require('../../common/constants/request.constants');
+const { validatePrivateCharterRequest, isObject } = require('./private-charter.validation');
+const { resolveCityRefs } = require('../geo/geo.service');
 
 const REQUIRED_FIELDS = ['serviceType', 'patientName', 'origin', 'destination'];
 const { REQUIRED_SERVICE_BY_KEY } = require('../bitrix/bitrix-lead');
@@ -31,6 +35,8 @@ function mortalFieldsError(body) {
   if (Number.isNaN(date.getTime()) || date.getTime() > Date.now() + 24 * 60 * 60 * 1000) return 'Invalid dateOfDeath';
   return null;
 }
+
+const FIELD_ERRORS_MESSAGE = 'Please correct the highlighted fields.';
 
 const present = (value) => value !== undefined && value !== null;
 
@@ -57,6 +63,31 @@ function medicalFieldsError(body) {
 //the function for submitting the request
 async function submitRequest(req, res, next) {
   try {
+    // Express 5 leaves req.body undefined for a missing or non-JSON body, and JSON can also be
+    // an array or a bare value: refuse all of those here instead of failing further down.
+    if (!isObject(req.body)) {
+      return res.status(400).json({ error: 'The request body must be a JSON object.', fields: {} });
+    }
+    // The Private Charter name belongs to that service key alone: a request that uses it with
+    // another (or no) key, such as the app's old "air" default, is refused, never relabelled.
+    if (req.body.serviceType === PRIVATE_CHARTER_SERVICE_TYPE && req.body.serviceKey !== PRIVATE_CHARTER_KEY) {
+      return res.status(400).json({
+        error: FIELD_ERRORS_MESSAGE,
+        fields: { serviceKey: 'serviceKey must be "privatecharter" for the Private Charter service.' },
+      });
+    }
+    // Private Charter has its own strict rules; every other service continues below unchanged.
+    if (req.body.serviceKey === PRIVATE_CHARTER_KEY) {
+      // The cities are looked up (verified) first: unavailable city data throws a 503 here, before
+      // anything about the request is judged or saved.
+      const cities = await resolveCityRefs(req.body);
+      const { fields, data, legacy } = validatePrivateCharterRequest(req.body, { cities });
+      if (Object.keys(fields).length) return res.status(400).json({ error: FIELD_ERRORS_MESSAGE, fields });
+      // Which legacy formats are still arriving, by field name only: never the values.
+      if (legacy.length) console.info('[legacy-format] privatecharter:', legacy.join(', '));
+      const request = await createRequest(req.user.id, data);
+      return res.status(201).json({ request });
+    }
     const missing = REQUIRED_FIELDS.filter((field) => !req.body[field]);
     if (missing.length) {
       return res.status(400).json({ error: `Missing required field(s): ${missing.join(', ')}` });
