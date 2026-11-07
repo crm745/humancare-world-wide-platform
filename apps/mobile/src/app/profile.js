@@ -84,7 +84,7 @@ export default function Profile() {
   const openStat = (status) => (isCorporate ? navReplace('/corporate-dashboard') : navReplace(`/my-requests?status=${status}`));
   const langLabel = LANGUAGES.find((l) => l.code === lang).label;
   // Signed-out people already have an account, so they land on their login screen.
-  const signOut = async () => { await clearTokens(); navReplace(isCorporate ? '/corporate-login' : '/login'); };
+  const signOut = async () => { await clearTokens(); navReplace(isCorporate ? '/corporate-login' : '/welcome'); };
 
   return (
     <Screen>
