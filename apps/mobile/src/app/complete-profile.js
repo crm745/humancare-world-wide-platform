@@ -26,18 +26,18 @@ export default function CompleteProfile() {
   const [gender, setGender] = useState('');
   const [where, setWhere] = useState(INITIAL_PHONE_STATE);
   const [phone, setPhone] = useState('');
-  const [consents, setConsents] = useState([false, false, false]);
+  const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [attempted, setAttempted] = useState(false);
   if (!step) return <Redirect href="/login" />;
 
   const name = nameKnown ? step.name.trim() : '';
-  const ready = (nameKnown || (isValidNamePart(firstName) && isValidNamePart(lastName))) && gender && where.nationality && isValidMobileNumber(phone, dialOf(where.phoneCountry)) && consents[0] && consents[1];
+  const ready = (nameKnown || (isValidNamePart(firstName) && isValidNamePart(lastName))) && gender && where.nationality && isValidMobileNumber(phone, dialOf(where.phoneCountry)) && agreed;
 
   const submit = async () => {
     if (!ready) {
       setAttempted(true);
-      toast('Enter your name, gender, nationality and a valid mobile number, and accept the required consents.');
+      toast('Enter your name, gender, nationality and a valid mobile number, and accept the Terms and Conditions and Privacy Policy.');
       return;
     }
     setBusy(true);
@@ -47,7 +47,7 @@ export default function CompleteProfile() {
         ...(nameKnown ? { name } : { firstName: firstName.trim(), lastName: lastName.trim() }),
         countryCode: dialOf(where.phoneCountry), phoneCountry: where.phoneCountry,
         gender, nationality: where.nationality,
-        consents: consentsBody(consents),
+        consents: consentsBody(agreed),
       });
       toast('OTP sent');
       setAuthStep('register-otp', codeStepFrom(data));
@@ -94,7 +94,7 @@ export default function CompleteProfile() {
             onPhone={setPhone}
           />
         </View>
-        <SignupConsents value={consents} onChange={setConsents} />
+        <SignupConsents value={agreed} onChange={setAgreed} />
         <Button large title={t('send_otp_btn')} dimmed={!ready} loading={busy} onPress={submit} className="mt-[26px]" />
       </Body>
     </Screen>

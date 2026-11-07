@@ -197,9 +197,9 @@
   "privacy_title": "Privacy Policy",
   "register_login_q": "Already have an account?",
   "register_otp_title": "Verify Your Number",
-  "register_sub": "Join us to get started",
+  "register_sub": "Join HumanCare for reliable healthcare assistance worldwide.",
   "register_terms_link": "Terms and Conditions",
-  "register_title": "Create Account",
+  "register_title": "Create Your Account",
   "complete_profile_title": "Complete your profile",
   "complete_profile_sub": "Add your mobile number to finish creating your account",
   "field_airline_mode": "Travel type",
@@ -392,7 +392,8 @@
   "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
   "gs_button": "Get Started",
   "gs_footer": "Trusted. Secure. Always by Your Side.",
-  "onboard_skip": "Skip"
+  "onboard_skip": "Skip",
+  "register_btn": "CREATE ACCOUNT"
  },
  "HI": {
   "greeting": "नमस्ते,",
@@ -726,7 +727,8 @@
   "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
   "gs_button": "Get Started",
   "gs_footer": "Trusted. Secure. Always by Your Side.",
-  "onboard_skip": "Skip"
+  "onboard_skip": "Skip",
+  "register_btn": "खाता बनाएं"
  },
  "MR": {
   "greeting": "नमस्कार,",
@@ -1060,7 +1062,8 @@
   "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
   "gs_button": "Get Started",
   "gs_footer": "Trusted. Secure. Always by Your Side.",
-  "onboard_skip": "Skip"
+  "onboard_skip": "Skip",
+  "register_btn": "खाते तयार करा"
  },
  "GU": {
   "greeting": "નમસ્તે,",
@@ -1394,7 +1397,8 @@
   "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
   "gs_button": "Get Started",
   "gs_footer": "Trusted. Secure. Always by Your Side.",
-  "onboard_skip": "Skip"
+  "onboard_skip": "Skip",
+  "register_btn": "ખાતું બનાવો"
  },
  "TE": {
   "greeting": "నమస్తే,",
@@ -1728,7 +1732,8 @@
   "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
   "gs_button": "Get Started",
   "gs_footer": "Trusted. Secure. Always by Your Side.",
-  "onboard_skip": "Skip"
+  "onboard_skip": "Skip",
+  "register_btn": "ఖాతాను సృష్టించండి"
  },
  "AR": {
   "greeting": "مرحباً,",
@@ -2062,6 +2067,7 @@
   "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
   "gs_button": "Get Started",
   "gs_footer": "Trusted. Secure. Always by Your Side.",
-  "onboard_skip": "Skip"
+  "onboard_skip": "Skip",
+  "register_btn": "إنشاء حساب"
  }
 }
