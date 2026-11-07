@@ -69,8 +69,9 @@ export default function Register() {
 
   return (
     <Screen bg="bg-white">
-      <View className="px-[26px] pt-[26px]"><BackButton /></View>
-      <Body contentClassName="px-[26px] pb-[26px] pt-5">
+      {/* No header strip: the back button is the first thing inside the scrolling page, so it scrolls away with it. */}
+      <Body contentClassName="px-[26px] pb-[26px] pt-[26px]">
+        <BackButton className="mb-3" />
         {/* The official HumanCare logo, as it is everywhere else in the app: its own proportions, never stretched. The picture already carries the HUMANCARE wordmark. */}
         <Image
           source={LOGO} accessible accessibilityLabel={t('gs_logo_label')} resizeMode="contain"
