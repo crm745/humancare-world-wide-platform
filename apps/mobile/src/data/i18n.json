@@ -388,7 +388,8 @@
   "field_first_name": "First Name",
   "field_last_name": "Last Name",
   "gender_placeholder": "Select gender",
-  "phone_country_code_label": "Phone country code"
+  "phone_country_code_label": "Phone country code",
+  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare"
  },
  "HI": {
   "greeting": "नमस्ते,",
@@ -714,7 +715,8 @@
   "field_first_name": "First Name",
   "field_last_name": "Last Name",
   "gender_placeholder": "Select gender",
-  "phone_country_code_label": "Phone country code"
+  "phone_country_code_label": "Phone country code",
+  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare"
  },
  "MR": {
   "greeting": "नमस्कार,",
@@ -1040,7 +1042,8 @@
   "field_first_name": "First Name",
   "field_last_name": "Last Name",
   "gender_placeholder": "Select gender",
-  "phone_country_code_label": "Phone country code"
+  "phone_country_code_label": "Phone country code",
+  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare"
  },
  "GU": {
   "greeting": "નમસ્તે,",
@@ -1366,7 +1369,8 @@
   "field_first_name": "First Name",
   "field_last_name": "Last Name",
   "gender_placeholder": "Select gender",
-  "phone_country_code_label": "Phone country code"
+  "phone_country_code_label": "Phone country code",
+  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare"
  },
  "TE": {
   "greeting": "నమస్తే,",
@@ -1692,7 +1696,8 @@
   "field_first_name": "First Name",
   "field_last_name": "Last Name",
   "gender_placeholder": "Select gender",
-  "phone_country_code_label": "Phone country code"
+  "phone_country_code_label": "Phone country code",
+  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare"
  },
  "AR": {
   "greeting": "مرحباً,",
@@ -2018,6 +2023,7 @@
   "field_first_name": "First Name",
   "field_last_name": "Last Name",
   "gender_placeholder": "Select gender",
-  "phone_country_code_label": "Phone country code"
+  "phone_country_code_label": "Phone country code",
+  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare"
  }
 }

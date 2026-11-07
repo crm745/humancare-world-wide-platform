@@ -15,9 +15,9 @@ const PAGES = [
   { key: 'care', image: ONBOARDING_CARE, title: 'onboard_2_title', body: 'onboard_2_body', bodyMaxWidth: 320 },
 ];
 
-// "Get Started" and "Skip" always open Create Account (then straight to Home after the SMS
-// code). People who already have an account use "Already have an account? Login" there.
-const finish = () => router.push('/register');
+// "Get Started" and "Skip" open Login. New people use "Sign up" on the Login screen to reach
+// Create Account.
+const finish = () => router.push('/login');
 
 // Getting Started: two swipeable pages. Only the middle (illustration, heading, text)
 // scrolls when it doesn't fit; the dots and the button stay pinned at the bottom. The
@@ -52,7 +52,7 @@ export default function Welcome() {
   }, [reduceMotion]);
 
   // Android back on page 2 goes to page 1. Only while this screen is focused, or it would
-  // also catch the back press on the Register screen opened on top of it.
+  // also catch the back press on the Login screen opened on top of it.
   useFocusEffect(
     useCallback(() => {
       const sub = BackHandler.addEventListener('hardwareBackPress', () => {
