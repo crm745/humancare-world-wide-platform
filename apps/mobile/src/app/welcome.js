@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, BackHandler, FlatList, Image, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft } from 'lucide-react-native';
 import { ONBOARDING_CARE } from '../data/images';
 import { useApp } from '../state/AppContext';
 import { GettingStartedIntro } from '../components/GettingStartedIntro';
@@ -12,8 +11,8 @@ const BLUE = '#1B6FDB';
 const MAX_COLUMN = 480;
 
 const PAGES = [
-  { key: 'intro' }, // page 1: its own design, see GettingStartedIntro.js
   { key: 'care', image: ONBOARDING_CARE, title: 'onboard_2_title', body: 'onboard_2_body', bodyMaxWidth: 320 },
+  { key: 'intro' }, // page 2: its own design, see GettingStartedIntro.js
 ];
 
 // "Get Started" and "Skip" open Login. New people use "Sign up" on the Login screen to reach
@@ -107,15 +106,14 @@ export default function Welcome() {
             // Pinned to the pager's own height, so the ScrollView inside scrolls instead
             // of running down behind the dots and the button.
             <View style={{ width: pageW, height: listH || undefined }}>
-              {i === 0 ? (
-                // Page 1 has no Skip and no dots: its own Get Started button goes to page 2.
-                <GettingStartedIntro width={pageW} height={listH} onNext={() => goTo(1)} />
+              {i === 1 ? (
+                // Page 2 has no Skip and no dots: its own Get Started button finishes Getting Started.
+                <GettingStartedIntro width={pageW} height={listH} onNext={finish} />
               ) : (
                 <>
-                  <View style={{ height: 48, paddingHorizontal: side, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start' }}>
-                    <Pressable accessibilityRole="button" accessibilityLabel={t('onboard_back')} onPress={() => goTo(0)} hitSlop={8} style={{ minWidth: 44, minHeight: 44, flexDirection: 'row', alignItems: 'center' }}>
-                      <ChevronLeft size={22} color="#4A5268" strokeWidth={2.2} />
-                      <Text className="font-inter-semibold" style={{ fontSize: 16, color: '#4A5268' }}>{t('onboard_back')}</Text>
+                  <View style={{ height: 48, paddingHorizontal: side, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' }}>
+                    <Pressable accessibilityRole="button" accessibilityLabel={t('onboard_skip')} onPress={finish} hitSlop={8} style={{ minWidth: 44, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' }}>
+                      <Text className="font-inter-semibold" style={{ fontSize: 16, color: '#4A5268' }}>{t('onboard_skip')}</Text>
                     </Pressable>
                   </View>
                   <ScrollView
@@ -141,20 +139,20 @@ export default function Welcome() {
                   <View style={{ paddingHorizontal: side, paddingBottom: 24 + insets.bottom }}>
                     <View
                       accessible
-                      accessibilityLabel={t('onboard_page').replace('{n}', 2).replace('{total}', PAGES.length)}
+                      accessibilityLabel={t('onboard_page').replace('{n}', 1).replace('{total}', PAGES.length)}
                       style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 28 }}
                     >
                       {PAGES.map((page, dot) => (
                         <View
                           key={page.key}
-                          style={{ width: dot === 1 ? 24 : 8, height: 8, borderRadius: 4, backgroundColor: dot === 1 ? BLUE : '#D3DAE6' }}
+                          style={{ width: dot === 0 ? 24 : 8, height: 8, borderRadius: 4, backgroundColor: dot === 0 ? BLUE : '#D3DAE6' }}
                         />
                       ))}
                     </View>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel={t('welcome_btn')}
-                      onPress={finish}
+                      accessibilityLabel={t('onboard_next')}
+                      onPress={() => goTo(1)}
                       style={{
                         height: 56,
                         borderRadius: 16,
@@ -169,7 +167,7 @@ export default function Welcome() {
                       }}
                     >
                       <Text className="font-inter-bold" style={{ fontSize: 18, color: '#FFFFFF' }}>
-                        {t('welcome_btn')}
+                        {t('onboard_next')}
                       </Text>
                     </Pressable>
                   </View>

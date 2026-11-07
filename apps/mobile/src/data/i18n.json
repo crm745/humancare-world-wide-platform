@@ -289,7 +289,6 @@
   "home_banner_3_title": "Home Health Care",
   "home_banner_3_body": "Personalized medical support in the comfort of your home.",
   "home_banner_3_alt": "A nurse helping an elderly man at home",
-  "onboard_back": "Back",
   "onboard_next": "Next",
   "onboard_page": "Page {n} of {total}",
   "onboard_2_title": "All your care in one place",
@@ -392,7 +391,8 @@
   "gs_tagline": "Care. Anywhere. Anytime.",
   "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
   "gs_button": "Get Started",
-  "gs_footer": "Trusted. Secure. Always by Your Side."
+  "gs_footer": "Trusted. Secure. Always by Your Side.",
+  "onboard_skip": "Skip"
  },
  "HI": {
   "greeting": "नमस्ते,",
@@ -725,7 +725,8 @@
   "gs_tagline": "Care. Anywhere. Anytime.",
   "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
   "gs_button": "Get Started",
-  "gs_footer": "Trusted. Secure. Always by Your Side."
+  "gs_footer": "Trusted. Secure. Always by Your Side.",
+  "onboard_skip": "Skip"
  },
  "MR": {
   "greeting": "नमस्कार,",
@@ -1058,7 +1059,8 @@
   "gs_tagline": "Care. Anywhere. Anytime.",
   "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
   "gs_button": "Get Started",
-  "gs_footer": "Trusted. Secure. Always by Your Side."
+  "gs_footer": "Trusted. Secure. Always by Your Side.",
+  "onboard_skip": "Skip"
  },
  "GU": {
   "greeting": "નમસ્તે,",
@@ -1391,7 +1393,8 @@
   "gs_tagline": "Care. Anywhere. Anytime.",
   "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
   "gs_button": "Get Started",
-  "gs_footer": "Trusted. Secure. Always by Your Side."
+  "gs_footer": "Trusted. Secure. Always by Your Side.",
+  "onboard_skip": "Skip"
  },
  "TE": {
   "greeting": "నమస్తే,",
@@ -1724,7 +1727,8 @@
   "gs_tagline": "Care. Anywhere. Anytime.",
   "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
   "gs_button": "Get Started",
-  "gs_footer": "Trusted. Secure. Always by Your Side."
+  "gs_footer": "Trusted. Secure. Always by Your Side.",
+  "onboard_skip": "Skip"
  },
  "AR": {
   "greeting": "مرحباً,",
@@ -2057,6 +2061,7 @@
   "gs_tagline": "Care. Anywhere. Anytime.",
   "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
   "gs_button": "Get Started",
-  "gs_footer": "Trusted. Secure. Always by Your Side."
+  "gs_footer": "Trusted. Secure. Always by Your Side.",
+  "onboard_skip": "Skip"
  }
 }
