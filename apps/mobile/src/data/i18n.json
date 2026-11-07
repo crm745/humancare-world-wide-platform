@@ -289,12 +289,9 @@
   "home_banner_3_title": "Home Health Care",
   "home_banner_3_body": "Personalized medical support in the comfort of your home.",
   "home_banner_3_alt": "A nurse helping an elderly man at home",
-  "onboard_skip": "Skip",
   "onboard_back": "Back",
   "onboard_next": "Next",
   "onboard_page": "Page {n} of {total}",
-  "onboard_1_title": "We are here for you",
-  "onboard_1_body": "Medical assistance, anywhere, anytime.",
   "onboard_2_title": "All your care in one place",
   "onboard_2_body": "Doctor visits, hospital admissions, second opinions and air ambulance, arranged by our team.",
   "care_level_hint": "Select the one that best describes the patient's condition",
@@ -389,7 +386,13 @@
   "field_last_name": "Last Name",
   "gender_placeholder": "Select gender",
   "phone_country_code_label": "Phone country code",
-  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare"
+  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare",
+  "gs_logo_label": "HumanCare",
+  "gs_heading": "Global Medical Assistance",
+  "gs_tagline": "Care. Anywhere. Anytime.",
+  "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
+  "gs_button": "Get Started",
+  "gs_footer": "Trusted. Secure. Always by Your Side."
  },
  "HI": {
   "greeting": "नमस्ते,",
@@ -716,7 +719,13 @@
   "field_last_name": "Last Name",
   "gender_placeholder": "Select gender",
   "phone_country_code_label": "Phone country code",
-  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare"
+  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare",
+  "gs_logo_label": "HumanCare",
+  "gs_heading": "Global Medical Assistance",
+  "gs_tagline": "Care. Anywhere. Anytime.",
+  "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
+  "gs_button": "Get Started",
+  "gs_footer": "Trusted. Secure. Always by Your Side."
  },
  "MR": {
   "greeting": "नमस्कार,",
@@ -1043,7 +1052,13 @@
   "field_last_name": "Last Name",
   "gender_placeholder": "Select gender",
   "phone_country_code_label": "Phone country code",
-  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare"
+  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare",
+  "gs_logo_label": "HumanCare",
+  "gs_heading": "Global Medical Assistance",
+  "gs_tagline": "Care. Anywhere. Anytime.",
+  "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
+  "gs_button": "Get Started",
+  "gs_footer": "Trusted. Secure. Always by Your Side."
  },
  "GU": {
   "greeting": "નમસ્તે,",
@@ -1370,7 +1385,13 @@
   "field_last_name": "Last Name",
   "gender_placeholder": "Select gender",
   "phone_country_code_label": "Phone country code",
-  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare"
+  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare",
+  "gs_logo_label": "HumanCare",
+  "gs_heading": "Global Medical Assistance",
+  "gs_tagline": "Care. Anywhere. Anytime.",
+  "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
+  "gs_button": "Get Started",
+  "gs_footer": "Trusted. Secure. Always by Your Side."
  },
  "TE": {
   "greeting": "నమస్తే,",
@@ -1697,7 +1718,13 @@
   "field_last_name": "Last Name",
   "gender_placeholder": "Select gender",
   "phone_country_code_label": "Phone country code",
-  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare"
+  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare",
+  "gs_logo_label": "HumanCare",
+  "gs_heading": "Global Medical Assistance",
+  "gs_tagline": "Care. Anywhere. Anytime.",
+  "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
+  "gs_button": "Get Started",
+  "gs_footer": "Trusted. Secure. Always by Your Side."
  },
  "AR": {
   "greeting": "مرحباً,",
@@ -2024,6 +2051,12 @@
   "field_last_name": "Last Name",
   "gender_placeholder": "Select gender",
   "phone_country_code_label": "Phone country code",
-  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare"
+  "splash_tagline": "Excellence in Saving Lives\nThrough Humancare",
+  "gs_logo_label": "HumanCare",
+  "gs_heading": "Global Medical Assistance",
+  "gs_tagline": "Care. Anywhere. Anytime.",
+  "gs_trust": "Your trusted partner for medical assistance, wherever life takes you.",
+  "gs_button": "Get Started",
+  "gs_footer": "Trusted. Secure. Always by Your Side."
  }
 }
