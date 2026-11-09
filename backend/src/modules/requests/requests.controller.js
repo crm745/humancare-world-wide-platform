@@ -1,3 +1,4 @@
+const fs = require('fs');
 const {
   createRequest,
   listRequestsForUser,
@@ -5,6 +6,8 @@ const {
   listDocumentsForUser,
 } = require('./requests.service');
 const { addDocumentToCase } = require('../documents/documents.service');
+const { toSafeDocument } = require('../documents/document-response');
+const { addPatientDocument, scanRequestDocument, toUploadResponse } = require('../request-review/request-review.service');
 const { sendMedicalReportToBitrix } = require('../bitrix/bitrix.service');
 const { leadInputFromRequest, commentWithReports } = require('../bitrix/bitrix-lead');
 const { prisma } = require('../../db/prisma');
@@ -141,8 +144,32 @@ async function listMyDocuments(req, res, next) {
 async function uploadRequestDocument(req, res, next) {
   try {
     if (!req.file) return res.status(400).json({ error: 'file is required' });
-    const request = await getRequestForUser(req.user.id, req.params.id);
-    if (!request.case) return res.status(409).json({ error: 'This request has no case yet.' });
+    // The file is already on disk (multer). If the request is not found or is not the patient's, or
+    // has nothing to attach it to, it must not be left behind unreferenced.
+    const discardFile = () => fs.promises.rm(req.file.path, { force: true }).catch(() => {});
+    let request;
+    try {
+      request = await getRequestForUser(req.user.id, req.params.id);
+    } catch (err) {
+      await discardFile();
+      throw err;
+    }
+    // A request in the review workflow has no Case yet: its files are kept with the request, scanned
+    // by ClamAV, and reviewed by an Admin. The same URL and form field as before; an optional
+    // "replacesDocumentId" field marks an earlier document as replaced.
+    if (request.reviewStatus != null) {
+      const stored = await addPatientDocument({
+        userId: req.user.id, requestId: request.id, file: req.file, replacesDocumentId: req.body && req.body.replacesDocumentId,
+      });
+      // Fail closed: if the scanner is down the document is saved but stays "error" (unusable)
+      // until the worker's next sweep scans it.
+      const scanned = await scanRequestDocument(stored.id).catch(() => null);
+      return res.status(201).json({ document: toUploadResponse(scanned || stored) });
+    }
+    if (!request.case) {
+      await discardFile();
+      return res.status(409).json({ error: 'This request has no case yet.' });
+    }
     // This is the request form's one upload: "Upload Medical Report", or for Mortal
     // Remains "Upload Death Certificate". The lead has no death-certificate field, so
     // that one stays with us (Bitrix has it on the deal; sent once deals are synced).
@@ -164,7 +191,7 @@ async function uploadRequestDocument(req, res, next) {
       const comments = commentWithReports(leadInputFromRequest(request, user).comments, reports.map((r) => r.name));
       await sendMedicalReportToBitrix(request.bitrixLeadId, document, { comments });
     }
-    res.status(201).json({ document });
+    res.status(201).json({ document: toSafeDocument(document) });
   } catch (err) {
     next(err);
   }

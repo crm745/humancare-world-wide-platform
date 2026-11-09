@@ -40,6 +40,10 @@ const {
   deleteService,
 } = require('../services/services.controller');
 
+const {
+  getRequests, getRequest, downloadDocument, postDocumentReview, postRequestDocuments, postApproval,
+} = require('../request-review/request-review.controller');
+
 const adminRouter = Router();
 
 adminRouter.post('/login', loginLimiter, login);
@@ -74,6 +78,14 @@ adminRouter.post('/corporates', postCorporate);
 // Adds a subsequent employee login to a company that already has an Owner; it can never
 // create a company's first login (see createCorporateUser).
 adminRouter.post('/corporates/:id/users', postCorporateUser);
+
+// Request-first review workflow (Private Charter): any Admin can review documents and approve.
+adminRouter.get('/requests', getRequests);
+adminRouter.get('/requests/:id', getRequest);
+adminRouter.get('/requests/:id/documents/:docId/file', downloadDocument);
+adminRouter.post('/requests/:id/documents/:docId/review', postDocumentReview);
+adminRouter.post('/requests/:id/request-documents', postRequestDocuments);
+adminRouter.post('/requests/:id/approve', postApproval);
 
 adminRouter.get('/cases', getCases);
 adminRouter.get('/cases/:id', getCase);

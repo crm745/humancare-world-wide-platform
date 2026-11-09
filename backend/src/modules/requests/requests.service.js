@@ -2,11 +2,20 @@ const { prisma } = require('../../db/prisma');
 const { createLead } = require('../bitrix/bitrix.service');
 const { leadInputFromRequest } = require('../bitrix/bitrix-lead');
 const { isBitrixSyncEnabled } = require('../bitrix/bitrix-config');
-const { URGENCY_TO_CASE } = require('../../common/constants/request.constants');
+const { URGENCY_TO_CASE, PRIVATE_CHARTER_KEY } = require('../../common/constants/request.constants');
+const { isRequestReviewEnabled, PATIENT_DOCUMENT_SELECT } = require('../request-review/request-review.config');
+const { createReviewRequest } = require('../request-review/request-review.service');
+const { SAFE_DOCUMENT_SELECT } = require('../documents/document-response');
 
 const VALID_STATUSES = ['submitted', 'in_progress', 'completed', 'cancelled'];
 
 async function createRequest(userId, data) {
+  // Request-first workflow (Private Charter only, when switched on): the request is saved with its
+  // REQ- reference and no Case; the Case is created later, when an Admin approves it. Everything
+  // below is the original flow, unchanged, for every other service and for Private Charter while
+  // the workflow is off.
+  if (data.serviceKey === PRIVATE_CHARTER_KEY && isRequestReviewEnabled()) return createReviewRequest(userId, data);
+
   const {
     serviceType,
     serviceKey,
@@ -143,7 +152,11 @@ async function listRequestsForUser(userId, { status } = {}) {
 async function getRequestForUser(userId, id) {
   const request = await prisma.serviceRequest.findFirst({
     where: { id: Number(id), userId },
-    include: { case: { include: { stageEvents: { orderBy: { occurredAt: 'asc' } }, documents: true } } },
+    include: {
+      case: { include: { stageEvents: { orderBy: { occurredAt: 'asc' } }, documents: { select: SAFE_DOCUMENT_SELECT } } },
+      // Empty for every request made before the review workflow; never exposes stored file names.
+      requestDocuments: { select: PATIENT_DOCUMENT_SELECT, orderBy: { id: 'asc' } },
+    },
   });
   if (!request) {
     const err = new Error('Request not found');
@@ -159,7 +172,7 @@ async function getRequestForUser(userId, id) {
 async function listDocumentsForUser(userId) {
   return prisma.document.findMany({
     where: { case: { serviceRequest: { userId } } },
-    include: { case: { select: { referenceNumber: true } } },
+    select: { ...SAFE_DOCUMENT_SELECT, case: { select: { referenceNumber: true } } },
     orderBy: { uploadedAt: 'desc' },
   });
 }
