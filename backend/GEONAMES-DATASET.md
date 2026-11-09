@@ -5,6 +5,18 @@ and the server-side check of the pick, use a **local copy of the GeoNames popula
 tables, `geonames_cities` and `geonames_city_names`. There is no GeoNames account, no API call and no
 network dependency while the app is running.
 
+## Quick reference: the five jobs
+
+| Job | What to do | Details |
+|---|---|---|
+| **Download** | Get `allCountries.zip` and `admin1CodesASCII.txt` over HTTPS from <https://download.geonames.org/export/dump/> (direct links: <https://download.geonames.org/export/dump/allCountries.zip> and <https://download.geonames.org/export/dump/admin1CodesASCII.txt>), into a new empty folder, and unzip. | [Import or update the data](#import-or-update-the-data) |
+| **Credit GeoNames** | Show the `attribution` text that `GET /geo/cities` returns wherever the city list is shown. Mention that the data is filtered if you republish it. | [Licence and credit](#licence-and-credit-required) |
+| **Import** | `node scripts/import-geonames.js --file <dir>/allCountries.txt --admin1 <dir>/admin1CodesASCII.txt --env-file .env --dry-run`, then the same with `--confirm-database <database name>` instead of `--dry-run`. About 16 minutes. | [Import or update the data](#import-or-update-the-data) |
+| **Refresh** | Every **90 days**: download the files again and repeat the import command. No migration is needed; it is safe to repeat. | [Refreshing](#refreshing-every-90-days) |
+| **Check freshness** | `node scripts/geonames-status.js --env-file .env`: exit 0 ok, 1 refresh due (90 days or more), 2 stale (over 180 days) or empty, 3 could not read. Run it daily from your monitoring. | [Freshness](#freshness-refresh-every-90-days-refused-after-180) |
+
+If the data is never refreshed, Private Charter requests start failing (503) 180 days after the last import.
+
 ## Licence and credit (required)
 
 The data is from [GeoNames](https://www.geonames.org), licensed
@@ -41,8 +53,9 @@ Every populated place (feature class `P`) **except**:
 
 Kept, among others: `PPL` city/town/village, `PPLA` to `PPLA5` administrative seats, `PPLC` capital,
 `PPLG` seat of government, `PPLL` locality, `PPLF` farm village, `PPLR` religious community, `PPLS`,
-and `STLMT` (GeoNames' code for an **Israeli settlement**: 225 places in the full file, kept because they are
-classed as populated places; say if that should change). Names and meanings: <https://www.geonames.org/export/codes.html>.
+and `STLMT` (GeoNames' code for an **Israeli settlement**: 225 places in the full file). **Decision: kept**, like every
+other populated place; there are no special geographic exclusions. Names and meanings:
+<https://www.geonames.org/export/codes.html>.
 
 ### Other names
 
@@ -53,7 +66,8 @@ only digits or punctuation, names of 1 character or over 200, repeats, repeats t
 case or accents, and the place's own name and plain-ASCII name. Airport-code and nickname spellings
 ("NYC", "DXB") are kept.
 
-By default the other names are kept for places **with a known population** (`--alt-min-population 1`).
+By default the other names are kept for places **with a known population** (`--alt-min-population 1`;
+**decision: this stays the default**).
 In the full dump about 4.5 million of the 5 million places have no population recorded (mostly
 hamlets) and carry 4.8 million of the 5.9 million other names; their own name and plain-ASCII name
 stay searchable either way. `--alt-min-population 0` keeps everything (about six times as many
@@ -93,6 +107,17 @@ admin1CodesASCII.txt    region names (small)
 5. Check: `node scripts/geonames-status.js --env-file .env` (exit code 0), and `GET /geo/cities?q=mün`
    returns Munich with the `attribution` block.
 
+### Refreshing every 90 days
+
+Repeat steps 1 to 5 above with newly downloaded files (step 3, the backup, as your routine requires).
+Nothing else is needed: the same command updates every record and stamps it with the new time, replaces
+each city's other names, and removes places GeoNames has since marked historical, abandoned or as
+subdivisions. The API can stay up while it runs, but each batch of cities has its other names swapped (deleted, then written
+again), so for a moment during the run a search may miss one of a city's other names; run it at a quiet time if
+that matters. Afterwards `node scripts/geonames-status.js` should
+exit 0. If a refresh is missed, the 90-day warning appears in the log and `geonames-status.js` exits 1;
+at 180 days Private Charter requests fail until the import is run.
+
 ### Measured on the full `allCountries` file
 
 Run on a separate scratch MySQL 26.7 instance (same binary as the main server, `innodb_buffer_pool_size`
@@ -119,6 +144,8 @@ Before the covering indexes (migration `20261106130000`) the same short searches
 seconds; the full table is why a small test fixture could never show it.
 
 ## Freshness: refresh every 90 days, refused after 180
+
+(This policy is confirmed: a 90-day refresh warning, a 180-day rejection.)
 
 | Age of the last import | State | What happens |
 |---|---|---|
@@ -189,11 +216,23 @@ Roll back, if needed: restore the backup, or run each folder's `down.sql` by han
 (`20261106130000`, `120000`, `110000`, `100000`) and delete that migration's row from `_prisma_migrations`
 (Prisma will not mark an applied migration as rolled back).
 
-## Migration timestamps
+## The four migrations of this work
 
-The four migrations of this work are named `20261106100000` to `20261106130000`. They sort after every
-existing migration, which is what matters: Prisma applies them in name order. They were not taken from the
-clock (the machine's date was 5 November 2026); no other branch has a migration at or after `20261106`.
+| Migration | Does |
+|---|---|
+| `20261106100000_geonames_city_metadata` | seven nullable city columns on `service_requests`; the `geonames_cities` table |
+| `20261106110000_preferred_date_to_date` | `preferred_date` from `DATETIME(3)` to `DATE` (cuts any time of day off first, because MySQL would otherwise round 23:59:59.999 to the next day) |
+| `20261106120000_geonames_city_names` | the `geonames_city_names` table (other names) and an index on `verified_at` |
+| `20261106130000_geonames_search_indexes` | covering `(name, population)` and `(ascii_name, population)` indexes; drops the single-column ones |
+
+Each folder has a `down.sql` for a manual rollback. On a Windows checkout git may give these files CRLF line
+endings while Prisma recorded them as LF when they were applied; only the line endings differ, and
+`prisma migrate status` is not affected.
+
+They are named `20261106100000` to `20261106130000`. They sort after every
+existing migration, which is what matters: Prisma applies them in name order. The date was chosen to sort after
+`20261105140000`, not taken from the clock (the machine's date was 5 November 2026 when they were written);
+no other branch has a migration at or after `20261106`.
 A migration another branch adds with an earlier timestamp is still applied by `migrate deploy` even after
 these (out of order, which is allowed), and there is no table overlap, so the order does not matter here.
 

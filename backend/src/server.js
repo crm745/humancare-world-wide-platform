@@ -2,6 +2,19 @@ require('dotenv').config();
 const { app } = require('./app');
 const { prisma } = require('./db/prisma');
 
+// With Firebase phone verification on, a missing or broken service-account key would only show
+// up when the first user asks for an OTP. Check it now and stop with a clear message instead.
+const { isFirebasePhoneEnabled, assertFirebaseConfigured } = require('./integrations/firebase/firebase');
+if (isFirebasePhoneEnabled()) {
+  try {
+    assertFirebaseConfigured();
+    console.log('Firebase phone verification: service-account credentials loaded.');
+  } catch (err) {
+    console.error(`Firebase phone verification is enabled (PHONE_OTP_PROVIDER=firebase) but not set up: ${err.message}`);
+    process.exit(1);
+  }
+}
+
 // This process only serves HTTP. Scheduled jobs (Bitrix retry, security-log cleanup) run in
 // the separate worker — see worker.js and src/jobs.
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;
