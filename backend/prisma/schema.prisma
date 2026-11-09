@@ -562,7 +562,87 @@ model ServiceRequest {
   updatedAt         DateTime  @updatedAt @map("updated_at")
   case              Case?
 
+  // Request-first review workflow (Private Charter only; see backend/REQUEST-REVIEW-WORKFLOW.md).
+  // NULL on every older request and on every other service: those keep the original flow, where a
+  // Case is created together with the request. Otherwise one of: "awaiting_documents" (nothing
+  // uploaded yet), "in_review", "changes_requested" (an Admin asked for more or rejected a
+  // document), "approved" (the Case exists). The Case is created only on approval.
+  reviewStatus           String?   @map("review_status") @db.VarChar(24)
+  // When the first document arrived (the request then entered review).
+  submittedAt            DateTime? @map("submitted_at")
+  reviewedAt             DateTime? @map("reviewed_at")
+  // What the patient is told to provide next. Shown to the patient, so never an internal note.
+  documentsRequestReason String?   @db.Text @map("documents_request_reason")
+  requestDocuments       RequestDocument[]
+  requestEvents          RequestEvent[]
+
+  @@index([reviewStatus, createdAt])
   @@map("service_requests")
+}
+
+// One file a patient uploaded against a request in the review workflow. The file stays on disk and
+// every row is kept for good: a replaced or rejected document is marked, never deleted, so the
+// history of what was sent and decided survives. Nothing here is downloadable until scan_status is
+// "clean" (see request-review.service.js).
+model RequestDocument {
+  id                Int      @id @default(autoincrement())
+  serviceRequestId  Int      @map("service_request_id")
+  serviceRequest    ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Restrict)
+  originalName      String   @map("original_name")
+  // The file's name inside the uploads folder. Never sent to a client.
+  storageKey        String   @unique @map("storage_key")
+  sizeBytes         Int      @map("size_bytes")
+  mimeType          String?  @map("mime_type")
+  sha256            String?  @db.Char(64)
+  uploadedByUserId  Int      @map("uploaded_by_user_id")
+  uploadedAt        DateTime @default(now()) @map("uploaded_at")
+  // The earlier document this one replaces (a plain id: the old row is kept as it was).
+  replacesId        Int?     @map("replaces_id")
+  supersededAt      DateTime? @map("superseded_at")
+  // "pending" | "clean" | "infected" | "error". Only an explicit "OK" from ClamAV is "clean".
+  scanStatus        String   @default("pending") @map("scan_status") @db.VarChar(16)
+  scanEngine        String?  @map("scan_engine") @db.VarChar(40)
+  scanDetail        String?  @map("scan_detail") @db.VarChar(255)
+  scannedAt         DateTime? @map("scanned_at")
+  // Retry bookkeeping of the scan worker. Attempts are counted when an attempt is claimed (a crash
+  // mid-scan still uses one); NULL next-attempt = due now; while an attempt runs it is the lease end.
+  scanAttempts      Int      @default(0) @map("scan_attempts")
+  scanNextAttemptAt DateTime? @map("scan_next_attempt_at")
+  // "pending" | "approved" | "rejected"
+  reviewStatus      String   @default("pending") @map("review_status") @db.VarChar(16)
+  reviewedByAdminId Int?     @map("reviewed_by_admin_id")
+  reviewedAt        DateTime? @map("reviewed_at")
+  // Shown to the patient.
+  rejectionReason   String?  @db.Text @map("rejection_reason")
+  // The documents row created for it when the request was approved (a plain id).
+  caseDocumentId    Int?     @unique @map("case_document_id")
+
+  @@index([serviceRequestId])
+  @@index([scanStatus])
+  @@index([scanStatus, scanNextAttemptAt])
+  @@map("request_documents")
+}
+
+// Append-only business audit history of a request: uploads, scan results, review decisions,
+// requests for more documents, replacements, approval. Rows are only ever inserted (nothing in the
+// code updates or deletes one) and are not covered by any purge job. Deliberately not
+// security_events, which is a security log with a 365-day retention.
+model RequestEvent {
+  id               Int      @id @default(autoincrement())
+  serviceRequestId Int      @map("service_request_id")
+  serviceRequest   ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Restrict)
+  documentId       Int?     @map("document_id")
+  action           String   @db.VarChar(40)
+  fromStatus       String?  @map("from_status") @db.VarChar(24)
+  toStatus         String?  @map("to_status") @db.VarChar(24)
+  // "patient" | "admin" | "system"
+  actorType        String   @map("actor_type") @db.VarChar(12)
+  actorId          Int?     @map("actor_id")
+  detail           Json?
+  occurredAt       DateTime @default(now()) @map("occurred_at")
+
+  @@index([serviceRequestId, occurredAt])
+  @@map("request_events")
 }
 
 // A Case is the corporate/ops-side tracking record for a request once it's being worked.
