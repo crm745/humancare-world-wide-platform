@@ -11,7 +11,23 @@ const path = require('path');
 const EXPECTED_DB = 'humancare_test';
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 
-module.exports = async function globalSetup() {
+// While a manual integration session uses `humancare_test` (real patient, Admin and uploads), this file
+// exists and no Jest run may empty the database. Created by hand when the session starts and deleted when
+// it ends; it is in .gitignore. Checked before anything else, so a refused run touches nothing.
+const INTEGRATION_LOCK = path.join(__dirname, '..', '.integration-session.lock');
+
+function assertNoIntegrationSession(lockFile = INTEGRATION_LOCK) {
+  if (fs.existsSync(lockFile)) {
+    throw new Error(
+      `An integration session is active (${lockFile} exists), so the tests will not run: they would empty every table of ` +
+        'humancare_test, including the accounts, requests and uploads of that session. ' +
+        'Finish the session and delete the lock file, then run the tests again. Nothing was changed.',
+    );
+  }
+}
+
+async function globalSetup() {
+  assertNoIntegrationSession();
   require('dotenv').config({ path: path.join(__dirname, '..', '.env.test'), override: true, quiet: true });
   const { PrismaClient } = require('@prisma/client');
   const prisma = new PrismaClient();
@@ -46,4 +62,8 @@ module.exports = async function globalSetup() {
   } finally {
     await prisma.$disconnect();
   }
-};
+}
+
+module.exports = globalSetup;
+module.exports.assertNoIntegrationSession = assertNoIntegrationSession;
+module.exports.INTEGRATION_LOCK = INTEGRATION_LOCK;

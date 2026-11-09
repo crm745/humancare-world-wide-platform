@@ -8,6 +8,7 @@
     "start": "node src/server.js",
     "start:worker": "node src/worker.js",
     "test": "cross-env NODE_ENV=test jest --runInBand",
+    "test:isolation": "node --test tests/isolation/upload-dir-and-lock.node-test.js",
     "migrate:dev": "prisma migrate deploy",
     "migrate:test": "node -e \"require('dotenv').config({path:'.env.test',override:true});require('child_process').execSync('npx prisma migrate deploy',{stdio:'inherit',env:process.env})\"",
     "migrate:all": "npm run migrate:dev && npm run migrate:test"
