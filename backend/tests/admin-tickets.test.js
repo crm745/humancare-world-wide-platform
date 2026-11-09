@@ -22,7 +22,7 @@ describe('GET /admin/tickets', () => {
   it('rejects a corporate token', async () => {
     const { token } = await createCorporateUserAndLogin();
     const res = await request(app).get('/admin/tickets').set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401); // Admin Lock: a non-Admin credential is a generic 401 (admin-session.middleware.js)
   });
 
   it('lists tickets across every corporate, newest-updated first, with the corporate company name attached', async () => {

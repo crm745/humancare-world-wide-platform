@@ -2,13 +2,24 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Where uploaded files are kept: backend/uploads unless HC_UPLOAD_DIR is set (an absolute path is best;
-// a relative one is resolved against the working directory). Everything that stores, reads, scans or
-// quarantines an upload uses this one constant, so setting it moves all of them together, e.g. to keep
-// an integration session's files apart from the dev server's. Unset or blank: the default, as before.
+// Where uploaded files are kept. Everything that stores, reads, scans or quarantines an upload uses this
+// one constant, so changing it moves all of them together.
+//   - Test environment (NODE_ENV=test with UPLOAD_DIR set): only backend/.e2e-uploads, the one value the
+//     safety guard accepts, so tests never write to, or delete from, the shared development folder.
+//   - HC_UPLOAD_DIR (an absolute path is best; a relative one is resolved against the working directory):
+//     keeps e.g. an integration session's files apart from the dev server's. Blank counts as unset.
+//   - Otherwise backend/uploads.
+// The two settings are never combined: a test run that also names HC_UPLOAD_DIR is refused instead of
+// letting one silently win (the tests could otherwise write into, or clean, a real session's folder).
 const DEFAULT_UPLOAD_DIR = path.join(__dirname, '..', '..', 'uploads');
 const customUploadDir = (process.env.HC_UPLOAD_DIR || '').trim();
-const UPLOAD_DIR = customUploadDir ? path.resolve(customUploadDir) : DEFAULT_UPLOAD_DIR;
+const testMode = process.env.NODE_ENV === 'test' && Boolean(process.env.UPLOAD_DIR);
+if (testMode && customUploadDir) {
+  throw new Error('HC_UPLOAD_DIR must not be set together with UPLOAD_DIR in the test environment.');
+}
+let UPLOAD_DIR = DEFAULT_UPLOAD_DIR;
+if (testMode) UPLOAD_DIR = require('../common/safety/test-database-guard').resolveTestUploadsDir(process.env.UPLOAD_DIR);
+else if (customUploadDir) UPLOAD_DIR = path.resolve(customUploadDir);
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 const ALLOWED_MIME_TYPES = [

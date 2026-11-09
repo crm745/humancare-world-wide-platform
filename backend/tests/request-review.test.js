@@ -346,7 +346,7 @@ describe('Admin can see every request, including incomplete ones', () => {
   it('requires an Admin', async () => {
     const patient = await createPatient();
     expect((await request(app).get('/admin/requests')).status).toBe(401);
-    expect((await request(app).get('/admin/requests').set(auth(patient.token))).status).toBe(403);
+    expect((await request(app).get('/admin/requests').set(auth(patient.token))).status).toBe(401); // Admin Lock: any credential that is not an Admin session or Admin token is a generic 401 (admin-session.middleware.js)
   });
 
   it('lists the submissions, keeps drafts out of the default list, and filters by status', async () => {
@@ -757,17 +757,17 @@ describe('asking for additional documents is only possible in review, once at a 
   });
 
   describe('who may ask', () => {
-    it('needs an Admin: no token 401, a bad token 401, a patient or a corporate user 403, and nothing changes', async () => {
+    it('needs an Admin: no token 401, a bad token 401, a patient or a corporate user 401 (Admin Lock: a non-Admin credential is a generic 401), and nothing changes', async () => {
       const r = await inReview();
       const url = askUrl(r.id);
       const body = { reason: 'Please send more.' };
       expect((await request(app).post(url).send(body)).status).toBe(401);
       expect((await request(app).post(url).set('Authorization', 'Bearer not-a-real-token').send(body)).status).toBe(401);
-      expect((await request(app).post(url).set(auth(r.token)).send(body)).status).toBe(403); // the request's own patient
+      expect((await request(app).post(url).set(auth(r.token)).send(body)).status).toBe(401); // the request's own patient (Admin Lock: a non-Admin credential is a generic 401, never 403)
       const other = await createPatient();
-      expect((await request(app).post(url).set(auth(other.token)).send(body)).status).toBe(403);
+      expect((await request(app).post(url).set(auth(other.token)).send(body)).status).toBe(401);
       const corp = await createCorporateUserAndLogin();
-      expect((await request(app).post(url).set(auth(corp.token)).send(body)).status).toBe(403);
+      expect((await request(app).post(url).set(auth(corp.token)).send(body)).status).toBe(401);
       expect(await stateOf(r.id)).toMatchObject({ reviewStatus: 'in_review', documentsRequestReason: null });
       expect(await asks(r.id)).toHaveLength(0);
       // A regular Admin (not only a superadmin) is allowed.

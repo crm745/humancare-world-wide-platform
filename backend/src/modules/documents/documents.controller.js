@@ -24,7 +24,7 @@ async function downloadDocument(req, res, next) {
 
     // Every other document is a legacy one, from before the workflow: it has no scan or checksum data
     // and is served exactly as it always was. Having no such data is not a reason to refuse it.
-    return res.download(path.join(UPLOAD_DIR, filename), document.name);
+    return res.download(path.join(UPLOAD_DIR, filename), document.name, { dotfiles: 'allow' });
   } catch (err) {
     next(err);
   }

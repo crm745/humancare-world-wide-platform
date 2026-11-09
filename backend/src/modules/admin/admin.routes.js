@@ -1,14 +1,16 @@
 const { Router } = require('express');
-const { requireAuth, requireSuperAdmin } = require('../../common/middleware/auth.middleware');
+const { requireSuperAdmin } = require('../../common/middleware/auth.middleware');
 const { loginLimiter, otpSendIpLimiter } = require('../../common/middleware/rate-limit.middleware');
 const { requireCorporateReviewer } = require('./corporate-reviewer');
+const { requireAdminAuth } = require('./auth/admin-session.middleware');
+const { adminNoStore, adminAuthErrorHandler } = require('./auth/admin-auth.errors');
+const { adminAuthRouter } = require('./auth/admin-auth.routes');
+const { adminRecoveryRouter } = require('./auth/admin-recovery.routes');
+const { adminOriginGuard } = require('./auth/admin-origin.middleware');
 const {
   login,
   me,
-  logout,
   getAdmins,
-  postAdmin,
-  deleteAdminAccount,
   getPendingRegistrations,
   getRegistration,
   postApproveRegistration,
@@ -46,17 +48,33 @@ const {
 
 const adminRouter = Router();
 
+// Middleware order:
+//   1. no-store on every Admin response;
+//   2. the new authentication routes (public invitation / registration / login steps, refresh and
+//      logout), each with its own strict origin guard, rate limit and validation - mounted before
+//      any authentication middleware, so credentials sent to the public ones are never consulted;
+//      The recovery routes (approval / rejection step-ups and decisions behind a superadmin
+//      session, link redemption and the replacement-passkey steps) are mounted the same way.
+//   3. the legacy password-only login, unchanged;
+//   4. everything else: the (lenient) origin guard, then the database-backed Admin auth, which
+//      accepts new session tokens and - only while enforcement is off and the Admin has no
+//      passkey - legacy tokens;
+//   5. the Admin error mapper (last), which leaves unknown errors to the app's generic 500.
+adminRouter.use(adminNoStore);
+adminRouter.use(adminAuthRouter);
+adminRouter.use(adminRecoveryRouter);
+
 adminRouter.post('/login', loginLimiter, login);
 
-adminRouter.use(requireAuth(['admin']));
+adminRouter.use(adminOriginGuard({ strict: false }));
+adminRouter.use(requireAdminAuth(['admin']));
 
 adminRouter.get('/me', me);
-adminRouter.post('/logout', logout);
 
-// Admin-account management is superadmin-only.
+// Listing Admin accounts is superadmin-only. Accounts are created and disabled only by the
+// operator scripts (scripts/admin-create.js, admin-invitation.js, admin-account.js); there is
+// deliberately no HTTP route that creates or deletes an Admin.
 adminRouter.get('/admins', requireSuperAdmin, getAdmins);
-adminRouter.post('/admins', requireSuperAdmin, postAdmin);
-adminRouter.delete('/admins/:id', requireSuperAdmin, deleteAdminAccount);
 
 // Corporate-registration review — creating a real Corporate/CorporateUser account is a
 // sensitive action, so it is not open to every admin: only a superadmin or an admin who was
@@ -110,5 +128,7 @@ adminRouter.get('/services', listServices);
 adminRouter.post('/services', requireSuperAdmin, createService);
 adminRouter.patch('/services/:slug', requireSuperAdmin, updateService);
 adminRouter.delete('/services/:slug', requireSuperAdmin, deleteService);
+
+adminRouter.use(adminAuthErrorHandler);
 
 module.exports = { adminRouter };

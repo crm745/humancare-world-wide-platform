@@ -7,3 +7,7 @@ node_modules
 /.integration-session.lock
 
 /src/generated/prisma
+
+# Test-only folders (isolated uploads and captured mail; mail holds one-time tokens)
+.e2e-uploads/
+.e2e-mail/

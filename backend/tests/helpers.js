@@ -50,6 +50,12 @@ async function createAdminAndLogin({ password = 'TestAdminPass@123', role = 'adm
   const email = uniqueEmail('admin');
   const passwordHash = await bcrypt.hash(password, 10);
   await prisma.adminUser.create({ data: { name: 'Test Admin', email, passwordHash, role } });
+  // This helper hands out a legacy password-login Admin token, for suites that need an Admin session for some
+  // other feature. With ADMIN_PASSKEY_ENFORCEMENT on (the Admin Lock rule, and the value in .env.test.example)
+  // the login is refused AND every later request with such a token is rejected (admin-session.middleware.js),
+  // so the setting is switched off for the rest of the calling test file (Jest gives each file its own copy of
+  // process.env, so this never reaches another suite). Suites that test enforcement itself do not use this helper.
+  delete process.env.ADMIN_PASSKEY_ENFORCEMENT;
   const res = await request(app).post('/admin/login').send({ email, password });
   return { token: res.body.token, email };
 }

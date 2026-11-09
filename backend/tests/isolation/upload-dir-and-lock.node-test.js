@@ -19,7 +19,9 @@ const DEFAULT_UPLOADS = path.join(BACKEND, 'uploads');
 // Runs `script` in a fresh node process from `cwd`, with the given extra environment, and returns its stdout.
 function run(script, { env = {}, cwd = BACKEND, drop = [] } = {}) {
   const base = { ...process.env };
-  delete base.HC_UPLOAD_DIR;
+  // The test-mode upload folder (NODE_ENV=test + UPLOAD_DIR, see upload.middleware.js) must not leak in from
+  // the shell either: these checks are about the default and HC_UPLOAD_DIR behaviour.
+  for (const key of ['HC_UPLOAD_DIR', 'NODE_ENV', 'UPLOAD_DIR']) delete base[key];
   for (const key of drop) delete base[key];
   return execFileSync(process.execPath, ['-e', script], { cwd, env: { ...base, ...env }, encoding: 'utf8' }).trim();
 }
@@ -90,6 +92,7 @@ test('every consumer takes the directory from the shared constant, and the quara
   })(path.join(BACKEND, 'src'));
 
   const middleware = path.join(BACKEND, 'src', 'middleware', 'upload.middleware.js');
+  const guardFile = path.join(BACKEND, 'src', 'common', 'safety', 'test-database-guard.js');
   const importsConstant = /\{[^}]*\bUPLOAD_DIR\b[^}]*\}\s*=\s*require\('(?:\.\.\/)+middleware\/upload\.middleware'\)/;
   const consumers = [];
   for (const file of sources) {
@@ -97,7 +100,10 @@ test('every consumer takes the directory from the shared constant, and the quara
     const text = fs.readFileSync(file, 'utf8');
     // No other file builds its own uploads directory.
     assert.doesNotMatch(text, /(?:join|resolve)\([^)]*['"`]uploads['"`]/, `${path.relative(BACKEND, file)} builds its own uploads path`);
-    if (/\bUPLOAD_DIR\b/.test(text)) {
+    // The test-database guard (Admin Lock) names UPLOAD_DIR as an ENVIRONMENT VARIABLE and returns the fixed
+    // test folder; it does not consume the middleware's constant. It still has to pass the "no own uploads
+    // path" check above, and the middleware (which calls it) is the only place the constant is defined.
+    if (file !== guardFile && /\bUPLOAD_DIR\b/.test(text)) {
       assert.match(text, importsConstant, `${path.relative(BACKEND, file)} uses UPLOAD_DIR without importing it from the middleware`);
       consumers.push(path.relative(BACKEND, file).split(path.sep).join('/'));
     }
@@ -142,9 +148,22 @@ test('assertNoIntegrationSession: throws a clear error when the lock exists, sil
   );
 });
 
+// A stand-in for a valid test environment: it passes the safety guard (src/common/safety/test-database-guard.js)
+// but is not a credential - dotenv and the Prisma client are replaced below, so nothing ever connects with it.
+const GUARD_PASSING_ENV = {
+  NODE_ENV: 'test',
+  DATABASE_URL: 'mysql://humancare_test_stub:not-a-password@127.0.0.1:3306/humancare_test?connection_limit=1',
+  UPLOAD_DIR: '.e2e-uploads',
+  EMAIL_PROVIDER: 'console',
+};
+// Variables of the surrounding shell that could change what the guard sees.
+const AMBIENT_GUARD_INPUTS = ['DATABASE_URL', 'EMAIL_PROVIDER', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'];
+
 // Loads global-setup.js in a child with `fs.existsSync(<lock>)` forced to `lockExists`, and with dotenv and
 // the Prisma client replaced by recorders, so nothing can connect to a database or read an env file.
-function runGlobalSetup(lockExists) {
+// `env` is the whole environment the guard may see (the shell's own guard inputs are removed first).
+// The Prisma stand-in answers the live-database question with a database that is NOT humancare_test.
+function runGlobalSetup(lockExists, env = {}) {
   const script = `
     const fs = require('fs');
     const Module = require('module');
@@ -157,7 +176,7 @@ function runGlobalSetup(lockExists) {
       if (request === 'dotenv') { seen.dotenvLoaded = true; return { config() {} }; }
       if (request === '@prisma/client') {
         seen.prismaLoaded = true;
-        return { PrismaClient: class { async $queryRawUnsafe(sql) { seen.queries.push(String(sql)); return [{ db: 'not_the_test_database' }]; } async $disconnect() {} } };
+        return { PrismaClient: class { async $queryRawUnsafe(sql) { seen.queries.push(String(sql)); return [{ db: 'not_the_test_database', account: 'humancare_test_stub@localhost' }]; } async $disconnect() {} } };
       }
       return realLoad.call(this, request, ...rest);
     };
@@ -165,11 +184,12 @@ function runGlobalSetup(lockExists) {
       () => console.log(JSON.stringify({ outcome: 'resolved', ...seen })),
       (err) => console.log(JSON.stringify({ outcome: 'rejected', message: err.message, ...seen })),
     );`;
-  return JSON.parse(run(script));
+  return JSON.parse(run(script, { env, drop: AMBIENT_GUARD_INPUTS }));
 }
 
 test('with the lock present, global setup aborts BEFORE reading env files, creating a Prisma client or running any SQL', () => {
-  const result = runGlobalSetup(true);
+  // Even with a fully valid test environment: the lock is checked first and decides alone.
+  const result = runGlobalSetup(true, GUARD_PASSING_ENV);
   assert.equal(result.outcome, 'rejected');
   assert.match(result.message, /integration session is active/);
   assert.equal(result.dotenvLoaded, false);
@@ -177,13 +197,30 @@ test('with the lock present, global setup aborts BEFORE reading env files, creat
   assert.deepEqual(result.queries, []);
 });
 
-test('without the lock, global setup proceeds to the database-name check (and stops there with the stub), running no cleanup SQL', () => {
-  const result = runGlobalSetup(false);
+test('without the lock, global setup passes the URL and environment guard and stops at the live-database check (with the stub), running no cleanup SQL', () => {
+  const result = runGlobalSetup(false, GUARD_PASSING_ENV);
   assert.equal(result.outcome, 'rejected');
-  assert.match(result.message, /Refusing to wipe database "not_the_test_database"/);
+  assert.match(result.message, /Test environment safety guard: connected database is not "humancare_test"/);
   assert.equal(result.dotenvLoaded, true);
   assert.equal(result.prismaLoaded, true);
   assert.equal(result.queries.length, 1);
   assert.match(result.queries[0], /SELECT DATABASE\(\)/);
   assert.ok(!result.queries.some((sql) => /DELETE/i.test(sql)));
+});
+
+test('without the lock but without a test database URL, global setup refuses BEFORE a Prisma client exists', () => {
+  const { DATABASE_URL, ...noUrl } = GUARD_PASSING_ENV;
+  const result = runGlobalSetup(false, noUrl);
+  assert.equal(result.outcome, 'rejected');
+  assert.match(result.message, /Test environment safety guard: DATABASE_URL is not set/);
+  assert.equal(result.prismaLoaded, false);
+  assert.deepEqual(result.queries, []);
+});
+
+test('without the lock, a URL for any other database (the development one) is refused BEFORE a Prisma client exists', () => {
+  const result = runGlobalSetup(false, { ...GUARD_PASSING_ENV, DATABASE_URL: 'mysql://humancare_test_stub:not-a-password@127.0.0.1:3306/humancare_dev' });
+  assert.equal(result.outcome, 'rejected');
+  assert.match(result.message, /DATABASE_URL must name the database "humancare_test"/);
+  assert.equal(result.prismaLoaded, false);
+  assert.deepEqual(result.queries, []);
 });

@@ -5,6 +5,7 @@
 // never break the login it describes, so failures are reported and swallowed.
 const { prisma } = require('../../db/prisma');
 const { maskContact } = require('../../common/utils/phone');
+const { sharedAuditEventWhere } = require('../../common/constants/admin-audit.constants');
 
 const EVENTS = {
   REGISTER_STARTED: 'register_started',
@@ -46,6 +47,8 @@ async function recordSecurityEvent(req, event, { userId = null, identifier = nul
 // than SECURITY_LOG_RETENTION_DAYS (default 365) are deleted by a daily job in
 // server.js. Don't set it below 180: CERT-In's 2022 directions ask for logs to be kept
 // at least that long. Confirm the exact period with legal.
+// Admin Lock audit events are NOT purged here: they have their own fixed retention
+// (modules/admin/auth/admin-audit-retention.js) that this setting cannot change.
 const DEFAULT_RETENTION_DAYS = 365;
 
 function retentionDays() {
@@ -55,7 +58,10 @@ function retentionDays() {
 
 async function purgeOldSecurityEvents() {
   const cutoff = new Date(Date.now() - retentionDays() * 24 * 60 * 60 * 1000);
-  const { count } = await prisma.securityEvent.deleteMany({ where: { createdAt: { lt: cutoff } } });
+  // Everything except Admin Lock events (admin/operator actors and "admin." system events).
+  const { count } = await prisma.securityEvent.deleteMany({
+    where: { AND: [{ createdAt: { lt: cutoff } }, sharedAuditEventWhere()] },
+  });
   return count;
 }
 

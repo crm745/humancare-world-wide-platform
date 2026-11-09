@@ -2,5 +2,6 @@
 const bitrixRetryJob = require('./bitrix-retry.job');
 const securityLogPurgeJob = require('./security-log-purge.job');
 const scanRequestDocumentsJob = require('./scan-request-documents.job');
+const adminAuditPurgeJob = require('./admin-audit-purge.job');
 
-module.exports = { jobs: [bitrixRetryJob, securityLogPurgeJob, scanRequestDocumentsJob] };
+module.exports = { jobs: [bitrixRetryJob, securityLogPurgeJob, scanRequestDocumentsJob, adminAuditPurgeJob] };

@@ -719,6 +719,11 @@ async function refreshAccessToken(req, res) {
   } catch (err) {
     return res.status(401).json({ error: "Invalid or expired refresh token" });
   }
+  // Admin sessions refresh only through POST /admin/refresh (database-backed, rotating). A legacy
+  // Admin refresh token must not mint new access tokens here.
+  if (payload.role === "admin") {
+    return res.status(401).json({ error: "Invalid or expired refresh token" });
+  }
 
   const claims = {
     sub: payload.sub,

@@ -212,7 +212,7 @@ async function postDocument(req, res, next) {
 async function downloadDocument(req, res, next) {
   try {
     const doc = await getCorporateDocumentForDownload(req.user.corporateId, req.params.id);
-    res.download(path.join(UPLOAD_DIR, path.basename(doc.fileUrl)), doc.name);
+    res.download(path.join(UPLOAD_DIR, path.basename(doc.fileUrl)), doc.name, { dotfiles: 'allow' });
   } catch (err) {
     next(err);
   }

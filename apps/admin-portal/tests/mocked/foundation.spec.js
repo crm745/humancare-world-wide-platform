@@ -30,7 +30,7 @@ test.describe('login form', () => {
     await expect(page.getByText(/valid email address/)).toBeVisible();
     await expect(email(page)).toHaveAttribute('aria-invalid', 'true');
 
-    expect(api.calls.some((c) => c.path === '/admin/login')).toBe(false);
+    expect(api.calls.some((c) => c.path.startsWith('/admin/login'))).toBe(false);
   });
 
   test('shows the server message for 401 and 429, and recovers from a network failure', async ({ page, context }) => {
@@ -45,7 +45,7 @@ test.describe('login form', () => {
     await signIn(page).click();
     await expect(page.getByRole('alert')).toContainText('Too many login attempts');
 
-    await context.route('http://localhost:4000/admin/login', (r) => r.abort('connectionrefused'));
+    await context.route('http://localhost:4000/admin/login/password', (r) => r.abort('connectionrefused'));
     await signIn(page).click();
     await expect(page.getByRole('alert')).toContainText('Unable to reach the server');
     await expect(signIn(page)).toBeEnabled();
@@ -212,9 +212,11 @@ test.describe('tab-focus session check', () => {
 
 test.describe('role-based navigation', () => {
   const cases = [
-    { label: 'regular admin', state: { role: 'admin', corporateReview: false }, count: 9, blocked: ['/admins', '/registrations'] },
-    { label: 'admin with corporate review', state: { role: 'admin', corporateReview: true }, count: 10, blocked: ['/admins'] },
-    { label: 'superadmin', state: { role: 'superadmin' }, count: 11, blocked: [] },
+    // Nine items for every admin (Incomplete Submissions and Drafts are open to all), plus Partner
+    // Applications with corporate review, plus Admins and Recovery (the Lock branch's) for a superadmin.
+    { label: 'regular admin', state: { role: 'admin', corporateReview: false }, count: 9, blocked: ['/admins', '/registrations', '/recovery'] },
+    { label: 'admin with corporate review', state: { role: 'admin', corporateReview: true }, count: 10, blocked: ['/admins', '/recovery'] },
+    { label: 'superadmin', state: { role: 'superadmin' }, count: 12, blocked: [] },
   ];
   for (const { label, state, count, blocked } of cases) {
     test(`${label}: ${count} nav items; restricted pages show an access-denied state`, async ({ page, context }) => {
