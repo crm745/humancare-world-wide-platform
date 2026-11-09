@@ -2,6 +2,8 @@ import {
   LayoutDashboard,
   Building2,
   ClipboardCheck,
+  FilePen,
+  FileSearch,
   Briefcase,
   Receipt,
   Stethoscope,
@@ -17,6 +19,9 @@ export const NAV_ITEMS = [
   { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, access: 'any' },
   { label: 'Corporates', path: '/corporates', icon: Building2, access: 'any' },
   { label: 'Partner Applications', path: '/registrations', icon: ClipboardCheck, access: 'corporateReview' },
+  // `exclude`: sub-paths that belong to another item, so only one of the two is highlighted.
+  { label: 'Incomplete Submissions', path: '/requests', icon: FileSearch, access: 'any', exclude: ['/requests/drafts'] },
+  { label: 'Drafts', path: '/requests/drafts', icon: FilePen, access: 'any' },
   { label: 'Cases', path: '/cases', icon: Briefcase, access: 'any' },
   { label: 'Billing', path: '/billing', icon: Receipt, access: 'any' },
   { label: 'Services', path: '/services', icon: Stethoscope, access: 'any' },

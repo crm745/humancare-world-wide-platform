@@ -212,9 +212,9 @@ test.describe('tab-focus session check', () => {
 
 test.describe('role-based navigation', () => {
   const cases = [
-    { label: 'regular admin', state: { role: 'admin', corporateReview: false }, count: 7, blocked: ['/admins', '/registrations'] },
-    { label: 'admin with corporate review', state: { role: 'admin', corporateReview: true }, count: 8, blocked: ['/admins'] },
-    { label: 'superadmin', state: { role: 'superadmin' }, count: 9, blocked: [] },
+    { label: 'regular admin', state: { role: 'admin', corporateReview: false }, count: 9, blocked: ['/admins', '/registrations'] },
+    { label: 'admin with corporate review', state: { role: 'admin', corporateReview: true }, count: 10, blocked: ['/admins'] },
+    { label: 'superadmin', state: { role: 'superadmin' }, count: 11, blocked: [] },
   ];
   for (const { label, state, count, blocked } of cases) {
     test(`${label}: ${count} nav items; restricted pages show an access-denied state`, async ({ page, context }) => {
@@ -277,7 +277,7 @@ test.describe('error boundary', () => {
     await page.unroute(/\/features\/cases\/pages\/CasesPage\.jsx/);
     await mainNav(page).getByRole('link', { name: 'Cases' }).click();
     await page.getByRole('button', { name: 'Reload page' }).click();
-    await expect(page.getByRole('heading', { name: 'Cases' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Cases' })).toBeVisible();
   });
 });
 

@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { LogOut, Menu, ShieldCheck, UserRound, X } from 'lucide-react';
 import logoMark from '@/assets/logo-mark.png';
 import { cn } from '@/utils/cn';
@@ -10,25 +10,47 @@ import { PageLoader } from '@/components/ui/Loading';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { NAV_ITEMS, canAccess } from '@/routes/navItems';
 
+const NAV_ITEM_CLASS = (active) =>
+  cn(
+    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+    active ? 'bg-brand-50 text-brand-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+  );
+
+// A normal item is a NavLink (active on its path and everything below it). An item with
+// `exclude` owns a sub-path that has its own item (Drafts under Incomplete Submissions), so it
+// works out "active" itself: that way the highlight and aria-current agree and only one shows.
+function NavItem({ item, pathname, onNavigate }) {
+  const { label, path, icon: Icon, exclude } = item;
+  const content = (
+    <>
+      <Icon className="h-[18px] w-[18px] shrink-0" />
+      <span className="truncate">{label}</span>
+    </>
+  );
+  if (!exclude) {
+    return (
+      <NavLink to={path} onClick={onNavigate} className={({ isActive }) => NAV_ITEM_CLASS(isActive)}>
+        {content}
+      </NavLink>
+    );
+  }
+  const under = (base) => pathname === base || pathname.startsWith(`${base}/`);
+  const active = under(path) && !exclude.some(under);
+  return (
+    <Link to={path} onClick={onNavigate} aria-current={active ? 'page' : undefined} className={NAV_ITEM_CLASS(active)}>
+      {content}
+    </Link>
+  );
+}
+
 function NavList({ items, onNavigate }) {
+  const { pathname } = useLocation();
   return (
     <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Main navigation">
       <ul className="space-y-0.5">
-        {items.map(({ label, path, icon: Icon }) => (
-          <li key={path}>
-            <NavLink
-              to={path}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                  isActive ? 'bg-brand-50 text-brand-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
-                )
-              }
-            >
-              <Icon className="h-[18px] w-[18px] shrink-0" />
-              <span className="truncate">{label}</span>
-            </NavLink>
+        {items.map((item) => (
+          <li key={item.path}>
+            <NavItem item={item} pathname={pathname} onNavigate={onNavigate} />
           </li>
         ))}
       </ul>

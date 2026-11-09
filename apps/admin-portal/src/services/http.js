@@ -3,6 +3,7 @@
 // send it, and nothing here (or anywhere) reads or stores a token.
 import axios from 'axios';
 import { API_BASE_URL, ApiError, UNAUTHORIZED_EVENT } from './config';
+import { errorMessage, readErrorBody } from './errorBody.mjs';
 
 export const http = axios.create({
   baseURL: API_BASE_URL,
@@ -11,16 +12,13 @@ export const http = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-const isPlainBody = (data) => typeof data === 'object' && data !== null && !(data instanceof Blob);
-
 http.interceptors.response.use(
   (res) => res,
-  (err) => {
+  async (err) => {
     // A cancelled request is not a failure.
     if (axios.isCancel(err)) return Promise.reject(err);
 
     const status = err.response?.status ?? 0;
-    const data = err.response?.data;
 
     // The 15-minute session cookie has lapsed (or was never there): tell the app so it
     // can drop in-memory state. Calls that expect this (login, the boot-time /admin/me
@@ -29,9 +27,8 @@ http.interceptors.response.use(
       window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
     }
 
-    const message =
-      (isPlainBody(data) ? data.error : undefined) ??
-      (status === 0 ? 'Unable to reach the server. Check your connection and try again.' : 'Something went wrong. Please try again.');
-    return Promise.reject(new ApiError(message, status, isPlainBody(data) ? data.code : undefined));
+    // Also reads a JSON error that arrived as a Blob (a failed `responseType: 'blob'` download).
+    const body = await readErrorBody(err.response?.data);
+    return Promise.reject(new ApiError(errorMessage(body, status), status, body?.code, body));
   },
 );
