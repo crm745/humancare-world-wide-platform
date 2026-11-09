@@ -124,7 +124,7 @@ export const COUNTRY_CODES = [
 // placeholder. A calling code can be shared by several countries (+1 is also Canada
 // and the Caribbean, +44 is also the Isle of Man, etc.) — this picks the one the code
 // is most commonly associated with, same convention every phone-number picker uses.
-const CALLING_CODE_COUNTRY = {
+export const CALLING_CODE_COUNTRY = {
   '+91': 'IN', '+971': 'AE', '+44': 'GB', '+1': 'US',
   '+7': 'RU', '+20': 'EG', '+27': 'ZA', '+30': 'GR', '+31': 'NL', '+32': 'BE', '+33': 'FR', '+34': 'ES', '+36': 'HU', '+39': 'IT', '+40': 'RO', '+41': 'CH', '+43': 'AT',
   '+45': 'DK', '+46': 'SE', '+47': 'NO', '+48': 'PL', '+49': 'DE', '+51': 'PE', '+52': 'MX', '+53': 'CU', '+54': 'AR', '+55': 'BR', '+56': 'CL', '+57': 'CO', '+58': 'VE',

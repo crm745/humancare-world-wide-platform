@@ -35,7 +35,6 @@ export default function EditProfile() {
       setBusy(false);
     }
   };
-
   const contactRow = (label, value, kind) => (
     <View>
       <FieldLabel large>{label}</FieldLabel>

@@ -636,7 +636,7 @@ describe('Google/Apple sign-in', () => {
     await withFakeGoogle(newGoogleUser(), async ({ app: gApp }) => {
       const { body } = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
       const noConsent = await request(gApp).post('/auth/social/register')
-        .send(socialBody(body.signupTicket, { consents: { termsPrivacy: true } }));
+        .send(socialBody(body.signupTicket, { consents: { termsPrivacy: false } }));
       expect(noConsent.status).toBe(400);
       expect(noConsent.body.code).toBe('consent_required');
 
@@ -709,6 +709,17 @@ describe('Google/Apple sign-in', () => {
         .send(socialBody(first.body.signupTicket, { name: undefined, firstName: 'Kiran', lastName: 'Shah' }));
       expect(res.status).toBe(200);
       expect(await gPrisma.user.findFirst({ where: { email: google.email } })).toMatchObject({ name: 'Kiran Shah', firstName: 'Kiran', lastName: 'Shah' });
+    });
+  });
+
+  it('signs a Google user up with only the Terms and Privacy consent', async () => {
+    const google = newGoogleUser();
+    await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
+      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const res = await request(gApp).post('/auth/social/register').send(socialBody(first.body.signupTicket, { consents: { termsPrivacy: true } }));
+      expect(res.status).toBe(200);
+      const user = await gPrisma.user.findFirst({ where: { email: google.email }, include: { consents: true } });
+      expect(user.consents.map((c) => [c.type, c.accepted])).toEqual([['terms_privacy', true]]);
     });
   });
 
@@ -807,8 +818,9 @@ describe('changing mobile or email', () => {
 describe('sign-up consents', () => {
   it.each([
     ['missing', undefined],
-    ['terms not accepted', { termsPrivacy: false, medicalDisclaimer: true }],
-    ['medical disclaimer not accepted', { termsPrivacy: true, medicalDisclaimer: false }],
+    ['terms not accepted', { termsPrivacy: false }],
+    ['terms not accepted by an older app version', { termsPrivacy: false, medicalDisclaimer: true, marketing: true }],
+    ['an empty object', {}],
   ])('refuses sign-up when consent is %s, and creates nothing', async (_label, consents) => {
     const body = registerBody({ consents });
     const res = await request(app).post('/auth/register').send(body);
@@ -818,7 +830,7 @@ describe('sign-up consents', () => {
     expect(sendCount(`+91${body.mobile}`)).toBe(0);
   });
 
-  it('saves each consent with its wording version, time and IP, including a marketing "no"', async () => {
+  it('saves each consent an older app version sends, under the old wording version, including a marketing "no"', async () => {
     const patient = await createPatient();
     const rows = await prisma.userConsent.findMany({ where: { userId: patient.user.id }, orderBy: { type: 'asc' } });
     expect(rows.map((r) => [r.type, r.accepted])).toEqual([
@@ -827,10 +839,34 @@ describe('sign-up consents', () => {
       ['terms_privacy', true],
     ]);
     for (const r of rows) {
-      expect(r.version).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(r.version).toBe('2026-10-26');
       expect(r.acceptedAt).toBeInstanceOf(Date);
       expect(r.ipAddress).toBeTruthy();
     }
+  });
+
+  it('accepts a sign-up with only the Terms and Privacy consent, and records only that', async () => {
+    const body = registerBody({ consents: { termsPrivacy: true } });
+    const res = await request(app).post('/auth/register').send(body);
+    expect(res.status).toBe(200);
+    const user = await prisma.user.findFirst({ where: { email: body.email }, include: { consents: true } });
+    expect(user.consents.map((c) => [c.type, c.accepted])).toEqual([['terms_privacy', true]]);
+    expect(user.consents[0].version).toBe('2026-11-07');
+    expect(user.consents[0].ipAddress).toBeTruthy();
+  });
+
+  it('does not record a medical disclaimer or marketing choice nobody was asked for', async () => {
+    const body = registerBody({ consents: { termsPrivacy: true } });
+    await request(app).post('/auth/register').send(body);
+    const user = await prisma.user.findFirst({ where: { email: body.email } });
+    const types = (await prisma.userConsent.findMany({ where: { userId: user.id } })).map((c) => c.type);
+    expect(types).not.toContain('medical_disclaimer');
+    expect(types).not.toContain('marketing');
+  });
+
+  it('says what is missing in plain words', async () => {
+    const res = await request(app).post('/auth/register').send(registerBody({ consents: { termsPrivacy: false } }));
+    expect(res.body.error).toBe('Please accept the Terms and Conditions and Privacy Policy to continue.');
   });
 
   it('drops the consents of a half-finished sign-up when it is replaced', async () => {

@@ -40,7 +40,12 @@ const TICKET_EXPIRED = "This step has expired. Please start again.";
 const DUPLICATE_ACCOUNT = "An account with that email or mobile number already exists.";
 // Which wording of the sign-up consents the app shows. Bump this whenever the consent
 // text in mobile/src/app/register.js changes, so each saved consent says what was agreed.
-const CONSENT_VERSION = "2026-10-26"; // company name spelling fixed in the marketing consent
+// The sign-up now shows ONE consent: the Terms and Conditions and Privacy Policy. Bump this whenever
+// that wording changes.
+const CONSENT_VERSION = "2026-11-07";
+// Older app versions still show three checkboxes (terms, medical disclaimer, marketing) and send all
+// three keys; their sign-ups are recorded under the wording they were actually shown.
+const LEGACY_CONSENT_VERSION = "2026-10-26";
 
 // Only the fields the app needs — never the hash, lockout counters or token version.
 // `hasPassword` is included when the row was loaded with its hash, so Edit Profile knows
@@ -145,25 +150,29 @@ function phoneCountryFailure(res, country) {
     : res.status(400).json({ error: "Enter a valid mobile number for the selected country." });
 }
 
-// Both sign-ups (the form, and Google/Apple + mobile) refuse to go on without the two
-// required consents, and save all three as proof of what was agreed.
+// Both sign-ups (the form, and Google/Apple + mobile) refuse to go on without the Terms and
+// Privacy consent, and save what was agreed as proof.
 function hasRequiredConsents(consents) {
-  return consents.termsPrivacy === true && consents.medicalDisclaimer === true;
+  return consents.termsPrivacy === true;
 }
 
 function consentRequired(res) {
   return res.status(400).json({
-    error: "Please accept the Terms & Privacy Policy and the medical disclaimer to continue.",
+    error: "Please accept the Terms and Conditions and Privacy Policy to continue.",
     code: "consent_required",
   });
 }
 
+// Only what the person was shown is recorded: never an agreement they were not asked for. The
+// terms consent is always there; the medical disclaimer and marketing rows come only from an
+// older app version that still shows those checkboxes (and so sends their keys).
 function consentRows(req, consents) {
-  return [
-    { type: "terms_privacy", accepted: true },
-    { type: "medical_disclaimer", accepted: true },
-    { type: "marketing", accepted: consents.marketing === true },
-  ].map((c) => ({ ...c, version: CONSENT_VERSION, ipAddress: req.ip || null }));
+  const legacy = "medicalDisclaimer" in consents || "marketing" in consents;
+  const rows = [{ type: "terms_privacy", accepted: true }];
+  if (consents.medicalDisclaimer === true) rows.push({ type: "medical_disclaimer", accepted: true });
+  if (typeof consents.marketing === "boolean") rows.push({ type: "marketing", accepted: consents.marketing });
+  const version = legacy ? LEGACY_CONSENT_VERSION : CONSENT_VERSION;
+  return rows.map((c) => ({ ...c, version, ipAddress: req.ip || null }));
 }
 
 // Step 1 of registration: the account is created straight away but unverified, with the
