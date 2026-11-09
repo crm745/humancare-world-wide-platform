@@ -4,6 +4,7 @@ const {
   createCaseByCorporate,
 } = require('./cases.service');
 const { addDocumentToCase } = require('../documents/documents.service');
+const { toSafeDocument } = require('../documents/document-response');
 const { sendMedicalReportToBitrix } = require('../bitrix/bitrix.service');
 
 async function listMyCases(req, res, next) {
@@ -55,7 +56,8 @@ async function uploadCaseDocument(req, res, next) {
     });
     // Other document types (passport, ID…) have their own Bitrix fields; only the report is mapped so far.
     if (document.type === 'Medical Report') await sendMedicalReportToBitrix(caseRecord.bitrixLeadId, document);
-    res.status(201).json({ document });
+    // `document` was read in full (the Bitrix24 step above needs its fileUrl); the client gets the safe fields only.
+    res.status(201).json({ document: toSafeDocument(document) });
   } catch (err) {
     next(err);
   }

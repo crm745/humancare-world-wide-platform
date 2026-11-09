@@ -1,4 +1,5 @@
 const { prisma } = require('../../db/prisma');
+const { SAFE_DOCUMENT_SELECT } = require('../documents/document-response');
 const { sendExpoPush } = require('../../integrations/push/expo-push.service');
 const { createLead } = require('../bitrix/bitrix.service');
 const { leadInputFromCase } = require('../bitrix/bitrix-lead');
@@ -7,7 +8,8 @@ const { isBitrixSyncEnabled } = require('../bitrix/bitrix-config');
 const VALID_CASE_STATUSES = ['submitted', 'scheduled', 'in_progress', 'completed', 'cancelled'];
 const CASE_INCLUDE = {
   stageEvents: { orderBy: { occurredAt: 'asc' } },
-  documents: true,
+  // Never `documents: true`: that would send each row's stored path (fileUrl) to the client.
+  documents: { select: SAFE_DOCUMENT_SELECT },
   serviceRequest: { select: { id: true, userId: true, referenceNumber: true } },
 };
 
