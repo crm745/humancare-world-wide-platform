@@ -113,23 +113,28 @@ export function formatFileSize(bytes) {
 // The medical reports on the form: a tile for each file (with a remove button), an "Add file"
 // tile and a "Camera" link. Each file is checked here, before the request is sent, so a bad
 // one is caught while the person can still fix it.
-export function ReportTiles({ files, onChange, title }) {
+//
+// `maxFiles` and `multiple` are for adding to a request that exists already (default: the request
+// form's own limit, any number of files). With `multiple={false}` it holds one file: picking another
+// replaces it (and a pick that is not accepted leaves the current one alone).
+export function ReportTiles({ files, onChange, title, maxFiles = MAX_REPORT_FILES, multiple = true }) {
   const { t, toast } = useApp();
+  const limit = multiple ? maxFiles : 1;
 
   const add = (picked) => {
-    const next = [...files];
+    const next = multiple ? [...files] : [];
     for (const file of picked) {
       if (file.mimeType && !ALLOWED_MIME_TYPES.includes(file.mimeType)) { toast(t('req_file_type')); continue; }
       if (file.size && file.size > MAX_REPORT_BYTES) { toast(t('req_file_big')); continue; }
       if (next.some((f) => f.uri === file.uri || (f.name === file.name && f.size === file.size))) continue;
-      if (next.length >= MAX_REPORT_FILES) { toast(t('req_file_max').replace('{n}', MAX_REPORT_FILES)); break; }
+      if (next.length >= limit) { toast(t('req_file_max').replace('{n}', limit)); break; }
       next.push(file);
     }
-    onChange(next);
+    onChange(multiple || next.length ? next : files);
   };
 
   const pickFiles = async () => {
-    const result = await DocumentPicker.getDocumentAsync({ type: ALLOWED_MIME_TYPES, multiple: true, copyToCacheDirectory: true });
+    const result = await DocumentPicker.getDocumentAsync({ type: ALLOWED_MIME_TYPES, multiple, copyToCacheDirectory: true });
     if (result.canceled) return;
     // The picker's `type` is only a hint to the OS file dialog, so each file is checked in add().
     add(result.assets.map((a) => ({ uri: a.uri, name: a.name, mimeType: a.mimeType, size: a.size })));

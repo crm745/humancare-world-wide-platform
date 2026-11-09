@@ -1,6 +1,7 @@
 // Mock data mirroring interactive-prototype/app.html. Replace with API calls
 // (see docs/ROADMAP.md §3) once the mobile app is wired to the backend.
 import { COUNTRY_NAME_BY_ISO } from './countries';
+import { normalizeServiceKey } from '../lib/privateCharter';
 
 // Home / Select Service grid. Private Charter and Commercial Escort used to be
 // combined under one "Air Ambulance" tile that opened a sub-menu picking between the
@@ -32,14 +33,16 @@ export const DECEASED_RELATIONS = ['Father', 'Mother', 'Brother', 'Sister', 'Spo
 // What a request is submitted as: the name people see, and the key the backend maps to
 // Bitrix's "Required Service" (backend src/modules/bitrix/bitrix-lead.js).
 export function requestService(draft, services) {
-  const title = (services[draft.service] || services.air).title;
-  if (needsAirlineMode(draft.service) && draft.airlineMode) {
-    return { title: `${title} — ${AIRLINE_MODE_LABELS[draft.airlineMode]}`, key: `${draft.service}_${draft.airlineMode}` };
+  // The generic "air" service is Private Charter: it is sent under that key and name.
+  const service = normalizeServiceKey(draft.service);
+  const title = (services[service] || services.air).title;
+  if (needsAirlineMode(service) && draft.airlineMode) {
+    return { title: `${title} — ${AIRLINE_MODE_LABELS[draft.airlineMode]}`, key: `${service}_${draft.airlineMode}` };
   }
-  if (isMortal(draft.service) && draft.mortalTransfer) {
-    return { title: `${title} — ${MORTAL_TRANSFER_LABELS[draft.mortalTransfer]}`, key: `${draft.service}_${draft.mortalTransfer}` };
+  if (isMortal(service) && draft.mortalTransfer) {
+    return { title: `${title} — ${MORTAL_TRANSFER_LABELS[draft.mortalTransfer]}`, key: `${service}_${draft.mortalTransfer}` };
   }
-  return { title, key: draft.service };
+  return { title, key: service };
 }
 
 // Label keys for each service filter value.

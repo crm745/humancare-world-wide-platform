@@ -4,6 +4,7 @@ import { apiGet } from '../lib/api';
 import { getAccessToken } from '../lib/session';
 import { profileFromUser } from '../lib/profile';
 import { draftForService, needsCareLevel } from '../lib/requestForm';
+import { clearErrorsForPatch } from '../lib/privateCharter';
 
 const AppContext = createContext(null);
 
@@ -26,6 +27,11 @@ export const INITIAL_DRAFT = {
   age: '',
   gender: '',
   location: '',
+  sentRequest: null, // Private Charter: { id, referenceNumber, title } once the request is saved, so a retry never saves it twice
+  uploaded: [], // Private Charter: the uri of each report file the server has accepted
+  uploadErrors: {}, // Private Charter: { uri: message } for the files that failed on the last attempt
+  originCity: null, // Private Charter: the verified city picked for Location, { geonameId, name, label, countryCode }
+  destCity: null, // Private Charter: the same for Destination
   country: '', // the country's name, as it is sent to the backend
   countryIso: '', // its ISO code, which the phone code follows (see pickRequestCountry)
   cc: '+91', // the calling code sent with the contact number: always the dial code of phoneCountry
@@ -64,6 +70,9 @@ export function AppProvider({ children }) {
   const [profile, setProfile] = useState(INITIAL_PROFILE);
   const [draft, setDraft] = useState(INITIAL_DRAFT);
   const [toastMsg, setToastMsg] = useState(null);
+  // The API's field errors from the last refused submission, { apiField: message } or null. Kept
+  // apart from the draft so the answers are never touched; changing a field clears its own error.
+  const [serverErrors, setServerErrors] = useState(null);
   const toastTimer = useRef(null);
 
   const t = useCallback((key) => (I18N[lang] && I18N[lang][key]) ?? I18N.EN[key] ?? key, [lang]);
@@ -74,7 +83,10 @@ export function AppProvider({ children }) {
     toastTimer.current = setTimeout(() => setToastMsg(null), 2200);
   }, []);
 
-  const updateDraft = useCallback((patch) => setDraft((d) => ({ ...d, ...patch })), []);
+  const updateDraft = useCallback((patch) => {
+    setDraft((d) => ({ ...d, ...patch }));
+    setServerErrors((errors) => clearErrorsForPatch(errors, patch));
+  }, []);
 
   // Runs on every app/provider mount — not just the splash screen's — so a saved
   // session still gets a real name/email loaded even when the browser is reloaded
@@ -109,11 +121,13 @@ export function AppProvider({ children }) {
       setProfile,
       draft,
       updateDraft,
-      resetDraft: (service) => setDraft((d) => draftForService(d, service, INITIAL_DRAFT)),
+      resetDraft: (service) => { setDraft((d) => draftForService(d, service, INITIAL_DRAFT)); setServerErrors(null); },
+      serverErrors,
+      setServerErrors,
       toast,
       toastMsg,
     }),
-    [lang, t, session, profile, draft, updateDraft, toast, toastMsg]
+    [lang, t, session, profile, draft, updateDraft, serverErrors, toast, toastMsg]
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

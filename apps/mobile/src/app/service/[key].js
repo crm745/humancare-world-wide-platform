@@ -6,6 +6,7 @@ import { useApp } from '../../state/AppContext';
 import SERVICES from '../../data/services.json';
 import { IMAGES } from '../../data/images';
 import { apiGet } from '../../lib/api';
+import { isMissingLiveService } from '../../lib/serviceLookup';
 import { Body, Screen, TopBar } from '../../components/layout';
 import { Button, Card, Heading, SectionLabel, Text } from '../../components/ui';
 
@@ -20,7 +21,9 @@ export default function ServiceDetail() {
   useEffect(() => {
     apiGet(`/services/${key}`)
       .then(({ service }) => setLive(service))
-      .catch((err) => toast(err.message));
+      // A 404 only means "no editable text for this service" (see lib/serviceLookup.js): the bundled
+      // content is used silently. Any other failure is still shown.
+      .catch((err) => { if (!isMissingLiveService(err)) toast(err.message); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch only when the key changes
   }, [key]);
 

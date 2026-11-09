@@ -5,11 +5,14 @@ import { Check } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { apiGet } from '../lib/api';
 import { downloadAndShare } from '../lib/download';
-import { isMortalRequest, toUiStatus, formatDisplayDate } from '../lib/requestShape';
+import { formatDisplayDate } from '../lib/requestShape';
+import { trackingItemFromCase, trackingItemFromRequest } from '../lib/trackingItem';
 import { Body, Screen, TopBar } from '../components/layout';
-import { Card, InfoRow, Pill, Spacer, Text } from '../components/ui';
+import { Card, InfoRow, Spacer, Text } from '../components/ui';
 import { LoadError, LoadingState } from '../components/LoadingState';
 import { DocRow } from '../components/widgets';
+import DocumentHistory from '../components/request/DocumentHistory';
+import RequestStatusPill from '../components/request/RequestStatusPill';
 
 function stageEventsToTimeline(stageEvents, status) {
   const rows = stageEvents.map((ev, i) => ({
@@ -52,36 +55,8 @@ function Timeline({ rows }) {
 const TABS = [['overview', 'tab_overview'], ['timeline', 'tab_timeline'], ['docs', 'tab_documents']];
 
 // A patient's ServiceRequest (with its linked Case nested inside) and a corporate's Case
-// are different shapes from the backend — this flattens either one into what the UI
+// are different shapes from the backend — lib/trackingItem flattens either one into what the UI
 // below actually needs, so the rest of the screen doesn't care which it's looking at.
-function fromRequest(request) {
-  const c = request.case;
-  return {
-    referenceNumber: request.referenceNumber,
-    serviceType: request.serviceType,
-    origin: request.origin,
-    destination: request.destination,
-    status: request.status,
-    mortal: isMortalRequest(request),
-    patientLabel: `${request.patientName}${request.patientAge ? `, ${request.patientAge}` : ''}${request.patientGender ? ` / ${request.patientGender}` : ''}`,
-    stageEvents: c?.stageEvents || [],
-    documents: c?.documents || [],
-  };
-}
-
-function fromCase(c) {
-  return {
-    referenceNumber: c.referenceNumber,
-    serviceType: c.serviceType,
-    origin: c.origin,
-    destination: c.destination,
-    status: c.status,
-    patientLabel: c.patientName,
-    stageEvents: c.stageEvents || [],
-    documents: c.documents || [],
-  };
-}
-
 export default function Tracking() {
   const { t, toast } = useApp();
   const params = useLocalSearchParams();
@@ -94,7 +69,7 @@ export default function Tracking() {
     if (!params.id) return;
     const path = isCase ? `/corporate/cases/${params.id}` : `/requests/me/${params.id}`;
     apiGet(path)
-      .then((data) => setItem(isCase ? fromCase(data.case) : fromRequest(data.request)))
+      .then((data) => setItem(isCase ? trackingItemFromCase(data.case) : trackingItemFromRequest(data.request)))
       .catch((err) => { setFailed(true); toast(err.message); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per id/kind
   }, [params.id, isCase]);
@@ -113,7 +88,7 @@ export default function Tracking() {
       <TopBar title={t('tracking_details_title')} />
       <View className="flex-row items-center justify-between bg-white px-[18px] py-3.5">
         <Text className="font-inter-black text-[14.5px] text-navy">{item.referenceNumber} · {item.serviceType}</Text>
-        <Pill status={toUiStatus(item.status)} />
+        <RequestStatusPill pill={item.reviewPill} status={item.status} />
       </View>
       <View className="flex-row border-b border-line bg-white">
         {TABS.map(([id, key]) => (
@@ -126,7 +101,7 @@ export default function Tracking() {
       {tab === 'overview' && (
         <Body contentClassName="p-[22px]">
           <Card className="p-[18px]">
-            <InfoRow className="py-[13px]" label={t('lbl_status')} valueNode={<Pill status={toUiStatus(item.status)} />} />
+            <InfoRow className="py-[13px]" label={t('lbl_status')} valueNode={<RequestStatusPill pill={item.reviewPill} status={item.status} />} />
             <InfoRow className="py-[13px]" label={t('lbl_service')} value={item.serviceType} />
             <InfoRow className="py-[13px]" label={t('lbl_from')} value={item.origin} />
             <InfoRow className="py-[13px]" label={t('lbl_to')} value={item.destination} />
@@ -142,10 +117,18 @@ export default function Tracking() {
       )}
       {tab === 'docs' && (
         <Body contentClassName="p-[18px]">
-          {item.documents.length === 0 && <Text className="py-6 text-center text-[13px] text-faint">No documents uploaded yet.</Text>}
-          {item.documents.map((d) => (
-            <DocRow key={d.id} label={d.name} meta={d.fileSizeBytes ? `${Math.round(d.fileSizeBytes / 1024)} KB` : ''} onPress={() => downloadAndShare(`/documents/${d.id}/file`, d.name).catch((err) => toast(err.message))} />
-          ))}
+          {item.workflow ? (
+            // A request in the review workflow lists its own documents (every version, with how each stands).
+            // Display only: these are not opened or downloaded from here.
+            <DocumentHistory request={item.request} className="" />
+          ) : (
+            <>
+              {item.documents.length === 0 && <Text className="py-6 text-center text-[13px] text-faint">No documents uploaded yet.</Text>}
+              {item.documents.map((d) => (
+                <DocRow key={d.id} label={d.name} meta={d.fileSizeBytes ? `${Math.round(d.fileSizeBytes / 1024)} KB` : ''} onPress={() => downloadAndShare(`/documents/${d.id}/file`, d.name).catch((err) => toast(err.message))} />
+              ))}
+            </>
+          )}
           <Spacer min={14} />
         </Body>
       )}

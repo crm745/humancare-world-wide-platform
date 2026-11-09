@@ -11,7 +11,9 @@ import {
 import { nameOf } from '../../lib/phoneCountry';
 import { pickRequestCountry, pickRequestPhoneCountry } from '../../lib/requestForm';
 import { isValidAge, isValidDateString, isValidMobileNumber, isValidName } from '../../lib/validators';
+import { isPrivateCharter, isPrivateCharterAge, firstAnchorOnStep } from '../../lib/privateCharter';
 import { CountryPicker } from '../../components/NationalityPhone';
+import CityField from '../../components/request/CityField';
 import { Anchor, RequestFrame } from '../../components/request/RequestFrame';
 import { Field, FieldLabel, Input, Text } from '../../components/ui';
 import { Select, Sheet } from '../../components/widgets';
@@ -129,8 +131,12 @@ function SectionHeading({ children, first }) {
 // deceased instead, in calmer wording. What the person needs, and how to word it, comes on
 // the next page.
 export default function RequestStep1() {
-  const { t, draft, updateDraft } = useApp();
+  const { t, draft, updateDraft, serverErrors } = useApp();
   const mortal = isMortal(draft.service);
+  // Private Charter: the cities are picked from the server's verified list, and the API's own
+  // limits apply. Every other service keeps the free-text places.
+  const charter = isPrivateCharter(draft.service);
+  const serverError = (field) => (serverErrors ? serverErrors[field] : undefined);
   // Flips true the first time Continue is tapped while something required is still blank;
   // before that, an untouched required field shows no error (nobody wants red borders on a
   // form they haven't started filling in yet).
@@ -140,11 +146,11 @@ export default function RequestStep1() {
   // What is wrong, in page order. The first one is where the page scrolls to.
   const problems = [
     ['name', !isValidName(draft.name)],
-    ['age', draft.age.trim() === '' || !isValidAge(draft.age) || !draft.gender],
+    ['age', draft.age.trim() === '' || !isValidAge(draft.age) || (charter && !isPrivateCharterAge(draft.age)) || !draft.gender],
     ...(mortal ? [['relation', !draft.relation], ['deathPlace', !draft.deathPlace.trim()], ['deathDate', !isNotFuture(draft.deathDate)]] : []),
-    ['country', !draft.country],
-    ['location', !draft.location.trim()],
-    ['dest', !draft.dest.trim()],
+    ['country', !draft.country || (charter && !draft.countryIso)],
+    ['location', charter ? !draft.originCity : !draft.location.trim()],
+    ['dest', charter ? !draft.destCity : !draft.dest.trim()],
     ['phone', !isValidMobileNumber(draft.phone, draft.cc)],
     ['date', !isValidDateString(draft.date)],
     ...(needsAirlineMode(draft.service) ? [['airlineMode', !draft.airlineMode]] : []),
@@ -155,26 +161,26 @@ export default function RequestStep1() {
   return (
     <RequestFrame
       step={1} firstError={firstError} onInvalid={() => setAttempted(true)} onNext={() => router.push('/request/step2')}
-      nextKey="req_next_medical"
+      nextKey="req_next_medical" serverAnchor={firstAnchorOnStep(serverErrors, 1)}
     >
       <SectionHeading first>{t(mortal ? 'step1_heading_mortal' : 'step1_heading')}</SectionHeading>
       <Anchor id="name">
         <Field
           required label={t(mortal ? 'field_deceased_name' : 'field_patient_name')} placeholder={mortal ? 'Full name of the deceased' : "Enter patient's full name"}
           value={draft.name} onChangeText={(name) => updateDraft({ name })}
-          error={(attempted || draft.name) && !isValidName(draft.name) ? 'Enter a valid name.' : undefined}
+          error={(attempted || draft.name) && !isValidName(draft.name) ? 'Enter a valid name.' : serverError('patientName')}
         />
       </Anchor>
       <Anchor id="age">
         <View className="flex-row gap-2.5">
           <Field
             required className="flex-1" label={t(mortal ? 'field_deceased_age' : 'field_age')} placeholder="Age" keyboardType="number-pad" value={draft.age} onChangeText={(age) => updateDraft({ age })}
-            error={(attempted || draft.age) && (!draft.age.trim() || !isValidAge(draft.age)) ? 'Enter a valid age.' : undefined}
+            error={(attempted || draft.age) && (!draft.age.trim() || !isValidAge(draft.age) || (charter && !isPrivateCharterAge(draft.age))) ? 'Enter a valid age.' : serverError('patientAge')}
           />
           <View className="flex-1">
             <FieldLabel required>{t('field_gender')}</FieldLabel>
             <Select value={draft.gender} options={['Male', 'Female', 'Other']} onChange={(gender) => updateDraft({ gender })} title={t('field_gender')} placeholder="Select gender" />
-            {attempted && !draft.gender ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : null}
+            {attempted && !draft.gender ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : serverError('patientGender') ? <Text className="mt-1 text-[12px] text-danger">{serverError('patientGender')}</Text> : null}
           </View>
         </View>
       </Anchor>
@@ -209,19 +215,35 @@ export default function RequestStep1() {
           <Text className={`flex-1 text-[15px] ${draft.country ? '' : 'text-faint'}`} numberOfLines={1}>{draft.country || 'Select country'}</Text>
           <ChevronDown size={16} color="#97A4B8" />
         </Pressable>
-        {attempted && !draft.country ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : null}
+        {attempted && !draft.country ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : serverError('country') ? <Text className="mt-1 text-[12px] text-danger">{serverError('country')}</Text> : null}
       </Anchor>
       <Anchor id="location">
-        <Field
-          required label={t('field_location')} placeholder="City, Country" value={draft.location} onChangeText={(location) => updateDraft({ location })}
-          error={attempted && !draft.location.trim() ? 'This field is required.' : undefined}
-        />
+        {charter ? (
+          <CityField
+            required label={t('field_location')} city={draft.originCity} testID="origin-city"
+            onChange={(city) => updateDraft({ originCity: city, location: city.label })}
+            error={attempted && !draft.originCity ? 'Select a city from the list.' : serverError('origin')}
+          />
+        ) : (
+          <Field
+            required label={t('field_location')} placeholder="City, Country" value={draft.location} onChangeText={(location) => updateDraft({ location })}
+            error={attempted && !draft.location.trim() ? 'This field is required.' : undefined}
+          />
+        )}
       </Anchor>
       <Anchor id="dest">
-        <Field
-          required label={t('field_destination')} placeholder="City, Country" value={draft.dest} onChangeText={(dest) => updateDraft({ dest })}
-          error={attempted && !draft.dest.trim() ? 'This field is required.' : undefined}
-        />
+        {charter ? (
+          <CityField
+            required label={t('field_destination')} city={draft.destCity} testID="destination-city"
+            onChange={(city) => updateDraft({ destCity: city, dest: city.label })}
+            error={attempted && !draft.destCity ? 'Select a city from the list.' : serverError('destination')}
+          />
+        ) : (
+          <Field
+            required label={t('field_destination')} placeholder="City, Country" value={draft.dest} onChangeText={(dest) => updateDraft({ dest })}
+            error={attempted && !draft.dest.trim() ? 'This field is required.' : undefined}
+          />
+        )}
       </Anchor>
       <Anchor id="phone">
         <FieldLabel required>{t('field_contact_number')}</FieldLabel>
@@ -236,12 +258,12 @@ export default function RequestStep1() {
           </Pressable>
           <Input className="flex-1" placeholder="Enter number" keyboardType="phone-pad" value={draft.phone} onChangeText={(phone) => updateDraft({ phone })} />
         </View>
-        {(attempted || draft.phone) && !isValidMobileNumber(draft.phone, draft.cc) ? <Text className="mt-1 text-[12px] text-danger">{draft.phone ? 'Enter a valid number for the selected country.' : 'This field is required.'}</Text> : null}
+        {(attempted || draft.phone) && !isValidMobileNumber(draft.phone, draft.cc) ? <Text className="mt-1 text-[12px] text-danger">{draft.phone ? 'Enter a valid number for the selected country.' : 'This field is required.'}</Text> : serverError('patientContact') ? <Text className="mt-1 text-[12px] text-danger">{serverError('patientContact')}</Text> : null}
       </Anchor>
       <Anchor id="date">
         <DateField
           required label={t(mortal ? 'field_transfer_date' : 'field_preferred_date')} value={draft.date} onChange={(date) => updateDraft({ date })}
-          error={(attempted || draft.date) && !isValidDateString(draft.date) ? 'Enter a valid date.' : undefined}
+          error={(attempted || draft.date) && !isValidDateString(draft.date) ? 'Enter a valid date.' : serverError('preferredDate')}
         />
       </Anchor>
       {needsAirlineMode(draft.service) && (

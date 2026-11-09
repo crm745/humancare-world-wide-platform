@@ -6,6 +6,10 @@ import SERVICES from '../../data/services.json';
 import { EQUIPMENT_OPTIONS, isMortal, requestService } from '../../data/mock';
 import { navReplace } from '../../lib/nav';
 import { apiPost, apiUpload } from '../../lib/api';
+import { runSubmission } from '../../lib/requestUploads';
+import {
+  buildPrivateCharterPayload, fieldErrorsFromError, firstErrorLocation, isPrivateCharter, needsDocument, unplacedMessages,
+} from '../../lib/privateCharter';
 import { goToStep, RequestFrame } from '../../components/request/RequestFrame';
 import { InfoRow, SectionLabel, Text } from '../../components/ui';
 
@@ -29,7 +33,7 @@ function Section({ title, rows, onEdit, editLabel }) {
 
 // Step 3 of 3: check everything, then submit.
 export default function RequestReview() {
-  const { t, draft: d, updateDraft, toast } = useApp();
+  const { t, draft: d, updateDraft, toast, setServerErrors } = useApp();
   const [busy, setBusy] = useState(false);
   // null while the files are not uploading; otherwise which file, out of how many, and how far.
   const [uploading, setUploading] = useState(null);
@@ -46,6 +50,32 @@ export default function RequestReview() {
   const submit = async () => {
     setBusy(true);
     try {
+      if (isPrivateCharter(d.service)) {
+        // At least one document is required: nothing is sent (and no request is saved) without one.
+        if (needsDocument(d)) {
+          toast('Upload at least one document to submit this request.');
+          goToStep(2);
+          return;
+        }
+        // Private Charter is sent exactly as the server's validator expects it (see lib/privateCharter).
+        // The request is saved once; a file that fails stays pending (the next screen says which and
+        // offers a retry) and the answers and chosen files are kept (see lib/requestUploads).
+        const result = await runSubmission({
+          sentRequest: d.sentRequest, uploaded: d.uploaded, uploadErrors: d.uploadErrors, files: d.files,
+          createRequest: async () => {
+            const { request } = await apiPost('/requests', buildPrivateCharterPayload(d));
+            return { id: request.id, referenceNumber: request.referenceNumber, title: serviceTitle };
+          },
+          upload: (file, onProgress, sent) => apiUpload(`/requests/me/${sent.id}/documents`, file, false, onProgress),
+          onSent: updateDraft,
+          onProgress: setUploading,
+        });
+        updateDraft(result);
+        setUploading(null);
+        navReplace({ pathname: '/request/submitted', params: { id: result.sentRequest.referenceNumber, requestId: result.sentRequest.id, service: serviceTitle } });
+        return;
+      }
+      // Every other service keeps the body it has always sent.
       const { request } = await apiPost('/requests', {
         serviceType: serviceTitle,
         serviceKey,
@@ -88,7 +118,18 @@ export default function RequestReview() {
       navReplace({ pathname: '/request/submitted', params: { id: request.referenceNumber, requestId: request.id, service: serviceTitle } });
     } catch (err) {
       setUploading(null);
-      toast(err.message);
+      // The server refused a field: the form is left exactly as it was, each message goes under its
+      // field, and the person is taken to the first step that has one.
+      const fields = fieldErrorsFromError(err);
+      if (fields) {
+        setServerErrors(fields);
+        const { step } = firstErrorLocation(fields);
+        const other = unplacedMessages(fields);
+        toast(other.length ? other[0] : err.message);
+        if (step) goToStep(step);
+      } else {
+        toast(err.message);
+      }
     } finally {
       setBusy(false);
     }

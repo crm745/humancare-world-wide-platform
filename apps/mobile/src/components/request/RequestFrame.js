@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -80,13 +80,24 @@ function ServiceCard() {
 
 // `firstError()` returns the id of the first wrong field on this step (or null); a Continue
 // with an error scrolls to that field and runs `onInvalid` so the step starts showing errors.
-export function RequestFrame({ step, children, firstError, onInvalid, onNext, nextKey, label, busy, showService = true }) {
+// `serverAnchor` is the id of the first field the server refused on this step (or null): when it
+// appears, the page scrolls to that field so the message is not left off screen.
+export function RequestFrame({ step, children, firstError, onInvalid, onNext, nextKey, label, busy, showService = true, serverAnchor = null }) {
   const { t, toast, updateDraft } = useApp();
   const insets = useSafeAreaInsets();
   const scrollRef = useRef(null);
   const anchors = useRef({});
   const listY = useRef(0);
   const register = useCallback((id, y) => { anchors.current[id] = y; }, []);
+
+  useEffect(() => {
+    if (!serverAnchor) return undefined;
+    const timer = setTimeout(() => {
+      const y = anchors.current[serverAnchor];
+      if (y !== undefined) scrollRef.current?.scrollTo({ y: Math.max(0, listY.current + y - 16), animated: true });
+    }, 200); // after the step has laid its fields out
+    return () => clearTimeout(timer);
+  }, [serverAnchor]);
 
   // Coming back from the service list (with or without picking one) ends the swap.
   useFocusEffect(useCallback(() => {
