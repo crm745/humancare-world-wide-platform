@@ -45,7 +45,17 @@ const CARE_LEVEL_LEGACY_LABELS = {
   care_na: ['Not Applicable', 'लागू नहीं', 'लागू नाही', 'લાગુ નથી', 'వర్తించదు', 'غير منطبق'],
 };
 
+// The English label of each key, for the places that cannot translate (the PDF summary, the Bitrix
+// lead comment). A test compares it with the English strings of the mobile app.
+const CARE_LEVEL_LABEL_EN = {
+  care_icu: 'ICU / Critical',
+  care_stable: 'Stable / Monitored',
+  care_ambulatory: 'Ambulatory',
+  care_na: 'Not Applicable',
+};
+
 module.exports = {
+  CARE_LEVEL_LABEL_EN,
   MOBILITY, MOBILITY_LABEL, URGENCY, URGENCY_LABEL, URGENCY_TO_CASE, EQUIPMENT, isTransportKey,
   PRIVATE_CHARTER_KEY, PRIVATE_CHARTER_SERVICE_TYPE, GENDERS, CARE_LEVEL_KEYS, CARE_LEVEL_EXCLUSIVE, CARE_LEVEL_LEGACY_LABELS,
 };

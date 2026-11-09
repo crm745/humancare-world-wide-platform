@@ -1,5 +1,6 @@
 const PDFDocument = require('pdfkit');
 const { MOBILITY_LABEL, URGENCY_LABEL, EQUIPMENT } = require('../../common/constants/request.constants');
+const { careLevelText } = require('../../common/utils/care-level');
 
 // A date-only value (a preferred date, a date of death) is stored as that calendar day at 00:00 UTC.
 // Read it in UTC: toDateString() uses the server's own timezone, so on a server west of UTC it
@@ -49,7 +50,9 @@ function streamRequestSummaryPdf(res, request) {
   row(doc, 'Submitted:', new Date(request.createdAt).toLocaleString());
   row(doc, 'Urgency:', URGENCY_LABEL[request.urgency]);
   if (request.description) row(doc, mortal ? 'Details:' : 'Condition & diagnosis:', request.description);
-  row(doc, 'Care level:', request.careLevel);
+  // Keys read as English labels; so do the older translated labels, which the PDF's built-in font
+  // cannot draw (Hindi, Marathi, Gujarati, Telugu and Arabic printed as garbage or not at all).
+  row(doc, 'Care level:', careLevelText(request.careLevel, { translateLegacy: true }));
   row(doc, 'Patient mobility:', MOBILITY_LABEL[request.mobility]);
   row(doc, 'Required on board:', EQUIPMENT.filter(([field]) => request[field] === true).map(([, label]) => label).join(', '));
 
