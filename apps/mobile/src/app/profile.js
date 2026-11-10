@@ -1,35 +1,19 @@
-import { useEffect, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { Pressable, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
-import { Check, ChevronRight, Mail, Pencil, Smartphone } from 'lucide-react-native';
+import Constants from 'expo-constants';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BookOpen, Bell, Check, ChevronRight, CircleHelp, CreditCard, FileText, Globe, LogOut, ShieldCheck, User } from 'lucide-react-native';
 import { initialsOf, useApp } from '../state/AppContext';
 import { LANGUAGES } from '../data/mock';
 import { navReplace } from '../lib/nav';
-import { apiGet } from '../lib/api';
 import { clearTokens } from '../lib/session';
-import { Body, BottomNav, IconButton, Screen, TopBar } from '../components/layout';
-import { Button, Card, InfoRow, Text } from '../components/ui';
+import { BottomNav, Screen, useScrollToTopOnTabTap } from '../components/layout';
+import { Text } from '../components/ui';
 import { Sheet } from '../components/widgets';
-import { Spinner } from '../components/Spinner';
 
-// `value` null = still loading: a small spinner instead of a misleading "0".
-function Stat({ value, label, color, onPress, middle }) {
-  return (
-    <Pressable onPress={onPress} className={`flex-1 items-center ${middle ? 'border-x border-line' : ''}`}>
-      {value === null ? (
-        <View className="h-[30px] justify-center"><Spinner size={20} color="#1A73E8" trackColor="#E7F0FE" /></View>
-      ) : (
-        <Text className={`font-inter-black text-[22px] ${color}`}>{value}</Text>
-      )}
-      <Text className="mt-1 text-[11px] text-faint">{label}</Text>
-    </Pressable>
-  );
-}
-
-function Chevron() {
-  const { isRTL } = useApp();
-  return <View style={isRTL ? { transform: [{ scaleX: -1 }] } : null}><ChevronRight size={16} color="#97A4B8" /></View>;
-}
+const TAB_BAR = 64;
+const MAX_WIDTH = 720;
 
 function LanguageSheet({ visible, onClose }) {
   const { t, lang, setLang, toast } = useApp();
@@ -55,85 +39,114 @@ function LanguageSheet({ visible, onClose }) {
   );
 }
 
+// One tappable row: icon tile, label, chevron, and nothing else.
+function Row({ Icon, label, onPress, first }) {
+  const { isRTL } = useApp();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        minHeight: 64, paddingVertical: 10, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 12,
+        borderTopWidth: first ? 0 : 1, borderTopColor: '#EEF1F6', backgroundColor: pressed ? '#F7F9FC' : '#FFFFFF',
+      })}
+    >
+      <View style={{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EEF3FB' }}>
+        <Icon size={20} strokeWidth={1.8} color="#1A5FC4" />
+      </View>
+      <Text className="font-inter-semibold" style={{ flex: 1, fontSize: 15.5, lineHeight: 21, color: '#17233D' }}>{label}</Text>
+      <View style={isRTL ? { transform: [{ scaleX: -1 }] } : null}>
+        <ChevronRight size={18} strokeWidth={2} color="#8A97AB" />
+      </View>
+    </Pressable>
+  );
+}
+
+function Section({ label, rows }) {
+  return (
+    <View>
+      <Text className="font-inter-bold" style={{ marginTop: 4, marginLeft: 4, fontSize: 12, lineHeight: 16, letterSpacing: 0.96, color: '#5B6B84', textTransform: 'uppercase' }}>{label}</Text>
+      <View style={{ marginTop: 8, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E4E9F2', borderRadius: 18, overflow: 'hidden' }}>
+        {rows.map((row, i) => <Row key={row.label} first={i === 0} {...row} />)}
+      </View>
+    </View>
+  );
+}
+
 export default function Profile() {
-  const { t, isCorporate, profile, lang, toast } = useApp();
+  const { t, isCorporate, profile, toast } = useApp();
+  const insets = useSafeAreaInsets();
   const [langSheet, setLangSheet] = useState(false);
-  const [counts, setCounts] = useState(null); // null until loaded
+  const scrollRef = useRef(null);
+  useScrollToTopOnTabTap(scrollRef);
 
-  useEffect(() => {
-    const path = isCorporate ? '/corporate/cases' : '/requests/me';
-    const key = isCorporate ? 'cases' : 'requests';
-    apiGet(path)
-      .then((data) => {
-        const rows = data[key];
-        const active = rows.filter((r) => r.status === 'submitted' || r.status === 'scheduled' || r.status === 'in_progress').length;
-        const done = rows.filter((r) => r.status === 'completed').length;
-        setCounts({ total: rows.length, active, done });
-      })
-      .catch((err) => {
-        toast(err.message);
-        setCounts({ total: '–', active: '–', done: '–' }); // stop the spinners; the toast says why
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once on mount
-  }, [isCorporate]);
-
-  const shown = (n) => (counts ? String(n) : null);
-  const stats = isCorporate
-    ? { total: shown(counts?.total), active: shown(counts?.active), done: shown(counts?.done), totalLbl: t('lbl_total'), doneLbl: t('lbl_done') }
-    : { total: shown(counts?.total), active: shown(counts?.active), done: shown(counts?.done), totalLbl: t('lbl_total_requests'), doneLbl: t('status_completed') };
-  const openStat = (status) => (isCorporate ? navReplace('/corporate-dashboard') : navReplace(`/my-requests?status=${status}`));
-  const langLabel = LANGUAGES.find((l) => l.code === lang).label;
   // Signed-out people already have an account, so they land on their login screen.
-  const signOut = async () => { await clearTokens(); navReplace(isCorporate ? '/corporate-login' : '/welcome'); };
+  // The destination is shown first, then the tokens are cleared: clearing them while this screen is still open
+  // would let the auth gate send the person to Login before Getting Started opens.
+  const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/welcome'); await clearTokens(); };
+  const soon = () => toast(t('prof_soon'));
+
+  const account = [
+    { Icon: User, label: t('prof_personal'), onPress: soon },
+    { Icon: FileText, label: t('prof_documents'), onPress: () => router.push('/my-documents') },
+    { Icon: CreditCard, label: t('prof_payment'), onPress: soon },
+  ];
+  const preferences = [
+    { Icon: Globe, label: t('prof_language'), onPress: () => setLangSheet(true) },
+    { Icon: Bell, label: t('prof_notifications'), onPress: () => router.push('/notifications') },
+    { Icon: ShieldCheck, label: t('prof_privacy'), onPress: () => router.push('/privacy') },
+  ];
+  const support = [
+    { Icon: CircleHelp, label: t('prof_help'), onPress: () => router.push('/help-support') },
+    { Icon: BookOpen, label: t('prof_terms'), onPress: () => router.push('/terms') },
+  ];
+
+  const email = profile.email || '';
+  const place = [profile.city, profile.country].filter(Boolean).join(', ');
+  const version = Constants.expoConfig?.version || '1.0.0';
 
   return (
-    <Screen>
-      <TopBar title={t('profile_title')} />
-      <Body withNav contentClassName="px-[18px] pb-10 pt-[22px]">
-        <Card className="mb-5 flex-row items-center gap-3.5 p-[18px]">
-          <View className="h-14 w-14 items-center justify-center rounded-2xl bg-primary-soft">
-            <Text className="font-inter-black text-[18.5px] text-primary">{initialsOf(profile.name)}</Text>
-          </View>
-          <View className="min-w-0 flex-1">
-            <Text className="font-inter-black text-[16.5px]">{profile.name}</Text>
-            {isCorporate ? (
-              <Text className="mt-[5px] text-[12px] text-primary">{profile.email}</Text>
-            ) : (
-              <>
-                <View className="mt-[7px] flex-row items-center gap-[5px]">
-                  <Smartphone size={12} color="#97A4B8" />
-                  <Text className="font-inter-bold text-[11px] uppercase text-faint">{t('lbl_mobile')}</Text>
-                  <Text className="text-[12.5px] text-muted">{profile.cc} {profile.phone}</Text>
-                </View>
-                <View className="mt-1.5 flex-row items-center gap-[5px]">
-                  <Mail size={12} color="#97A4B8" />
-                  <Text className="font-inter-bold text-[11px] uppercase text-faint">{t('lbl_email')}</Text>
-                  <Text className="flex-1 text-[12px] text-muted" numberOfLines={1}>{profile.email}</Text>
-                </View>
-              </>
-            )}
-          </View>
-          {!isCorporate && <IconButton onPress={() => router.push('/edit-profile')}><Pencil size={15} color="#45526B" /></IconButton>}
-        </Card>
+    <Screen bg="" style={{ backgroundColor: '#F5F8FC' }}>
+      <ScrollView
+        ref={scrollRef}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: TAB_BAR + insets.bottom + 24 }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: 16, paddingTop: 8, gap: 16 }}>
+          <Text accessibilityRole="header" className="font-inter-black" style={{ fontSize: 26, lineHeight: 32, letterSpacing: -0.26, color: '#0D2340' }}>{t('prof_title')}</Text>
 
-        <Card className="mb-5 px-[18px] py-5">
-          <Text className="mb-4 font-inter-black text-[12px] uppercase tracking-wide text-faint">{t('lbl_overview')}</Text>
-          <View className="flex-row">
-            <Stat value={stats.total} label={stats.totalLbl} color="text-navy" onPress={() => openStat('all')} />
-            <Stat middle value={stats.active} label={t('lbl_active')} color="text-primary" onPress={() => openStat('active')} />
-            <Stat value={stats.done} label={stats.doneLbl} color="text-success" onPress={() => openStat('completed')} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <View style={{ width: 68, height: 68, borderRadius: 20, backgroundColor: '#E7F0FE', alignItems: 'center', justifyContent: 'center' }}>
+              <Text className="font-inter-black" style={{ fontSize: 24, color: '#1A5FC4' }}>{initialsOf(profile.name || '')}</Text>
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text className="font-inter-black" style={{ fontSize: 21, lineHeight: 26, color: '#0D2340' }}>{profile.name}</Text>
+              <Text style={{ marginTop: 4, fontSize: 13.5, lineHeight: 19, color: '#5B6B84' }}>{place ? `${email} · ${place}` : email}</Text>
+            </View>
           </View>
-        </Card>
 
-        <Card className="mb-5 px-[18px] py-1.5">
-          <InfoRow className="py-[15px]" label={t('my_documents')} valueNode={<Chevron />} onPress={() => router.push('/my-documents')} />
-          <InfoRow className="py-[15px]" label={t('emergency_contact')} valueNode={<Chevron />} onPress={() => router.push('/help-support')} />
-          <InfoRow className="py-[15px]" label={t('help_support')} valueNode={<Chevron />} onPress={() => router.push('/help-support')} />
-          <InfoRow className="py-[15px]" last label={t('language')} value={`${langLabel} >`} valueClassName="text-primary" onPress={() => setLangSheet(true)} />
-        </Card>
+          <Section label={t('prof_account')} rows={account} />
+          <Section label={t('prof_preferences')} rows={preferences} />
+          <Section label={t('prof_support')} rows={support} />
 
-        <Button variant="danger" title={t('sign_out')} onPress={signOut} className="py-[15px]" />
-      </Body>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('prof_logout')}
+            onPress={signOut}
+            style={({ pressed }) => ({
+              minHeight: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+              backgroundColor: pressed ? '#F7F9FC' : '#FFFFFF', borderWidth: 1, borderColor: '#E4E9F2', borderRadius: 18,
+            })}
+          >
+            <LogOut size={20} strokeWidth={1.9} color="#C53030" />
+            <Text className="font-inter-bold" style={{ fontSize: 15.5, color: '#C53030' }}>{t('prof_logout')}</Text>
+          </Pressable>
+
+          <Text style={{ fontSize: 12, lineHeight: 16, color: '#5B6B84', textAlign: 'center' }}>{t('prof_footer').replace('{v}', version)}</Text>
+        </View>
+      </ScrollView>
       <BottomNav />
       <LanguageSheet visible={langSheet} onClose={() => setLangSheet(false)} />
     </Screen>

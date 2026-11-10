@@ -1,12 +1,10 @@
 import { useRef, useState } from 'react';
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { router } from 'expo-router';
-import { ChevronLeft } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state/AppContext';
 import { SERVICE_TILES } from '../data/mock';
-import { goBack } from '../lib/nav';
-import { BottomNav, Screen, useScrollToTopOnTabTap } from '../components/layout';
+import { BottomNav, Screen, TopBar, useScrollToTopOnTabTap } from '../components/layout';
 import { Text } from '../components/ui';
 import { openService } from '../components/ServiceGrid';
 import { ServiceIconTile } from '../components/home/ServiceIcon';
@@ -18,7 +16,7 @@ const MAX_WIDTH = 720;
 // Every service, two to a row, each with its subtitle. Same list and same destinations
 // as the tiles on Home.
 export default function AllServices() {
-  const { t, isRTL } = useApp();
+  const { t } = useApp();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const [sosH, setSosH] = useState(72);
@@ -29,19 +27,7 @@ export default function AllServices() {
 
   return (
     <Screen bg="" style={{ backgroundColor: '#F5F8FC' }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 12, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E4E9F2' }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('home_back')}
-          onPress={goBack}
-          style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#EEF3FB', alignItems: 'center', justifyContent: 'center' }}
-        >
-          <View style={isRTL ? { transform: [{ scaleX: -1 }] } : null}>
-            <ChevronLeft size={20} color="#0D2340" strokeWidth={2.4} />
-          </View>
-        </Pressable>
-        <Text className="font-inter-black" accessibilityRole="header" style={{ fontSize: 16, color: '#0D2340' }}>{t('filter_svc_all')}</Text>
-      </View>
+      <TopBar title={t('filter_svc_all')} />
 
       <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: TAB_BAR + insets.bottom + sosH + 16 }} showsVerticalScrollIndicator={false}>
         <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', padding: 14, gap: 10 }}>

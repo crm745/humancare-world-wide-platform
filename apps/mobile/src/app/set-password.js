@@ -4,7 +4,8 @@ import { Redirect } from 'expo-router';
 import { useApp } from '../state/AppContext';
 import { navReplace } from '../lib/nav';
 import { apiPost } from '../lib/api';
-import { saveTokens } from '../lib/session';
+import { beginSignIn, saveTokens } from '../lib/session';
+import { postSignInRoute } from '../lib/tokens';
 import { clearAuthSteps, getAuthStep } from '../lib/authFlow';
 import { profileFromUser } from '../lib/profile';
 import { PASSWORD_HINT, passwordProblem } from '../lib/validators';
@@ -34,18 +35,23 @@ export default function SetPassword() {
     if (!ready) return;
     setBusy(true);
     try {
+      const attempt = beginSignIn(); // before the request: a stale answer cannot restore a session
       const data = await apiPost('/auth/password/set', { ticket, password: pwd1 });
       clearAuthSteps();
       if (isSetup) {
-        await saveTokens({ token: data.token, refreshToken: data.refreshToken });
-        setProfile(profileFromUser(data.user));
+        // Activation signs the person in: usable credentials first (saveTokens refuses a missing or empty
+        // token and stores and announces nothing), the profile read before they are saved.
+        const profile = profileFromUser(data.user);
+        await saveTokens({ token: data.token, refreshToken: data.refreshToken }, { signIn: true, attempt });
+        setProfile(profile);
         setSession('patient');
-        navReplace('/home');
+        navReplace(postSignInRoute('patient'));
       } else {
         toast(data.message || 'Password updated. Please log in.');
         navReplace('/login');
       }
     } catch (err) {
+      if (err.code === 'stale_sign_in') return; // replaced by a newer sign-in or a sign-out
       toast(err.message);
       if (err.code === 'ticket_invalid') navReplace('/login');
     } finally {

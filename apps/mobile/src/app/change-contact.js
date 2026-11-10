@@ -6,8 +6,8 @@ import { COUNTRY_CODES, COUNTRY_CODE_LABELS } from '../data/mock';
 import { apiPost } from '../lib/api';
 import { codeStepFrom, setAuthStep } from '../lib/authFlow';
 import { isValidEmail, isValidMobileNumber } from '../lib/validators';
-import { BackButton, Body, Screen } from '../components/layout';
-import { Button, Field, FieldLabel, Heading, Input, Spacer, Text } from '../components/ui';
+import { Body, Screen, TopBar } from '../components/layout';
+import { Button, Field, FieldLabel, Input, Spacer, Text } from '../components/ui';
 import { PasswordField, Select } from '../components/widgets';
 
 // Change mobile or email, step 1 (`kind` = "mobile" | "email"): current password + the
@@ -51,10 +51,9 @@ export default function ChangeContact() {
 
   return (
     <Screen bg="bg-white">
-      <View className="px-[26px] pt-[26px]"><BackButton /></View>
+      <TopBar title={t(isMobile ? 'change_mobile_title' : 'change_email_title')} />
       <Body contentClassName="px-[26px] pb-[26px] pt-5">
-        <Heading className="text-center text-[23.5px]">{t(isMobile ? 'change_mobile_title' : 'change_email_title')}</Heading>
-        <Text className="mb-[26px] mt-2.5 text-center text-[14.5px] text-muted">
+        <Text className="mb-[26px] text-center text-[14.5px] text-muted">
           {t('change_contact_current')} <Text className="font-inter-bold text-navy">{current}</Text>
         </Text>
         <View className="gap-[18px]">
