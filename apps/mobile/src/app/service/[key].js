@@ -6,11 +6,12 @@ import { useApp } from '../../state/AppContext';
 import SERVICES from '../../data/services.json';
 import { IMAGES } from '../../data/images';
 import { apiGet } from '../../lib/api';
+import { isMissingLiveService } from '../../lib/serviceLookup';
 import { Body, Screen, TopBar } from '../../components/layout';
 import { Button, Card, Heading, SectionLabel, Text } from '../../components/ui';
 
 export default function ServiceDetail() {
-  const { t, toast, resetDraft, isCorporate } = useApp();
+  const { t, toast, resetDraft, isCorporate, draft } = useApp();
   const { key } = useLocalSearchParams();
   const local = SERVICES[key] || SERVICES.air;
   // stats + img aren't in the backend yet, so those stay bundled locally; everything
@@ -20,7 +21,9 @@ export default function ServiceDetail() {
   useEffect(() => {
     apiGet(`/services/${key}`)
       .then(({ service }) => setLive(service))
-      .catch((err) => toast(err.message));
+      // A 404 only means "no editable text for this service" (see lib/serviceLookup.js): the bundled
+      // content is used silently. Any other failure is still shown.
+      .catch((err) => { if (!isMissingLiveService(err)) toast(err.message); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch only when the key changes
   }, [key]);
 
@@ -32,8 +35,12 @@ export default function ServiceDetail() {
   // patient-only /requests flow — that endpoint rejects non-patient tokens outright.
   const start = () => {
     if (isCorporate) { router.push('/corporate-new-case'); return; }
+    // Picking another service from inside the request form: keep the patient, and come back
+    // to the form already open instead of stacking a second copy of it.
+    const swapping = draft.changingService;
     resetDraft(key);
-    router.push('/request/step1');
+    if (swapping) router.dismissTo('/request/step1');
+    else router.push('/request/step1');
   };
 
   return (

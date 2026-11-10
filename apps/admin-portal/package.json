@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "playwright test",
+    "test:real": "playwright test -c playwright.real.config.js",
     "test:config": "node --test build/apiUrl.test.mjs",
+    "test:unit": "node --test src/services/errorBody.test.mjs src/components/ui/pageState.test.mjs src/features/requests/requestStatus.test.mjs src/features/requests/requestDetails.test.mjs src/features/requests/documentActions.test.mjs src/features/requests/approval.test.mjs src/features/cases/caseView.test.mjs src/features/dashboard/dashboardStats.test.mjs",
     "verify:dist": "node scripts/verify-dist.mjs"
   },
   "dependencies": {

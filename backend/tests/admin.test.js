@@ -92,58 +92,40 @@ describe('admin-account management is superadmin-only', () => {
     expect(res.status).toBe(403);
   });
 
-  it('rejects a regular admin trying to create an admin account', async () => {
-    const { token } = await createAdminAndLogin({ role: 'admin' });
-    const res = await request(app)
-      .post('/admin/admins')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'Should Not Work', email: `blocked-${Date.now()}@example.com`, password: 'SomePass@123' });
-    expect(res.status).toBe(403);
-  });
-
-  it('lets a superadmin list, create, and delete admin accounts', async () => {
+  it('lets a superadmin list admin accounts, without any password data', async () => {
     const { token } = await createAdminAndLogin({ role: 'superadmin' });
-
-    const listRes = await request(app).get('/admin/admins').set('Authorization', `Bearer ${token}`);
-    expect(listRes.status).toBe(200);
-    expect(Array.isArray(listRes.body.admins)).toBe(true);
-
-    const email = `new-admin-${Date.now()}@example.com`;
-    const createRes = await request(app)
-      .post('/admin/admins')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'New Admin', email, password: 'NewAdminPass@123' });
-    expect(createRes.status).toBe(201);
-    expect(createRes.body.admin.role).toBe('admin'); // defaults to the lower tier
-    expect(createRes.body.admin.passwordHash).toBeUndefined();
-
-    // The newly created admin account can actually log in.
-    const newAdminLogin = await request(app).post('/admin/login').send({ email, password: 'NewAdminPass@123' });
-    expect(newAdminLogin.status).toBe(200);
-
-    const deleteRes = await request(app)
-      .delete(`/admin/admins/${createRes.body.admin.id}`)
-      .set('Authorization', `Bearer ${token}`);
-    expect(deleteRes.status).toBe(204);
+    const res = await request(app).get('/admin/admins').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.admins)).toBe(true);
+    expect(res.body.admins.length).toBeGreaterThan(0);
+    expect(JSON.stringify(res.body)).not.toMatch(/passwordHash|password_hash/i);
   });
 
-  it('rejects creating a second admin with an already-used email', async () => {
+  // Admins are provisioned only by the operator scripts (scripts/admin-create.js); the old
+  // password-based creation route no longer exists, for any role.
+  it('has no HTTP route that creates an admin account', async () => {
+    for (const role of ['superadmin', 'admin']) {
+      const { token } = await createAdminAndLogin({ role });
+      const email = `blocked-${role}-${Date.now()}@example.com`;
+      const res = await request(app)
+        .post('/admin/admins')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ name: 'Should Not Exist', email, password: 'SomePass@123' });
+      expect(res.status).toBe(404);
+      expect(await prisma.adminUser.findUnique({ where: { email } })).toBeNull();
+    }
+  });
+
+  // Admins are soft-disabled by the operator (scripts/admin-account.js), never hard-deleted.
+  it('has no HTTP route that deletes an admin account, which stays in place', async () => {
     const { token } = await createAdminAndLogin({ role: 'superadmin' });
     const { email } = await createAdminAndLogin({ role: 'admin' });
-    const res = await request(app)
-      .post('/admin/admins')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ name: 'Duplicate', email, password: 'SomePass@123' });
-    expect(res.status).toBe(409);
-  });
-
-  it('refuses to let a superadmin delete their own account', async () => {
-    const { token, email } = await createAdminAndLogin({ role: 'superadmin' });
-    const me = await request(app).get('/admin/me').set('Authorization', `Bearer ${token}`);
-    const res = await request(app)
-      .delete(`/admin/admins/${me.body.admin.id}`)
-      .set('Authorization', `Bearer ${token}`);
-    expect(res.status).toBe(400);
+    const target = await prisma.adminUser.findUnique({ where: { email } });
+    for (const id of [target.id, 999999]) {
+      const res = await request(app).delete(`/admin/admins/${id}`).set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(404);
+    }
+    expect(await prisma.adminUser.findUnique({ where: { email } })).not.toBeNull();
   });
 });
 

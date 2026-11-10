@@ -7,7 +7,7 @@ import { navReplace } from '../lib/nav';
 import { getAccessToken } from '../lib/session';
 
 const MIN_SPLASH_MS = 5000; // kept at 5 s for now
-// If reading the saved session ever hangs, give up and land on Login rather than
+// If reading the saved session ever hangs, give up and land on Getting Started rather than
 // leaving the splash up forever.
 const SESSION_TIMEOUT_MS = 4000;
 // The native animation driver exists on phones only; the browser preview animates in JS.
@@ -35,7 +35,7 @@ const TAGLINE_STYLE = { marginTop: 14, paddingHorizontal: 28, textAlign: 'center
 // shown for at least 2s (tap to skip) while we check for a saved session. A saved token
 // means they're already logged in — AppContext's own startup effect loads their real
 // profile in parallel (it runs on every app launch, not just this screen), so here we
-// just need to decide where to land: Home if there's a token to try, Login if there's
+// just need to decide where to land: Home if there's a token to try, Getting Started if there's
 // none.
 export default function Splash() {
   const { t } = useApp();
@@ -53,7 +53,7 @@ export default function Splash() {
 
     Promise.all([session, wait(MIN_SPLASH_MS)]).then(([token]) => {
       if (cancelled) return;
-      navReplace(token ? '/home' : '/login');
+      navReplace(token ? '/home' : '/welcome');
     });
 
     const fadeIn = Animated.timing(intro, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: NATIVE });
@@ -83,7 +83,7 @@ export default function Splash() {
   const translateX = sweep.interpolate({ inputRange: [0, 1], outputRange: [-segmentWidth, trackWidth] });
 
   return (
-    <Pressable className="flex-1" style={{ backgroundColor: BG_COLOR }} onPress={() => navReplace('/login')}>
+    <Pressable className="flex-1" style={{ backgroundColor: BG_COLOR }} onPress={() => navReplace('/welcome')}>
       {/* Sized to the screen: in the browser an image given only top/left/right/bottom shows at its own size. */}
       <Image source={SPLASH_BG} accessible={false} resizeMode="cover" style={{ position: 'absolute', top: 0, left: 0, width: screenW, height: screenH }} />
       <View className="flex-1 items-center justify-center" style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>

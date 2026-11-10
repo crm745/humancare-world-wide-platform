@@ -1,3 +1,4 @@
+/* global describe, it, expect */
 const {
   isValidName,
   isValidEmail,
@@ -90,4 +91,14 @@ describe('passwordProblem', () => {
   it('rejects fewer than 8 characters', () => expect(passwordProblem('abc123')).toMatch(/8 characters/));
   it('rejects a password with no number', () => expect(passwordProblem('abcdefghij')).toMatch(/letter and one number/));
   it('rejects a password with no letter', () => expect(passwordProblem('1234567890')).toMatch(/letter and one number/));
+});
+
+describe('isValidNamePart (first name, last name)', () => {
+  const { isValidNamePart } = require('../validators');
+  it.each(['Asha', 'Rao', 'Mary Ann', "O'Brien", 'Müller', 'आशा', 'K'])('accepts %s', (value) => expect(isValidNamePart(value)).toBe(true));
+  it.each(['', '   ', '1234', '---', undefined])('refuses %p', (value) => expect(isValidNamePart(value)).toBe(false));
+  it('refuses more than 50 characters, the same limit as the server', () => {
+    expect(isValidNamePart('x'.repeat(50))).toBe(true);
+    expect(isValidNamePart('x'.repeat(51))).toBe(false);
+  });
 });

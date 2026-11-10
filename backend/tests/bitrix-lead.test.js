@@ -16,8 +16,6 @@ const request = {
   preferredDate: new Date('2026-11-02T00:00:00Z'),
   careLevel: 'Basic',
   description: 'Needs oxygen on board',
-  specialRequirements: 'Oxygen support',
-  referralSource: 'Google Search',
 };
 const user = { name: 'Rohan Patil', mobile: '+919000000000', email: 'rohan@example.com' };
 
@@ -47,9 +45,9 @@ describe('Bitrix lead from a patient request', () => {
     expect(fields.UF_CRM_1768812329423).toBe('Delhi'); // Drop City
   });
 
-  it('puts special requirements in Current Medical Conditions and never sends "heard about us"', () => {
-    expect(fields.UF_CRM_1784283904).toBe('Oxygen support');
-    expect(JSON.stringify(fields)).not.toContain('Google Search');
+  it('leaves Current Medical Conditions empty for a patient request: the condition goes in the comment', () => {
+    expect(fields.UF_CRM_1784283904).toBeUndefined();
+    expect(fields.COMMENTS).toContain('Needs oxygen on board');
   });
 
   it('keeps the comment to the requirement and care level', () => {
@@ -77,6 +75,36 @@ describe('Bitrix lead from a patient request', () => {
   });
 });
 
+describe('Bitrix lead: medical page details', () => {
+  const medical = { ...request, serviceKey: 'privatecharter', mobility: 'bedridden', equipOxygen: true, equipCardiacMonitor: true, equipVentilator: false, urgency: 'critical_6h' };
+
+  it('adds mobility, equipment on board and urgency to the comment, and urgency to Transfer Urgency', () => {
+    const fields = buildLeadFields(leadInputFromRequest(medical, user));
+    expect(fields.COMMENTS).toBe(
+      'Requirement: Needs oxygen on board\nCare level: Basic\nMobility: Bedridden\nOn board: Oxygen, Cardiac monitor\nUrgency: Critical (within 6h)',
+    );
+    expect(fields.UF_CRM_1775637825406).toBe(380); // Transfer Urgency: Urgent
+  });
+
+  it('maps a planned request to Transfer Urgency: Planned', () => {
+    expect(buildLeadFields(leadInputFromRequest({ ...medical, urgency: 'planned' }, user)).UF_CRM_1775637825406).toBe(382);
+  });
+
+  it('says nothing about equipment when none was asked for, and sends no urgency when there is none', () => {
+    const fields = buildLeadFields(leadInputFromRequest({ ...medical, equipOxygen: false, equipCardiacMonitor: false, urgency: null }, user));
+    expect(fields.COMMENTS).not.toContain('On board');
+    expect(fields.COMMENTS).not.toContain('Urgency');
+    expect(fields.UF_CRM_1775637825406).toBeUndefined();
+  });
+
+  it('adds the report names to the comment', () => {
+    const { commentWithReports } = require('../src/modules/bitrix/bitrix-lead');
+    expect(commentWithReports('Requirement: x', ['a.pdf', 'b.jpg'])).toBe('Requirement: x\nMedical reports (2): a.pdf, b.jpg');
+    expect(commentWithReports('-', ['a.pdf'])).toBe('Medical reports (1): a.pdf');
+    expect(commentWithReports('Requirement: x', [])).toBe('Requirement: x');
+  });
+});
+
 describe('Bitrix lead from a corporate case', () => {
   it('is B2B, carries the urgency, and says it came from the portal', () => {
     const fields = buildLeadFields(leadInputFromCase({
@@ -88,6 +116,16 @@ describe('Bitrix lead from a corporate case', () => {
     expect(fields.UF_CRM_1775637825406).toBe(380); // Transfer Urgency: Urgent
     expect(fields.UF_CRM_1775637565398).toBe(362); // Gender: Male
     expect(fields.COMMENTS).toBe('Service: Air Ambulance');
+  });
+});
+
+describe('Bitrix lead from a corporate case: special requirements', () => {
+  it('still puts them in Current Medical Conditions', () => {
+    const fields = buildLeadFields(leadInputFromCase({
+      referenceNumber: 'CASE-9', patientName: 'Asha Rao', origin: 'Pune', destination: 'Dubai', serviceType: 'Air Ambulance',
+      specialRequirements: 'Oxygen support',
+    }));
+    expect(fields.UF_CRM_1784283904).toBe('Oxygen support');
   });
 });
 

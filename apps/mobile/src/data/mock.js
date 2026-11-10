@@ -1,6 +1,7 @@
 // Mock data mirroring interactive-prototype/app.html. Replace with API calls
 // (see docs/ROADMAP.md §3) once the mobile app is wired to the backend.
 import { COUNTRY_NAME_BY_ISO } from './countries';
+import { normalizeServiceKey } from '../lib/privateCharter';
 
 // Home / Select Service grid. Private Charter and Commercial Escort used to be
 // combined under one "Air Ambulance" tile that opened a sub-menu picking between the
@@ -32,14 +33,16 @@ export const DECEASED_RELATIONS = ['Father', 'Mother', 'Brother', 'Sister', 'Spo
 // What a request is submitted as: the name people see, and the key the backend maps to
 // Bitrix's "Required Service" (backend src/modules/bitrix/bitrix-lead.js).
 export function requestService(draft, services) {
-  const title = (services[draft.service] || services.air).title;
-  if (needsAirlineMode(draft.service) && draft.airlineMode) {
-    return { title: `${title} — ${AIRLINE_MODE_LABELS[draft.airlineMode]}`, key: `${draft.service}_${draft.airlineMode}` };
+  // The generic "air" service is Private Charter: it is sent under that key and name.
+  const service = normalizeServiceKey(draft.service);
+  const title = (services[service] || services.air).title;
+  if (needsAirlineMode(service) && draft.airlineMode) {
+    return { title: `${title} — ${AIRLINE_MODE_LABELS[draft.airlineMode]}`, key: `${service}_${draft.airlineMode}` };
   }
-  if (isMortal(draft.service) && draft.mortalTransfer) {
-    return { title: `${title} — ${MORTAL_TRANSFER_LABELS[draft.mortalTransfer]}`, key: `${draft.service}_${draft.mortalTransfer}` };
+  if (isMortal(service) && draft.mortalTransfer) {
+    return { title: `${title} — ${MORTAL_TRANSFER_LABELS[draft.mortalTransfer]}`, key: `${service}_${draft.mortalTransfer}` };
   }
-  return { title, key: draft.service };
+  return { title, key: service };
 }
 
 // Label keys for each service filter value.
@@ -121,7 +124,7 @@ export const COUNTRY_CODES = [
 // placeholder. A calling code can be shared by several countries (+1 is also Canada
 // and the Caribbean, +44 is also the Isle of Man, etc.) — this picks the one the code
 // is most commonly associated with, same convention every phone-number picker uses.
-const CALLING_CODE_COUNTRY = {
+export const CALLING_CODE_COUNTRY = {
   '+91': 'IN', '+971': 'AE', '+44': 'GB', '+1': 'US',
   '+7': 'RU', '+20': 'EG', '+27': 'ZA', '+30': 'GR', '+31': 'NL', '+32': 'BE', '+33': 'FR', '+34': 'ES', '+36': 'HU', '+39': 'IT', '+40': 'RO', '+41': 'CH', '+43': 'AT',
   '+45': 'DK', '+46': 'SE', '+47': 'NO', '+48': 'PL', '+49': 'DE', '+51': 'PE', '+52': 'MX', '+53': 'CU', '+54': 'AR', '+55': 'BR', '+56': 'CL', '+57': 'CO', '+58': 'VE',
@@ -171,6 +174,20 @@ export const EMERGENCY_TEL = '+919699999065';
 export const EMERGENCY_DISPLAY = '+91 96999 99065';
 export const OPS_EMAIL = 'ops@humancareworldwide.com';
 
-// "How did you hear about us?" options. Picking SOURCE_OTHER asks the user to type the answer.
-export const SOURCE_OTHER = 'Other';
-export const SOURCES = ['Google Search', 'Referral', 'Insurance Provider', 'Social Media', SOURCE_OTHER];
+
+// New Request form, medical page. Same values the backend accepts (backend
+// src/common/constants/request.constants.js); the labels come from i18n (`mobility_*`, `urgency_*`).
+export const MOBILITY_OPTIONS = ['bedridden', 'wheelchair', 'walking'];
+export const URGENCY_OPTIONS = ['critical_6h', 'urgent_24h', 'planned'];
+// [draft field, API field, i18n label key]
+export const EQUIPMENT_OPTIONS = [
+  ['equipOxygen', 'equipOxygen', 'equip_oxygen'],
+  ['equipCardiac', 'equipCardiacMonitor', 'equip_cardiac_monitor'],
+  ['equipVentilator', 'equipVentilator', 'equip_ventilator'],
+];
+// Reports attached to one request (the backend takes them one upload at a time).
+export const MAX_REPORT_FILES = 10;
+export const MAX_REPORT_BYTES = 10 * 1024 * 1024;
+
+// Create Account form: gender, as the API stores it. Labels are i18n `gender_<value>`.
+export const GENDER_OPTIONS = ['male', 'female', 'other', 'prefer_not_to_say'];

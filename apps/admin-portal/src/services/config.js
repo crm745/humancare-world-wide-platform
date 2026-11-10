@@ -29,11 +29,14 @@ function resolveApiBaseUrl() {
 export const API_BASE_URL = resolveApiBaseUrl();
 
 export class ApiError extends Error {
-  constructor(message, status = 0, code = undefined) {
+  // `body` is the parsed error response (or undefined), so callers can read fields beyond
+  // `error` and `code`, e.g. the approval `blockers` on a 409.
+  constructor(message, status = 0, code = undefined, body = undefined) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.body = body;
   }
 }
 

@@ -92,9 +92,23 @@ export function apiPatch(path, body) {
 // platform, so this branches: native uses expo-file-system's upload task (which
 // reports progress natively), web uses XMLHttpRequest (whose `upload.onprogress` is
 // the one place that web API still beats fetch).
-export async function apiUpload(path, file, isRetry = false, onProgress) {
+//
+// `fields` (optional) are extra text fields sent next to the file in the same multipart body, e.g.
+// { replacesDocumentId: 12 } to mark an earlier document as replaced. The file is always sent in the
+// `file` field of the same request; a missing/empty `fields` leaves the upload exactly as it was.
+// Values are sent as text, and null, undefined and '' are left out. A `file` key is ignored.
+//
+// Callers pass (path, file, false, onProgress[, fields]); `isRetry` is only used by the retry below.
+function formFields(fields) {
+  return Object.entries(fields || {})
+    .filter(([key, value]) => key !== 'file' && value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => [key, String(value)]);
+}
+
+export async function apiUpload(path, file, isRetry = false, onProgress, fields) {
   const token = await getAccessToken();
   const url = `${API_URL}${path}`;
+  const extra = formFields(fields);
 
   if (Platform.OS === 'web') {
     return new Promise((resolve, reject) => {
@@ -111,7 +125,7 @@ export async function apiUpload(path, file, isRetry = false, onProgress) {
         if (xhr.status === 401 && token && !isRetry) {
           try {
             await refreshAccessToken();
-            resolve(await apiUpload(path, file, true, onProgress));
+            resolve(await apiUpload(path, file, true, onProgress, fields));
           } catch {
             await clearTokens();
             navReplace('/login');
@@ -124,9 +138,19 @@ export async function apiUpload(path, file, isRetry = false, onProgress) {
         else reject(new Error(data.error || 'Upload failed. Please try again.'));
       };
       xhr.onerror = () => reject(new Error('Upload failed. Please try again.'));
-      const form = new FormData();
-      form.append('file', { uri: file.uri, name: file.name, type: file.mimeType || 'application/octet-stream' });
-      xhr.send(form);
+      // A browser needs the file itself in the form: the { uri, name, type } object that React
+      // Native accepts there turns into the text "[object Object]" and the server sees no file.
+      // The picked file's uri is a blob: URL, so fetch it back into a Blob.
+      fetch(file.uri)
+        .then((res) => res.blob())
+        .then((blob) => {
+          const form = new FormData();
+          for (const [key, value] of extra) form.append(key, value);
+          const typed = blob.type ? blob : blob.slice(0, blob.size, file.mimeType || 'application/octet-stream');
+          form.append('file', typed, file.name);
+          xhr.send(form);
+        })
+        .catch(() => reject(new Error('Upload failed. Please try again.')));
     });
   }
 
@@ -139,6 +163,7 @@ export async function apiUpload(path, file, isRetry = false, onProgress) {
       fieldName: 'file',
       mimeType: file.mimeType || 'application/octet-stream',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
+      ...(extra.length ? { parameters: Object.fromEntries(extra) } : {}),
     },
     (progress) => {
       if (onProgress && progress.totalBytesExpectedToSend > 0) {
@@ -154,7 +179,7 @@ export async function apiUpload(path, file, isRetry = false, onProgress) {
   if (result.status === 401 && token && !isRetry) {
     try {
       await refreshAccessToken();
-      return apiUpload(path, file, true, onProgress);
+      return apiUpload(path, file, true, onProgress, fields);
     } catch {
       await clearTokens();
       navReplace('/login');

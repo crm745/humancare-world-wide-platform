@@ -8,7 +8,7 @@
 // this scale, and avoids adding infrastructure nobody asked for.
 const { prisma } = require('../../db/prisma');
 const { createLead, sendMedicalReportToBitrix } = require('./bitrix.service');
-const { leadInputFromRequest, leadInputFromCase } = require('./bitrix-lead');
+const { leadInputFromRequest, leadInputFromCase, commentWithReports } = require('./bitrix-lead');
 const { isBitrixSyncEnabled } = require('./bitrix-config');
 
 const MAX_ATTEMPTS = 5;
@@ -27,22 +27,25 @@ const pendingWhere = (now = Date.now()) => ({
 
 // `label` is just for log lines; `model` is the Prisma delegate (prisma.serviceRequest
 // or prisma.case) so the same retry/backoff/alert logic isn't duplicated per source.
-// The newest uploaded medical report, if any: it was uploaded while the lead didn't exist
-// yet, so it goes across once the lead is made.
-const LATEST_REPORT = { where: { type: 'Medical Report' }, orderBy: { uploadedAt: 'desc' }, take: 1 };
+// Every uploaded medical report, oldest first: they were uploaded while the lead didn't exist
+// yet, so they go across once the lead is made. (A single-file Medical Report field in Bitrix
+// keeps the last one; the lead comment lists them all.)
+const ALL_REPORTS = { where: { type: 'Medical Report' }, orderBy: { uploadedAt: 'asc' } };
 
-async function retryModel(model, label, findCandidates, buildLeadInput, latestReport) {
+async function retryModel(model, label, findCandidates, buildLeadInput, reportsOf) {
   const candidates = await findCandidates();
   for (const record of candidates) {
     try {
-      const leadId = await createLead(buildLeadInput(record));
+      const input = buildLeadInput(record);
+      const leadId = await createLead(input);
       await model.update({
         where: { id: record.id },
         data: { bitrixLeadId: leadId, bitrixLastError: null, bitrixSyncFailedAt: null },
       });
       console.log(`Bitrix24 retry succeeded for ${label} ${record.referenceNumber} (attempt ${record.bitrixSyncAttempts + 1}).`);
-      const report = latestReport(record);
-      if (report) await sendMedicalReportToBitrix(leadId, report);
+      const reports = reportsOf(record);
+      const comments = commentWithReports(input.comments, reports.map((report) => report.name));
+      for (const report of reports) await sendMedicalReportToBitrix(leadId, report, { comments });
     } catch (err) {
       const attempts = record.bitrixSyncAttempts + 1;
       await model.update({
@@ -66,17 +69,17 @@ async function retryFailedBitrixSyncs() {
   const requestsRetried = await retryModel(
     prisma.serviceRequest,
     'request',
-    () => prisma.serviceRequest.findMany({ where: pendingWhere(), include: { user: true, case: { include: { documents: LATEST_REPORT } } } }),
+    () => prisma.serviceRequest.findMany({ where: pendingWhere(), include: { user: true, case: { include: { documents: ALL_REPORTS } } } }),
     (request) => leadInputFromRequest(request, request.user),
-    (request) => request.case?.documents[0],
+    (request) => request.case?.documents ?? [],
   );
 
   const casesRetried = await retryModel(
     prisma.case,
     'case',
-    () => prisma.case.findMany({ where: pendingWhere(), include: { documents: LATEST_REPORT } }),
+    () => prisma.case.findMany({ where: pendingWhere(), include: { documents: ALL_REPORTS } }),
     (caseRecord) => leadInputFromCase(caseRecord),
-    (caseRecord) => caseRecord.documents[0],
+    (caseRecord) => caseRecord.documents,
   );
 
   return requestsRetried + casesRetried;

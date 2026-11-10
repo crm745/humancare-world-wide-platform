@@ -5,10 +5,17 @@ import { Check, Download, Phone, Share2 } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { apiGet } from '../lib/api';
 import { downloadAndShare } from '../lib/download';
-import { isMortalRequest, toUiStatus, formatDisplayDate } from '../lib/requestShape';
+import { isMortalRequest, toUiStatus, formatDisplayDate, careLevelText } from '../lib/requestShape';
 import { Body, Screen, TopBar } from '../components/layout';
-import { Button, Card, InfoRow, Pill, Spacer, Text } from '../components/ui';
+import { Button, Card, InfoRow, Spacer, Text } from '../components/ui';
 import { LoadError, LoadingState } from '../components/LoadingState';
+import AdditionalDocuments from '../components/request/AdditionalDocuments';
+import DocumentHistory from '../components/request/DocumentHistory';
+import ReviewBanner from '../components/request/ReviewBanner';
+import RequestStatusPill from '../components/request/RequestStatusPill';
+import { documentsSummary } from '../lib/documentHistoryView';
+import { reviewPill } from '../lib/requestDocuments';
+import { trackingRoute } from '../lib/trackingItem';
 
 function Action({ Icon, label, onPress }) {
   return (
@@ -69,6 +76,12 @@ export default function RequestDetails() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per id
   }, [id]);
 
+  // Reloads the request after documents were sent. The screen keeps showing the current request while
+  // this runs (and if it fails), so an upload's results on screen are never lost to a failed reload.
+  const reload = () => apiGet(`/requests/me/${id}`)
+    .then(({ request: r }) => setRequest(r))
+    .catch((err) => toast(err.message));
+
   if (!request) {
     return (
       <Screen>
@@ -78,8 +91,10 @@ export default function RequestDetails() {
     );
   }
 
-  const docs = request.case?.documents || [];
-  const docsLabel = docs.length ? `${docs[0].name}${docs.length > 1 ? ` +${docs.length - 1}` : ''} >` : 'No documents yet';
+  // Workflow requests list requestDocuments; every other request keeps its Case documents (see documentHistoryView).
+  const docsLabel = documentsSummary(request);
+  // A workflow request's chip says the same as its banner; every other request keeps the usual chip.
+  const pill = reviewPill(request);
 
   const downloadSummary = async () => {
     try {
@@ -97,7 +112,7 @@ export default function RequestDetails() {
         message:
           `HumanCare World Wide request ${request.referenceNumber}\n` +
           `${request.serviceType} — ${request.origin} to ${request.destination}\n` +
-          `Status: ${t('status_' + toUiStatus(request.status))}`,
+          `Status: ${pill ? pill.label : t('status_' + toUiStatus(request.status))}`,
       });
     } catch (err) {
       // On web, browsers without the Web Share API reject here (desktop Firefox,
@@ -114,8 +129,9 @@ export default function RequestDetails() {
         <Text className="mb-[5px] text-[12.5px] text-faint">{request.referenceNumber}</Text>
         <View className="mb-6 flex-row items-center justify-between">
           <Text className="font-inter-black text-[20px] text-navy">{request.serviceType}</Text>
-          <Pill status={toUiStatus(request.status)} />
+          <RequestStatusPill pill={pill} status={request.status} />
         </View>
+        <ReviewBanner request={request} />
         <View className="mb-6 flex-row gap-2.5">
           <Action Icon={Download} label={t('btn_download_summary')} onPress={downloadSummary} />
           <Action Icon={Share2} label={t('btn_share')} onPress={shareRequest} />
@@ -124,19 +140,21 @@ export default function RequestDetails() {
         <Card>
           <InfoRow label={t('lbl_request_date')} value={formatDisplayDate(request.createdAt)} />
           <InfoRow label={t(isMortalRequest(request) ? 'lbl_deceased_name' : 'lbl_patient_name')} value={request.patientName} />
-          <InfoRow label={t('field_care_level')} value={request.careLevel || '—'} />
+          <InfoRow label={t('field_care_level')} value={careLevelText(request.careLevel, t) || '—'} />
           <InfoRow label={t('lbl_service')} value={request.serviceType} />
           <InfoRow label={t('lbl_from')} value={request.origin} />
           <InfoRow label={t('lbl_to')} value={request.destination} />
           <InfoRow label={t(isMortalRequest(request) ? 'field_transfer_date' : 'lbl_expected_date')} value={request.preferredDate ? formatDisplayDate(request.preferredDate) : '—'} />
-          <InfoRow last label={t('lbl_documents')} value={docsLabel} valueClassName="text-primary" onPress={() => router.push({ pathname: '/tracking', params: { id: request.id, tab: 'docs' } })} />
+          <InfoRow last label={t('lbl_documents')} value={docsLabel} valueClassName="text-primary" onPress={() => router.push(trackingRoute(request, 'docs'))} />
         </Card>
         <Card className="mt-5">
           <Text className="mb-[22px] font-inter-black text-[14.5px] text-navy">{t('lbl_tracking_status')}</Text>
           <StatusTracker status={request.status} />
         </Card>
+        <DocumentHistory request={request} />
+        <AdditionalDocuments request={request} onUploaded={reload} />
         <Spacer />
-        <Button title={t('btn_track_details')} onPress={() => router.push({ pathname: '/tracking', params: { id: request.id } })} />
+        <Button title={t('btn_track_details')} onPress={() => router.push(trackingRoute(request))} />
       </Body>
     </Screen>
   );

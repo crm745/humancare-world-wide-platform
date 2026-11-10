@@ -1,16 +1,21 @@
 import { useState } from 'react';
 import { Platform, Pressable, View } from 'react-native';
-import * as DocumentPicker from 'expo-document-picker';
+import { router } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { Calendar, Check, FileText, Upload } from 'lucide-react-native';
-import { needsCareLevel, useApp } from '../../state/AppContext';
+import { Calendar, ChevronDown } from 'lucide-react-native';
+import { useApp } from '../../state/AppContext';
 import {
-  AIRLINE_MODES, AIRLINE_MODE_LABELS, COUNTRY_CODES, COUNTRY_CODE_LABELS, COUNTRY_NAMES, DECEASED_RELATIONS, MORTAL_TRANSFERS, MORTAL_TRANSFER_LABELS,
+  AIRLINE_MODES, AIRLINE_MODE_LABELS, DECEASED_RELATIONS, MORTAL_TRANSFERS, MORTAL_TRANSFER_LABELS,
   isMortal, needsAirlineMode,
 } from '../../data/mock';
-import { isValidAge, isValidDateString, isValidName, isValidPhoneForCountry } from '../../lib/validators';
-import { RequestStep } from '../../components/RequestStep';
-import { CareLevelGrid, Field, FieldLabel, Input, Text } from '../../components/ui';
+import { nameOf } from '../../lib/phoneCountry';
+import { pickRequestCountry, pickRequestPhoneCountry } from '../../lib/requestForm';
+import { isValidAge, isValidDateString, isValidMobileNumber, isValidName } from '../../lib/validators';
+import { isPrivateCharter, isPrivateCharterAge, firstAnchorOnStep } from '../../lib/privateCharter';
+import { CountryPicker } from '../../components/NationalityPhone';
+import CityField from '../../components/request/CityField';
+import { Anchor, RequestFrame } from '../../components/request/RequestFrame';
+import { Field, FieldLabel, Input, Text } from '../../components/ui';
 import { Select, Sheet } from '../../components/widgets';
 
 function dateStringToObj(value) {
@@ -122,171 +127,173 @@ function SectionHeading({ children, first }) {
   return <Text className={`font-inter-black text-[17px] text-navy ${first ? '' : 'mt-3'}`}>{children}</Text>;
 }
 
-// Matches the backend's allowed types (see backend/src/middleware/upload.middleware.js).
-const ALLOWED_MIME_TYPES = [
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-];
-
-function UploadBox({ file, onPick, onRemove }) {
-  const { t, toast } = useApp();
-
-  const pick = async () => {
-    const result = await DocumentPicker.getDocumentAsync({ type: ALLOWED_MIME_TYPES, copyToCacheDirectory: true });
-    if (result.canceled) return;
-    const asset = result.assets[0];
-    // The picker's `type` filter is only a hint to the OS/browser file dialog — on
-    // web especially, picking "All Files" bypasses it entirely — so we still check
-    // the type ourselves rather than trusting the dialog to have enforced it, and
-    // catch it here instead of letting it reach the server after the request (and
-    // every other field on this form) has already been submitted.
-    if (asset.mimeType && !ALLOWED_MIME_TYPES.includes(asset.mimeType)) {
-      toast('Unsupported file type. Allowed: PDF, JPG, PNG, WEBP, DOC, DOCX.');
-      return;
-    }
-    if (asset.size && asset.size > 10 * 1024 * 1024) { toast('File is too large — max 10MB.'); return; }
-    onPick({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType, size: asset.size });
-  };
-
-  if (file) {
-    return (
-      <Pressable onPress={onRemove} className="flex-row items-center gap-2.5 rounded-[14px] border border-line bg-white p-3">
-        <View className="h-[34px] w-[34px] items-center justify-center rounded-[9px] bg-[#FDECEC]"><FileText size={16} color="#D64545" /></View>
-        <View className="min-w-0 flex-1">
-          <Text className="font-inter-bold text-[14px]" numberOfLines={1}>{file.name}</Text>
-          <Text className="text-[11.5px] text-faint">Tap to remove</Text>
-        </View>
-        <View className="h-[22px] w-[22px] items-center justify-center rounded-full bg-primary"><Check size={12} color="#fff" strokeWidth={3} /></View>
-      </Pressable>
-    );
-  }
-  return (
-    <Pressable onPress={pick} className="items-center gap-1.5 rounded-xl border-[1.5px] border-dashed border-[#C7D3E5] bg-input px-4 py-5">
-      <Upload size={20} color="#1A73E8" />
-      <Text className="font-inter-bold text-[13.5px] text-primary">{t('upload_file_btn')}</Text>
-      <Text className="text-[11.5px] text-faint">{t('upload_hint')}</Text>
-    </Pressable>
-  );
-}
-
-// Step 1 of 3: patient details and request details on one page. For Mortal Remains the
-// same page asks about the deceased instead, in calmer wording.
+// Step 1 of 3: the patient and the trip. For Mortal Remains the same page asks about the
+// deceased instead, in calmer wording. What the person needs, and how to word it, comes on
+// the next page.
 export default function RequestStep1() {
-  const { t, draft, updateDraft } = useApp();
+  const { t, draft, updateDraft, serverErrors } = useApp();
   const mortal = isMortal(draft.service);
-  const ready = isValidName(draft.name) && draft.age.trim() !== '' && isValidAge(draft.age) && draft.gender
-    && draft.location.trim() && draft.country && isValidPhoneForCountry(draft.phone, draft.cc)
-    && draft.dest.trim() && isValidDateString(draft.date)
-    && (!needsAirlineMode(draft.service) || draft.airlineMode)
-    && (!mortal || (draft.relation && draft.deathPlace.trim() && isNotFuture(draft.deathDate) && draft.mortalTransfer));
-  // Flips true the first time Next is tapped while something required is still
-  // blank — before that, an untouched required field shows no error (nobody wants
-  // red borders on a form they haven't started filling in yet).
+  // Private Charter: the cities are picked from the server's verified list, and the API's own
+  // limits apply. Every other service keeps the free-text places.
+  const charter = isPrivateCharter(draft.service);
+  const serverError = (field) => (serverErrors ? serverErrors[field] : undefined);
+  // Flips true the first time Continue is tapped while something required is still blank;
+  // before that, an untouched required field shows no error (nobody wants red borders on a
+  // form they haven't started filling in yet).
   const [attempted, setAttempted] = useState(false);
+  const [picking, setPicking] = useState(null); // 'country' | 'phone' | null
+
+  // What is wrong, in page order. The first one is where the page scrolls to.
+  const problems = [
+    ['name', !isValidName(draft.name)],
+    ['age', draft.age.trim() === '' || !isValidAge(draft.age) || (charter && !isPrivateCharterAge(draft.age)) || !draft.gender],
+    ...(mortal ? [['relation', !draft.relation], ['deathPlace', !draft.deathPlace.trim()], ['deathDate', !isNotFuture(draft.deathDate)]] : []),
+    ['country', !draft.country || (charter && !draft.countryIso)],
+    ['location', charter ? !draft.originCity : !draft.location.trim()],
+    ['dest', charter ? !draft.destCity : !draft.dest.trim()],
+    ['phone', !isValidMobileNumber(draft.phone, draft.cc)],
+    ['date', !isValidDateString(draft.date)],
+    ...(needsAirlineMode(draft.service) ? [['airlineMode', !draft.airlineMode]] : []),
+    ...(mortal ? [['mortalTransfer', !draft.mortalTransfer]] : []),
+  ];
+  const firstError = () => problems.find(([, wrong]) => wrong)?.[0] || null;
 
   return (
-    <RequestStep step={1} ready={ready} onInvalidNext={() => setAttempted(true)}>
+    <RequestFrame
+      step={1} firstError={firstError} onInvalid={() => setAttempted(true)} onNext={() => router.push('/request/step2')}
+      nextKey="req_next_medical" serverAnchor={firstAnchorOnStep(serverErrors, 1)}
+    >
       <SectionHeading first>{t(mortal ? 'step1_heading_mortal' : 'step1_heading')}</SectionHeading>
-      <Field
-        required label={t(mortal ? 'field_deceased_name' : 'field_patient_name')} placeholder={mortal ? 'Full name of the deceased' : "Enter patient's full name"}
-        value={draft.name} onChangeText={(name) => updateDraft({ name })}
-        error={(attempted || draft.name) && !isValidName(draft.name) ? 'Enter a valid name.' : undefined}
-      />
-      <View className="flex-row gap-2.5">
+      <Anchor id="name">
         <Field
-          required className="flex-1" label={t(mortal ? 'field_deceased_age' : 'field_age')} placeholder="Age" keyboardType="number-pad" value={draft.age} onChangeText={(age) => updateDraft({ age })}
-          error={(attempted || draft.age) && (!draft.age.trim() || !isValidAge(draft.age)) ? 'Enter a valid age.' : undefined}
+          required label={t(mortal ? 'field_deceased_name' : 'field_patient_name')} placeholder={mortal ? 'Full name of the deceased' : "Enter patient's full name"}
+          value={draft.name} onChangeText={(name) => updateDraft({ name })}
+          error={(attempted || draft.name) && !isValidName(draft.name) ? 'Enter a valid name.' : serverError('patientName')}
         />
-        <View className="flex-1">
-          <FieldLabel required>{t('field_gender')}</FieldLabel>
-          <Select value={draft.gender} options={['Male', 'Female', 'Other']} onChange={(gender) => updateDraft({ gender })} title={t('field_gender')} placeholder="Select gender" />
-          {attempted && !draft.gender ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : null}
+      </Anchor>
+      <Anchor id="age">
+        <View className="flex-row gap-2.5">
+          <Field
+            required className="flex-1" label={t(mortal ? 'field_deceased_age' : 'field_age')} placeholder="Age" keyboardType="number-pad" value={draft.age} onChangeText={(age) => updateDraft({ age })}
+            error={(attempted || draft.age) && (!draft.age.trim() || !isValidAge(draft.age) || (charter && !isPrivateCharterAge(draft.age))) ? 'Enter a valid age.' : serverError('patientAge')}
+          />
+          <View className="flex-1">
+            <FieldLabel required>{t('field_gender')}</FieldLabel>
+            <Select value={draft.gender} options={['Male', 'Female', 'Other']} onChange={(gender) => updateDraft({ gender })} title={t('field_gender')} placeholder="Select gender" />
+            {attempted && !draft.gender ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : serverError('patientGender') ? <Text className="mt-1 text-[12px] text-danger">{serverError('patientGender')}</Text> : null}
+          </View>
         </View>
-      </View>
+      </Anchor>
       {mortal && (
         <>
-          <View>
+          <Anchor id="relation">
             <FieldLabel required>{t('field_relation')}</FieldLabel>
             <Select value={draft.relation} options={DECEASED_RELATIONS} onChange={(relation) => updateDraft({ relation })} title={t('field_relation')} placeholder="Select relation" />
             {attempted && !draft.relation ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : null}
-          </View>
-          <Field
-            required label={t('field_place_of_death')} placeholder="Hospital or place, City, Country" value={draft.deathPlace} onChangeText={(deathPlace) => updateDraft({ deathPlace })}
-            error={attempted && !draft.deathPlace.trim() ? 'This field is required.' : undefined}
-          />
-          <DateField
-            required past label={t('field_date_of_death')} value={draft.deathDate} onChange={(deathDate) => updateDraft({ deathDate })}
-            error={(attempted || draft.deathDate) && !isNotFuture(draft.deathDate) ? 'Enter a valid date.' : undefined}
-          />
+          </Anchor>
+          <Anchor id="deathPlace">
+            <Field
+              required label={t('field_place_of_death')} placeholder="Hospital or place, City, Country" value={draft.deathPlace} onChangeText={(deathPlace) => updateDraft({ deathPlace })}
+              error={attempted && !draft.deathPlace.trim() ? 'This field is required.' : undefined}
+            />
+          </Anchor>
+          <Anchor id="deathDate">
+            <DateField
+              required past label={t('field_date_of_death')} value={draft.deathDate} onChange={(deathDate) => updateDraft({ deathDate })}
+              error={(attempted || draft.deathDate) && !isNotFuture(draft.deathDate) ? 'Enter a valid date.' : undefined}
+            />
+          </Anchor>
         </>
       )}
-      <Field
-        required label={t('field_location')} placeholder="City, Country" value={draft.location} onChangeText={(location) => updateDraft({ location })}
-        error={attempted && !draft.location.trim() ? 'This field is required.' : undefined}
-      />
-      <View>
+      <Anchor id="country">
         <FieldLabel required>{t('field_country')}</FieldLabel>
-        <Select value={draft.country} options={COUNTRY_NAMES} onChange={(country) => updateDraft({ country })} title={t('field_country')} placeholder="Select country" />
-        {attempted && !draft.country ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : null}
-      </View>
-      <Field
-        required label={t('field_destination')} placeholder="City, Country" value={draft.dest} onChangeText={(dest) => updateDraft({ dest })}
-        error={attempted && !draft.dest.trim() ? 'This field is required.' : undefined}
-      />
-      <View>
+        <Pressable
+          onPress={() => setPicking('country')} accessibilityRole="button"
+          accessibilityLabel={`${t('field_country')}, ${draft.country || 'Select country'}`}
+          className="min-h-[48px] flex-row items-center justify-between gap-2 rounded-[10px] border-[1.5px] border-field bg-input px-3 py-3 active:opacity-80"
+        >
+          <Text className={`flex-1 text-[15px] ${draft.country ? '' : 'text-faint'}`} numberOfLines={1}>{draft.country || 'Select country'}</Text>
+          <ChevronDown size={16} color="#97A4B8" />
+        </Pressable>
+        {attempted && !draft.country ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : serverError('country') ? <Text className="mt-1 text-[12px] text-danger">{serverError('country')}</Text> : null}
+      </Anchor>
+      <Anchor id="location">
+        {charter ? (
+          <CityField
+            required label={t('field_location')} city={draft.originCity} testID="origin-city"
+            onChange={(city) => updateDraft({ originCity: city, location: city.label })}
+            error={attempted && !draft.originCity ? 'Select a city from the list.' : serverError('origin')}
+          />
+        ) : (
+          <Field
+            required label={t('field_location')} placeholder="City, Country" value={draft.location} onChangeText={(location) => updateDraft({ location })}
+            error={attempted && !draft.location.trim() ? 'This field is required.' : undefined}
+          />
+        )}
+      </Anchor>
+      <Anchor id="dest">
+        {charter ? (
+          <CityField
+            required label={t('field_destination')} city={draft.destCity} testID="destination-city"
+            onChange={(city) => updateDraft({ destCity: city, dest: city.label })}
+            error={attempted && !draft.destCity ? 'Select a city from the list.' : serverError('destination')}
+          />
+        ) : (
+          <Field
+            required label={t('field_destination')} placeholder="City, Country" value={draft.dest} onChangeText={(dest) => updateDraft({ dest })}
+            error={attempted && !draft.dest.trim() ? 'This field is required.' : undefined}
+          />
+        )}
+      </Anchor>
+      <Anchor id="phone">
         <FieldLabel required>{t('field_contact_number')}</FieldLabel>
         <View className="flex-row gap-2">
-          <Select value={draft.cc} options={COUNTRY_CODES} labels={COUNTRY_CODE_LABELS} onChange={(cc) => updateDraft({ cc })} title={t('field_contact_number')} className="w-28" />
+          <Pressable
+            onPress={() => setPicking('phone')} accessibilityRole="button"
+            accessibilityLabel={`${t('phone_country_code_label')}, ${nameOf(draft.phoneCountry)} ${draft.cc}`}
+            className="min-h-[48px] min-w-[96px] flex-row items-center justify-center gap-1 rounded-[10px] border-[1.5px] border-field bg-input px-3 active:opacity-80"
+          >
+            <Text className="text-[13px]">{draft.phoneCountry} {draft.cc}</Text>
+            <ChevronDown size={16} color="#97A4B8" />
+          </Pressable>
           <Input className="flex-1" placeholder="Enter number" keyboardType="phone-pad" value={draft.phone} onChangeText={(phone) => updateDraft({ phone })} />
         </View>
-        {(attempted || draft.phone) && !isValidPhoneForCountry(draft.phone, draft.cc) ? <Text className="mt-1 text-[12px] text-danger">{draft.phone ? 'Enter a valid number for the selected country.' : 'This field is required.'}</Text> : null}
-      </View>
-      <DateField
-        required label={t(mortal ? 'field_transfer_date' : 'field_preferred_date')} value={draft.date} onChange={(date) => updateDraft({ date })}
-        error={(attempted || draft.date) && !isValidDateString(draft.date) ? 'Enter a valid date.' : undefined}
-      />
-      {needsCareLevel(draft.service) && (
-        <View>
-          <FieldLabel>{t('field_care_level')}</FieldLabel>
-          <Text className="mb-2.5 text-[11.5px] text-faint">{t('care_level_hint')}</Text>
-          <CareLevelGrid value={draft.care} onChange={(care) => updateDraft({ care })} />
-        </View>
-      )}
-
-      <SectionHeading>{t('step2_heading')}</SectionHeading>
+        {(attempted || draft.phone) && !isValidMobileNumber(draft.phone, draft.cc) ? <Text className="mt-1 text-[12px] text-danger">{draft.phone ? 'Enter a valid number for the selected country.' : 'This field is required.'}</Text> : serverError('patientContact') ? <Text className="mt-1 text-[12px] text-danger">{serverError('patientContact')}</Text> : null}
+      </Anchor>
+      <Anchor id="date">
+        <DateField
+          required label={t(mortal ? 'field_transfer_date' : 'field_preferred_date')} value={draft.date} onChange={(date) => updateDraft({ date })}
+          error={(attempted || draft.date) && !isValidDateString(draft.date) ? 'Enter a valid date.' : serverError('preferredDate')}
+        />
+      </Anchor>
       {needsAirlineMode(draft.service) && (
-        <View>
+        <Anchor id="airlineMode">
           <FieldLabel required>{t('field_airline_mode')}</FieldLabel>
           <Select
             value={draft.airlineMode} options={AIRLINE_MODES} labels={AIRLINE_MODE_LABELS}
             onChange={(airlineMode) => updateDraft({ airlineMode })} title={t('field_airline_mode')} placeholder="Stretcher or wheelchair"
           />
           {attempted && !draft.airlineMode ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : null}
-        </View>
+        </Anchor>
       )}
       {mortal && (
-        <View>
+        <Anchor id="mortalTransfer">
           <FieldLabel required>{t('field_mortal_transfer')}</FieldLabel>
           <Select
             value={draft.mortalTransfer} options={MORTAL_TRANSFERS} labels={MORTAL_TRANSFER_LABELS}
             onChange={(mortalTransfer) => updateDraft({ mortalTransfer })} title={t('field_mortal_transfer')} placeholder="Within India or International"
           />
           {attempted && !draft.mortalTransfer ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : null}
-        </View>
+        </Anchor>
       )}
-      <Field
-        multiline label={t('field_requirement_desc')}
-        placeholder={mortal ? 'e.g. Transfer to the hometown for the last rites' : 'e.g. Patient needs a stable transfer to a cardiac hospital'}
-        value={draft.desc} onChangeText={(desc) => updateDraft({ desc })}
+      <CountryPicker
+        visible={picking === 'country'} title={t('field_country')} selected={draft.countryIso}
+        onPick={(code) => { setPicking(null); updateDraft(pickRequestCountry(draft, code)); }} onClose={() => setPicking(null)}
       />
-      <View>
-        <FieldLabel>{t(mortal ? 'field_upload_death_cert' : 'field_upload_report')}</FieldLabel>
-        <UploadBox file={draft.uploadedFile} onPick={(uploadedFile) => updateDraft({ uploadedFile })} onRemove={() => updateDraft({ uploadedFile: null })} />
-      </View>
-    </RequestStep>
+      <CountryPicker
+        visible={picking === 'phone'} title={t('phone_country_code_label')} selected={draft.phoneCountry}
+        onPick={(code) => { setPicking(null); updateDraft(pickRequestPhoneCountry(draft, code)); }} onClose={() => setPicking(null)}
+      />
+    </RequestFrame>
   );
 }

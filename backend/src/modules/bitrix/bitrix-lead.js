@@ -54,6 +54,9 @@ const RELATION = { father: 352, mother: 354, brother: 356, spouse: 358, friend: 
 const MORTAL_TRANSFER = { mortal_domestic: 'Within India', mortal_international: 'International' };
 const isMortal = (serviceKey) => /^mortal(_|$)/.test(serviceKey || '');
 
+const { MOBILITY_LABEL, URGENCY_LABEL, URGENCY_TO_CASE, EQUIPMENT } = require('../../common/constants/request.constants');
+const { careLevelText } = require('../../common/utils/care-level');
+
 // "Other" in this account's own Source list (confirmed with crm.status.list SOURCE);
 // there's no app/portal source yet, and the user chose to keep "Other".
 const SOURCE_OTHER = 'UC_8HLHOF';
@@ -68,6 +71,19 @@ function dateOnly(value) {
 function commentLines(pairs) {
   const lines = pairs.filter(([, value]) => value).map(([label, value]) => `${label}: ${value}`);
   return lines.length ? lines.join('\n') : '-'; // "-" = the requester gave no details
+}
+
+// "Oxygen, Cardiac monitor" for the equipment asked for on board; nothing when none was.
+function equipmentOnBoard(request) {
+  return EQUIPMENT.filter(([field]) => request[field] === true).map(([, label]) => label).join(', ');
+}
+
+// The comment plus the names of every medical report uploaded so far. The single-file
+// "Medical Report" field only keeps one of them, so Operations can still see all of them here.
+function commentWithReports(comments, fileNames) {
+  if (!fileNames || !fileNames.length) return comments;
+  const line = `Medical reports (${fileNames.length}): ${fileNames.join(', ')}`;
+  return comments === '-' ? line : `${comments}\n${line}`;
 }
 
 function buildLeadFields(input) {
@@ -115,11 +131,15 @@ function leadInputFromRequest(request, user) {
     destination: request.destination,
     dateOfService: request.preferredDate,
     serviceKey: request.serviceKey,
-    specialRequirements: request.specialRequirements,
+    urgency: URGENCY_TO_CASE[request.urgency],
     industry: INDUSTRY.patientApp,
     comments: commentLines([
       ['Requirement', request.description],
-      ['Care level', request.careLevel],
+      // Display only: a stored key reads as its English label; older text is sent as it was stored.
+      ['Care level', careLevelText(request.careLevel)],
+      ['Mobility', MOBILITY_LABEL[request.mobility]],
+      ['On board', equipmentOnBoard(request)],
+      ['Urgency', URGENCY_LABEL[request.urgency]],
       // Only when "Required Service" can't say it (no Bitrix service mapped yet).
       ['Service', REQUIRED_SERVICE_BY_KEY[request.serviceKey] ? null : request.serviceType],
     ]),
@@ -144,10 +164,11 @@ function mortalLeadInput(request, user) {
     destination: request.destination,
     dateOfService: request.preferredDate,
     serviceKey: request.serviceKey,
-    specialRequirements: request.specialRequirements,
+    urgency: URGENCY_TO_CASE[request.urgency],
     industry: INDUSTRY.patientApp,
     comments: commentLines([
       ['Requirement', request.description],
+      ['Urgency', URGENCY_LABEL[request.urgency]],
       ['Transfer', MORTAL_TRANSFER[request.serviceKey]],
       ['Relation to the deceased', RELATION[String(relation || '').toLowerCase()] ? null : relation],
       ['Place of death', request.placeOfDeath],
@@ -181,8 +202,10 @@ function leadInputFromCase(caseRecord) {
 
 // The lead fields that put one uploaded file into "Medical Report" (a single-file field,
 // so a newer report replaces the older one). Bitrix takes the file inline as base64.
+const MEDICAL_REPORT_FIELD = FIELD.MEDICAL_REPORT;
+
 function medicalReportFields(fileName, content) {
-  return { [FIELD.MEDICAL_REPORT]: { fileData: [fileName, content.toString('base64')] } };
+  return { [MEDICAL_REPORT_FIELD]: { fileData: [fileName, content.toString('base64')] } };
 }
 
-module.exports = { buildLeadFields, leadInputFromRequest, leadInputFromCase, medicalReportFields, isMortal, REQUIRED_SERVICE_BY_KEY };
+module.exports = { buildLeadFields, leadInputFromRequest, leadInputFromCase, medicalReportFields, commentWithReports, MEDICAL_REPORT_FIELD, isMortal, REQUIRED_SERVICE_BY_KEY };

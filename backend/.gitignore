@@ -3,4 +3,11 @@ node_modules
 .env
 .env.test
 
+# Present only while a manual integration session uses humancare_test: tests/global-setup.js refuses to run
+/.integration-session.lock
+
 /src/generated/prisma
+
+# Test-only folders (isolated uploads and captured mail; mail holds one-time tokens)
+.e2e-uploads/
+.e2e-mail/

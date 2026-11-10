@@ -107,16 +107,19 @@ describe('Bitrix24 on/off switch', () => {
     expect(createLead.mock.calls[0][0]).toMatchObject({ serviceKey: 'commercialair_wheelchair', industry: 712, origin: 'Mumbai, India' });
   });
 
-  it('saves "any additional information" in our database but never sends it to Bitrix', async () => {
+  it('ignores the optional "More details" answers an older app version may still send', async () => {
     createLead.mockClear();
     process.env.BITRIX_SYNC_ENABLED = 'true';
     const { token } = await createPatient();
     const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`)
-      .send({ ...baseRequestBody, additionalInfo: 'Prefers a female nurse' });
-    const saved = await prisma.serviceRequest.findUnique({ where: { id: res.body.request.id } });
-    expect(saved.additionalInfo).toBe('Prefers a female nurse');
+      .send({ ...baseRequestBody, additionalInfo: 'Prefers a female nurse', specialRequirements: 'Oxygen', referralSource: 'Google Search' });
+    expect(res.status).toBe(201);
+    expect(res.body.request).not.toHaveProperty('additionalInfo');
+    expect(res.body.request).not.toHaveProperty('specialRequirements');
+    expect(res.body.request).not.toHaveProperty('referralSource');
     const { buildLeadFields } = jest.requireActual('../src/modules/bitrix/bitrix-lead');
-    expect(JSON.stringify(buildLeadFields(createLead.mock.calls[0][0]))).not.toContain('female nurse');
+    const sent = JSON.stringify(buildLeadFields(createLead.mock.calls[0][0]));
+    expect(sent).not.toMatch(/female nurse|Google Search/);
   });
 
   it('sends an uploaded medical report to the Bitrix lead of the request', async () => {
@@ -127,7 +130,24 @@ describe('Bitrix24 on/off switch', () => {
     const upload = await request(app).post(`/requests/me/${created.body.request.id}/documents`).set('Authorization', `Bearer ${token}`)
       .attach('file', Buffer.from('%PDF-1.4 test'), { filename: 'report.pdf', contentType: 'application/pdf' });
     expect(upload.status).toBe(201);
-    expect(sendMedicalReportToBitrix).toHaveBeenCalledWith(12345, expect.objectContaining({ type: 'Medical Report', name: 'report.pdf' }));
+    expect(sendMedicalReportToBitrix).toHaveBeenCalledWith(
+      12345,
+      expect.objectContaining({ type: 'Medical Report', name: 'report.pdf' }),
+      { comments: expect.stringContaining('Medical reports (1): report.pdf') },
+    );
+  });
+
+  it('lists the names of every report in the lead comment, so none is lost when the field keeps one', async () => {
+    sendMedicalReportToBitrix.mockClear();
+    process.env.BITRIX_SYNC_ENABLED = 'true';
+    const { token } = await createPatient();
+    const created = await request(app).post('/requests').set('Authorization', `Bearer ${token}`).send(baseRequestBody);
+    const send = (filename) => request(app).post(`/requests/me/${created.body.request.id}/documents`).set('Authorization', `Bearer ${token}`)
+      .attach('file', Buffer.from('%PDF-1.4 test'), { filename, contentType: 'application/pdf' });
+    expect((await send('discharge.pdf')).status).toBe(201);
+    expect((await send('ct-report.pdf')).status).toBe(201);
+    expect(sendMedicalReportToBitrix).toHaveBeenCalledTimes(2);
+    expect(sendMedicalReportToBitrix.mock.calls[1][2].comments).toContain('Medical reports (2): discharge.pdf, ct-report.pdf');
   });
 
   it('keeps a death certificate with us and does not send it to the lead as a medical report', async () => {
@@ -227,5 +247,169 @@ describe('request lifecycle for the patient who submitted it', () => {
       .set('Authorization', `Bearer ${token}`)
       .attach('file', Buffer.from('bad'), { filename: 'virus.exe', contentType: 'application/x-msdownload' });
     expect(uploadRes.status).toBe(400);
+  });
+});
+
+describe('POST /requests: medical page fields', () => {
+  // A patient-transport service on the shared (legacy) rules. Private Charter has its own strict
+  // validation, tested in private-charter-validation.test.js and in the persistence test below.
+  const airBody = { ...baseRequestBody, serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground' };
+  const post = (token, body) => request(app).post('/requests').set('Authorization', `Bearer ${token}`).send(body);
+
+  it('saves mobility, equipment and urgency for an air ambulance request', async () => {
+    const { token } = await createPatient();
+    const res = await post(token, {
+      ...airBody, mobility: 'bedridden', equipOxygen: true, equipCardiacMonitor: true, equipVentilator: false, urgency: 'critical_6h',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.request).toMatchObject({
+      mobility: 'bedridden', equipOxygen: true, equipCardiacMonitor: true, equipVentilator: false, urgency: 'critical_6h',
+    });
+  });
+
+  it('copies the urgency to the Case on the older critical / urgent / routine scale', async () => {
+    const { token } = await createPatient();
+    const cases = {};
+    for (const urgency of ['critical_6h', 'urgent_24h', 'planned']) {
+      const res = await post(token, { ...airBody, urgency });
+      cases[urgency] = (await prisma.case.findUnique({ where: { serviceRequestId: res.body.request.id } })).urgency;
+    }
+    expect(cases).toEqual({ critical_6h: 'critical', urgent_24h: 'urgent', planned: 'routine' });
+  });
+
+  it('accepts a request without them (older app versions) and leaves them empty', async () => {
+    const { token } = await createPatient();
+    const res = await post(token, airBody);
+    expect(res.status).toBe(201);
+    expect(res.body.request).toMatchObject({ mobility: null, equipOxygen: null, equipCardiacMonitor: null, equipVentilator: null, urgency: null });
+    const saved = await prisma.case.findUnique({ where: { serviceRequestId: res.body.request.id } });
+    expect(saved.urgency).toBe('routine');
+  });
+
+  it('refuses a mobility, equipment or urgency value that is not on the list', async () => {
+    const { token } = await createPatient();
+    const mobility = await post(token, { ...airBody, mobility: 'flying' });
+    expect(mobility.status).toBe(400);
+    expect(mobility.body.error).toMatch(/Invalid mobility/);
+    const urgency = await post(token, { ...airBody, urgency: 'asap' });
+    expect(urgency.status).toBe(400);
+    expect(urgency.body.error).toMatch(/Invalid urgency/);
+    const equipment = await post(token, { ...airBody, equipOxygen: 'yes' });
+    expect(equipment.status).toBe(400);
+    expect(equipment.body.error).toMatch(/equipOxygen must be true or false/);
+  });
+
+  it('accepts mobility and equipment for ground ambulance and commercial airline too', async () => {
+    const { token } = await createPatient();
+    for (const serviceKey of ['ground', 'commercialair_stretcher', 'commercialair_wheelchair']) {
+      const res = await post(token, { ...baseRequestBody, serviceKey, mobility: 'wheelchair', equipVentilator: false });
+      expect(res.status).toBe(201);
+    }
+  });
+
+  it.each([['hospital'], ['homecare'], ['tele'], ['mortal_domestic']])('refuses mobility and equipment for %s', async (serviceKey) => {
+    const { token } = await createPatient();
+    const extra = serviceKey === 'mortal_domestic' ? { deceasedRelation: 'Son', placeOfDeath: 'Pune', dateOfDeath: '2026-10-20' } : {};
+    const mobility = await post(token, { ...baseRequestBody, ...extra, serviceKey, mobility: 'walking' });
+    expect(mobility.status).toBe(400);
+    expect(mobility.body.error).toMatch(/only accepted for air and ground/);
+    const equipment = await post(token, { ...baseRequestBody, ...extra, serviceKey, equipOxygen: false });
+    expect(equipment.status).toBe(400);
+  });
+
+  it('still takes an urgency on a service that has no mobility or equipment', async () => {
+    const { token } = await createPatient();
+    const res = await post(token, { ...baseRequestBody, serviceKey: 'hospital', urgency: 'urgent_24h' });
+    expect(res.status).toBe(201);
+    expect(res.body.request.urgency).toBe('urgent_24h');
+  });
+
+  it('sends the urgency, mobility and equipment to Bitrix', async () => {
+    createLead.mockClear();
+    process.env.BITRIX_SYNC_ENABLED = 'true';
+    const { token } = await createPatient();
+    await post(token, { ...airBody, mobility: 'wheelchair', equipOxygen: true, equipCardiacMonitor: false, equipVentilator: true, urgency: 'urgent_24h' });
+    const { buildLeadFields } = jest.requireActual('../src/modules/bitrix/bitrix-lead');
+    const fields = buildLeadFields(createLead.mock.calls[0][0]);
+    expect(fields.UF_CRM_1775637825406).toBe(380); // Transfer Urgency: Urgent
+    expect(fields.COMMENTS).toContain('Mobility: Wheelchair');
+    expect(fields.COMMENTS).toContain('On board: Oxygen, Ventilator');
+    expect(fields.COMMENTS).toContain('Urgency: Urgent (24h)');
+    delete process.env.BITRIX_SYNC_ENABLED;
+  });
+
+  it('returns the new fields wherever a request is returned', async () => {
+    const { token } = await createPatient();
+    const created = await post(token, { ...airBody, mobility: 'walking', equipOxygen: false, equipCardiacMonitor: false, equipVentilator: false, urgency: 'planned' });
+    const one = await request(app).get(`/requests/me/${created.body.request.id}`).set('Authorization', `Bearer ${token}`);
+    expect(one.body.request).toMatchObject({ mobility: 'walking', urgency: 'planned', equipOxygen: false });
+    const list = await request(app).get('/requests/me').set('Authorization', `Bearer ${token}`);
+    expect(list.body.requests[0]).toMatchObject({ mobility: 'walking', urgency: 'planned' });
+  });
+});
+
+// Needs the test database (like the rest of this file). The validation rules themselves are
+// tested without a database in private-charter-validation.test.js.
+describe('POST /requests: Private Charter persistence', () => {
+  // The cities are looked up in the local GeoNames table: put the fixtures in it (and take them out).
+  const { IDS, ROWS } = require('./fixtures/geo-cities');
+  beforeAll(async () => {
+    await prisma.geonamesCity.deleteMany();
+    await prisma.geonamesCity.createMany({ data: ROWS.map((row) => ({ ...row, verifiedAt: new Date() })) });
+  });
+  afterAll(() => prisma.geonamesCity.deleteMany());
+
+  it('saves the validated, normalised values and copies the urgency to the Case', async () => {
+    const { token } = await createPatient();
+    const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`).send({
+      serviceKey: 'privatecharter',
+      patientName: '  Maria Fernandez ',
+      patientAge: '47',
+      patientGender: 'Female', // legacy capitalised value, stored lowercase
+      country: 'AE',
+      origin: { geonameId: IDS.DUBAI },
+      destination: { geonameId: IDS.MUMBAI },
+      patientContact: '+971 50 123 4567', // legacy spaced format, stored as E.164
+      preferredDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      careLevel: 'ICU / Critical', // legacy label, stored as the key
+      description: ' BP <90/60 ',
+      mobility: 'bedridden',
+      urgency: 'urgent_24h',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.request).toMatchObject({
+      serviceType: 'Private Charter Air Ambulance Service',
+      serviceKey: 'privatecharter',
+      patientName: 'Maria Fernandez',
+      patientAge: 47,
+      patientGender: 'female',
+      country: 'AE',
+      patientContact: '+971501234567',
+      careLevel: 'care_icu',
+      description: 'BP <90/60',
+      urgency: 'urgent_24h',
+      // the cities as the server verified them, and the readable labels everything else shows
+      origin: 'Dubai, United Arab Emirates',
+      originGeonameId: IDS.DUBAI,
+      originCityName: 'Dubai',
+      originCountryCode: 'AE',
+      originTimezone: 'Asia/Dubai',
+      destination: 'Mumbai, Maharashtra, India',
+      destinationGeonameId: IDS.MUMBAI,
+      destinationCountryCode: 'IN',
+    });
+    const saved = await prisma.case.findUnique({ where: { serviceRequestId: res.body.request.id } });
+    expect(saved.urgency).toBe('urgent');
+    expect(saved).toMatchObject({ origin: 'Dubai, United Arab Emirates', destination: 'Mumbai, Maharashtra, India' });
+  });
+
+  it('writes nothing when a Private Charter request is refused', async () => {
+    const { token } = await createPatient();
+    const before = await prisma.serviceRequest.count();
+    const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`)
+      .send({ serviceKey: 'privatecharter', patientName: 'Maria Fernandez' });
+    expect(res.status).toBe(400);
+    expect(res.body.fields).toBeDefined();
+    expect(await prisma.serviceRequest.count()).toBe(before);
   });
 });

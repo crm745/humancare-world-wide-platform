@@ -2,10 +2,20 @@ const { prisma } = require('../../db/prisma');
 const { createLead } = require('../bitrix/bitrix.service');
 const { leadInputFromRequest } = require('../bitrix/bitrix-lead');
 const { isBitrixSyncEnabled } = require('../bitrix/bitrix-config');
+const { URGENCY_TO_CASE, PRIVATE_CHARTER_KEY } = require('../../common/constants/request.constants');
+const { isRequestReviewEnabled, PATIENT_DOCUMENT_SELECT } = require('../request-review/request-review.config');
+const { createReviewRequest } = require('../request-review/request-review.service');
+const { SAFE_DOCUMENT_SELECT } = require('../documents/document-response');
 
 const VALID_STATUSES = ['submitted', 'in_progress', 'completed', 'cancelled'];
 
 async function createRequest(userId, data) {
+  // Request-first workflow (Private Charter only, when switched on): the request is saved with its
+  // REQ- reference and no Case; the Case is created later, when an Admin approves it. Everything
+  // below is the original flow, unchanged, for every other service and for Private Charter while
+  // the workflow is off.
+  if (data.serviceKey === PRIVATE_CHARTER_KEY && isRequestReviewEnabled()) return createReviewRequest(userId, data);
+
   const {
     serviceType,
     serviceKey,
@@ -16,18 +26,25 @@ async function createRequest(userId, data) {
     patientContact,
     origin,
     destination,
+    originGeonameId,
+    originCityName,
+    originCountryCode,
+    originTimezone,
+    destinationGeonameId,
+    destinationCityName,
+    destinationCountryCode,
     country,
     preferredDate,
     careLevel,
     description,
-    medicalSummary,
-    additionalInfo,
-    specialRequirements,
     deceasedRelation,
     placeOfDeath,
     dateOfDeath,
-    referralSource,
-    documentUrl,
+    mobility,
+    equipOxygen,
+    equipCardiacMonitor,
+    equipVentilator,
+    urgency,
   } = data;
 
   // Create first so we have an id, then stamp a human-friendly reference number onto it.
@@ -43,18 +60,26 @@ async function createRequest(userId, data) {
       patientContact: patientContact || null,
       origin,
       destination,
+      // Private Charter only (the verified cities); null for every other service.
+      originGeonameId: originGeonameId ?? null,
+      originCityName: originCityName ?? null,
+      originCountryCode: originCountryCode ?? null,
+      originTimezone: originTimezone ?? null,
+      destinationGeonameId: destinationGeonameId ?? null,
+      destinationCityName: destinationCityName ?? null,
+      destinationCountryCode: destinationCountryCode ?? null,
       country: country || null,
       preferredDate: preferredDate ? new Date(preferredDate) : null,
       careLevel: careLevel || null,
       description: description || null,
-      medicalSummary: medicalSummary || null,
-      additionalInfo: additionalInfo || null,
-      specialRequirements: specialRequirements || null,
       deceasedRelation: deceasedRelation || null,
       placeOfDeath: placeOfDeath || null,
       dateOfDeath: dateOfDeath ? new Date(dateOfDeath) : null,
-      referralSource: referralSource || null,
-      documentUrl: documentUrl || null,
+      mobility: mobility || null,
+      equipOxygen: equipOxygen ?? null,
+      equipCardiacMonitor: equipCardiacMonitor ?? null,
+      equipVentilator: equipVentilator ?? null,
+      urgency: urgency || null,
       referenceNumber: `TEMP-${Date.now()}`,
       status: 'submitted',
     },
@@ -80,6 +105,8 @@ async function createRequest(userId, data) {
       origin: request.origin,
       destination: request.destination,
       country: request.country,
+      // Left out when the request has none, so the Case keeps its own 'routine' default.
+      ...(request.urgency && { urgency: URGENCY_TO_CASE[request.urgency] }),
       status: 'submitted',
     },
   });
@@ -125,7 +152,11 @@ async function listRequestsForUser(userId, { status } = {}) {
 async function getRequestForUser(userId, id) {
   const request = await prisma.serviceRequest.findFirst({
     where: { id: Number(id), userId },
-    include: { case: { include: { stageEvents: { orderBy: { occurredAt: 'asc' } }, documents: true } } },
+    include: {
+      case: { include: { stageEvents: { orderBy: { occurredAt: 'asc' } }, documents: { select: SAFE_DOCUMENT_SELECT } } },
+      // Empty for every request made before the review workflow; never exposes stored file names.
+      requestDocuments: { select: PATIENT_DOCUMENT_SELECT, orderBy: { id: 'asc' } },
+    },
   });
   if (!request) {
     const err = new Error('Request not found');
@@ -141,7 +172,7 @@ async function getRequestForUser(userId, id) {
 async function listDocumentsForUser(userId) {
   return prisma.document.findMany({
     where: { case: { serviceRequest: { userId } } },
-    include: { case: { select: { referenceNumber: true } } },
+    select: { ...SAFE_DOCUMENT_SELECT, case: { select: { referenceNumber: true } } },
     orderBy: { uploadedAt: 'desc' },
   });
 }

@@ -1,0 +1,19 @@
+1275339	Mumbai	Mumbai		19.07283	72.88261	P	PPLA	IN		16				12691836		8	Asia/Kolkata	2024-09-05
+292223	Dubai	Dubai		25.07725	55.30927	P	PPLA	AE		03				3790000		24	Asia/Dubai	2026-04-13
+5128581	New York City	New York City		40.71427	-74.00597	P	PPL	US		NY				8804190	10	57	America/New_York	2026-03-07
+2179537	Wellington	Wellington		-41.28664	174.77557	P	PPLC	NZ		G2	047			381900		31	Pacific/Auckland	2019-09-05
+5368361	Los Angeles	Los Angeles		34.05223	-118.24368	P	PPLA2	US		CA	037			3820914	89	96	America/Los_Angeles	2025-07-22
+2657896	Zürich	Zuerich		47.36667	8.55	P	PPLA	CH		ZH	112	261		415367		429	Europe/Zurich	2026-04-13
+6949382	Pittwater	Pittwater		-33.66623	151.30171	P	PPLH	AU		02	15990			63482		-9999	Australia/Sydney	2026-04-03
+900000001	Kiritimati Test	Kiritimati Test		1.87	-157.4	P	PPL	KI						5000			Pacific/Kiritimati	2024-01-01
+900000002	Mumbwa Test	Mumbwa Test		-14.99	27.06	P	PPL	ZM						1200			Africa/Lusaka	2024-01-01
+900000003	No Zone Town	No Zone Town		0	0	P	PPL	GB						9000				2024-01-01
+900000004	Bad Zone Town	Bad Zone Town		0	0	P	PPL	GB						9000			Mars/Olympus	2024-01-01
+900000005	Mount Test	Mount Test		0	0	T	MT	GB						0			Europe/London	2024-01-01
+900000006	Abandoned Test	Abandoned Test		0	0	P	PPLQ	GB						0			Europe/London	2024-01-01
+900000007	Destroyed Test	Destroyed Test		0	0	P	PPLW	GB						0			Europe/London	2024-01-01
+900000008	Old Capital Test	Old Capital Test		0	0	P	PPLCH	GB						0			Europe/London	2024-01-01
+900000009	Bad Country Test	Bad Country Test		0	0	P	PPL	XYZ						0			Europe/London	2024-01-01
+not-a-number	Broken Row
+2867714	Munich	Munich	Lungsod ng Muenchen,Lungsod ng München,MUC,Minca,Minche,Minga,Minhen,Minhene,Minkhen,Miunchenas,Miwnix,Mjunkhen,Mnichov,Mnichow,Mníchov,Monachium,Monacho,Monaco de Baviera,Monaco di Baviera,Monaco e Baviera,Monacu,Monacu di Baviera,Monacum,Muenchen,Muenegh,Muenhen,Muenih,Munchen,Munhen,Munic,Munich,Munich ed Baviera,Munih,Munike,Munique,Munix,Munkeno,Munkhen,Munîh,Mynihu,Myunxen,Myunxén,Mònacu,Mùnich ëd Baviera,Múnic,Múnich,München,Münegh,Münhen,Münih,mi wnik,mi'unika,mi'unikha,miunkheni,miyunik,miyuniki,mu ni hei,mwinhen,mwnkh,mwnykh,mynkn,myunhen,myunik,myunikha,myunsena,mywnkh,mywnykh,Μόναχο,Минхен,Мюнхен,Мүнхен,Мүнхэн,Мӱнхен,Միւնիխ,Մյունխեն,מינכן,مونخ,مونیخ,ميونخ,ميونيخ,میونخ,म्युन्शेन,म्यूनिख,মিউনিখ,ਮਿਊਨਿਕ,மியூனிக்,ಮ್ಯೂನಿಕ್,มิวนิก,မြူးနစ်ချ်မြို့,მიუნხენი,ሚዩኒክ,ミュンヘン,慕尼黑,뮌헨	48.13743	11.57549	P	PPLA	DE		02	091	09162	09162000	1505005		524	Europe/Berlin	2026-05-06
+2658656	Zürich (Kreis 11) / Seebach	Zuerich (Kreis 11) / Seebach		47.42181	8.54779	P	PPLX	CH		ZH	112	261		17851		436	Europe/Zurich	2006-10-21

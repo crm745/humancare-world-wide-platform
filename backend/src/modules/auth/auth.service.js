@@ -20,7 +20,7 @@ function generateOtp() {
   return crypto.randomInt(0, 1000000).toString().padStart(6, '0');
 }
 
-async function issueOtp(identifier, purpose, countryCode) {
+async function issueOtp(identifier, purpose) {
   const lastCode = await prisma.otpCode.findFirst({
     where: { identifier, purpose },
     orderBy: { createdAt: 'desc' },
@@ -59,7 +59,7 @@ async function issueOtp(identifier, purpose, countryCode) {
     data: { identifier, codeHash, purpose, expiresAt },
   });
 
-  await deliverOtp(identifier, code, purpose, countryCode);
+  await deliverOtp(identifier, code, purpose);
   return { throttled: false, expiresAt };
 }
 const TOO_MANY = 'Too many incorrect attempts. Please request a new code.';

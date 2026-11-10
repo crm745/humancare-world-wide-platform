@@ -109,16 +109,40 @@ describe('bitrix.service medical report upload', () => {
 
   const doc = () => ({ name: 'report.pdf', fileUrl: `/uploads/${fileName}` });
 
-  it('puts the file into the Medical Report field of the lead with crm.lead.update', async () => {
-    global.fetch = jest.fn().mockResolvedValue(jsonResponse(200, { result: true }));
+  const FIELD = 'UF_CRM_1768194664955';
+  const b64 = Buffer.from('PDF-BYTES').toString('base64');
+
+  it('reads the lead, then puts the file into a single-file Medical Report field with crm.lead.update', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { result: { ID: '77', [FIELD]: false } }))
+      .mockResolvedValueOnce(jsonResponse(200, { result: true }));
     const { sendMedicalReportToBitrix } = require('../src/modules/bitrix/bitrix.service');
     await expect(sendMedicalReportToBitrix(77, doc())).resolves.toBe(true);
-    const [url, init] = global.fetch.mock.calls[0];
+    expect(global.fetch.mock.calls[0][0]).toMatch(/crm\.lead\.get\.json$/);
+    const [url, init] = global.fetch.mock.calls[1];
     expect(url).toMatch(/crm\.lead\.update\.json$/);
-    expect(JSON.parse(init.body)).toEqual({
+    expect(JSON.parse(init.body)).toEqual({ id: 77, fields: { [FIELD]: { fileData: ['report.pdf', b64] } } });
+  });
+
+  it('adds to the files already on a multiple-file Medical Report field instead of replacing them', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { result: { ID: '77', [FIELD]: [{ id: 501, showUrl: 'x' }, { id: 502, showUrl: 'y' }] } }))
+      .mockResolvedValueOnce(jsonResponse(200, { result: true }));
+    const { sendMedicalReportToBitrix } = require('../src/modules/bitrix/bitrix.service');
+    await expect(sendMedicalReportToBitrix(77, doc())).resolves.toBe(true);
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({
       id: 77,
-      fields: { UF_CRM_1768194664955: { fileData: ['report.pdf', Buffer.from('PDF-BYTES').toString('base64')] } },
+      fields: { [FIELD]: [{ id: 501 }, { id: 502 }, { fileData: ['report.pdf', b64] }] },
     });
+  });
+
+  it('writes the lead comment with every report name in the same update', async () => {
+    global.fetch = jest.fn()
+      .mockResolvedValueOnce(jsonResponse(200, { result: { ID: '77', [FIELD]: false } }))
+      .mockResolvedValueOnce(jsonResponse(200, { result: true }));
+    const { sendMedicalReportToBitrix } = require('../src/modules/bitrix/bitrix.service');
+    await sendMedicalReportToBitrix(77, doc(), { comments: 'Requirement: x\nMedical reports (1): report.pdf' });
+    expect(JSON.parse(global.fetch.mock.calls[1][1].body).fields.COMMENTS).toBe('Requirement: x\nMedical reports (1): report.pdf');
   });
 
   it('does nothing without a lead or while the switch is off', async () => {

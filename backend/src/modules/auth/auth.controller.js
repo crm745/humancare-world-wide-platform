@@ -23,6 +23,8 @@ const {
 const { EVENTS, recordSecurityEvent } = require("./security-events");
 const { PASSWORD_CHANGE_REQUIRED } = require("../../common/constants/auth.constants");
 const { isFirebasePhoneEnabled, verifyPhoneProof } = require("../../integrations/firebase/firebase");
+const { readNameFields } = require("../../common/utils/person-name");
+const { readProfileFields, callingCodeFor, resolvePhoneCountry } = require("../../common/utils/signup-profile");
 
 const disposableDomainSet = new Set(disposableDomains);
 function isDisposableEmail(email) {
@@ -38,7 +40,12 @@ const TICKET_EXPIRED = "This step has expired. Please start again.";
 const DUPLICATE_ACCOUNT = "An account with that email or mobile number already exists.";
 // Which wording of the sign-up consents the app shows. Bump this whenever the consent
 // text in mobile/src/app/register.js changes, so each saved consent says what was agreed.
-const CONSENT_VERSION = "2026-10-26"; // company name spelling fixed in the marketing consent
+// The sign-up now shows ONE consent: the Terms and Conditions and Privacy Policy. Bump this whenever
+// that wording changes.
+const CONSENT_VERSION = "2026-11-07";
+// Older app versions still show three checkboxes (terms, medical disclaimer, marketing) and send all
+// three keys; their sign-ups are recorded under the wording they were actually shown.
+const LEGACY_CONSENT_VERSION = "2026-10-26";
 
 // Only the fields the app needs — never the hash, lockout counters or token version.
 // `hasPassword` is included when the row was loaded with its hash, so Edit Profile knows
@@ -83,9 +90,9 @@ function viaFirebase(dest) {
 }
 
 // Step 1. In Firebase mode there's nothing to send from here for a mobile: the app does it.
-async function sendCode(dest, purpose, countryCode) {
+async function sendCode(dest, purpose) {
   if (viaFirebase(dest)) return { throttled: false };
-  return issueOtp(dest, purpose, countryCode);
+  return issueOtp(dest, purpose);
 }
 
 // What the code screen needs. The full number is only handed back in Firebase mode, and
@@ -134,25 +141,38 @@ function parseIdentifier({ email, mobile, countryCode }) {
   return parsed ? { where: { mobile: parsed.e164 }, value: parsed.e164 } : null;
 }
 
-// Both sign-ups (the form, and Google/Apple + mobile) refuse to go on without the two
-// required consents, and save all three as proof of what was agreed.
+// The picked phone country must belong to the number (+971 with "AE", not "IN"; "US" for a
+// +1 number that is really Canadian). An older app sends none, and gets the country the number
+// reliably belongs to, or none.
+function phoneCountryFailure(res, country) {
+  return country.error === "phone_country_mismatch"
+    ? res.status(400).json({ error: "The phone country does not match the mobile number.", code: "phone_country_mismatch" })
+    : res.status(400).json({ error: "Enter a valid mobile number for the selected country." });
+}
+
+// Both sign-ups (the form, and Google/Apple + mobile) refuse to go on without the Terms and
+// Privacy consent, and save what was agreed as proof.
 function hasRequiredConsents(consents) {
-  return consents.termsPrivacy === true && consents.medicalDisclaimer === true;
+  return consents.termsPrivacy === true;
 }
 
 function consentRequired(res) {
   return res.status(400).json({
-    error: "Please accept the Terms & Privacy Policy and the medical disclaimer to continue.",
+    error: "Please accept the Terms and Conditions and Privacy Policy to continue.",
     code: "consent_required",
   });
 }
 
+// Only what the person was shown is recorded: never an agreement they were not asked for. The
+// terms consent is always there; the medical disclaimer and marketing rows come only from an
+// older app version that still shows those checkboxes (and so sends their keys).
 function consentRows(req, consents) {
-  return [
-    { type: "terms_privacy", accepted: true },
-    { type: "medical_disclaimer", accepted: true },
-    { type: "marketing", accepted: consents.marketing === true },
-  ].map((c) => ({ ...c, version: CONSENT_VERSION, ipAddress: req.ip || null }));
+  const legacy = "medicalDisclaimer" in consents || "marketing" in consents;
+  const rows = [{ type: "terms_privacy", accepted: true }];
+  if (consents.medicalDisclaimer === true) rows.push({ type: "medical_disclaimer", accepted: true });
+  if (typeof consents.marketing === "boolean") rows.push({ type: "marketing", accepted: consents.marketing });
+  const version = legacy ? LEGACY_CONSENT_VERSION : CONSENT_VERSION;
+  return rows.map((c) => ({ ...c, version, ipAddress: req.ip || null }));
 }
 
 // Step 1 of registration: the account is created straight away but unverified, with the
@@ -160,12 +180,12 @@ function consentRows(req, consents) {
 // checks it and only then flips isVerified, so nothing can log in to it before the
 // mobile is proven. The email is verified later, on first use (markEmailVerified).
 async function register(req, res) {
-  const { name, email, mobile, countryCode, password } = req.body;
-  if (!name || !email || !mobile || !password) {
+  const { email, mobile, password } = req.body;
+  const names = readNameFields(req.body);
+  if (names.missing || !email || !mobile || !password) {
     return res.status(400).json({ error: "name, email, mobile and password are required" });
   }
-  const cleanName = String(name).trim();
-  if (cleanName.length < 2) return res.status(400).json({ error: "Enter a valid name." });
+  if (names.error) return res.status(400).json({ error: names.error });
   const cleanEmail = normalizeEmail(email);
   if (!EMAIL_RE.test(cleanEmail)) return res.status(400).json({ error: "Enter a valid email address." });
   if (isDisposableEmail(cleanEmail)) {
@@ -173,8 +193,12 @@ async function register(req, res) {
       .status(400)
       .json({ error: "Please use a permanent email address, not a temporary/disposable one." });
   }
-  const phone = normalizeMobile(mobile, countryCode);
+  const profile = readProfileFields(req.body);
+  if (profile.error) return res.status(400).json({ error: profile.error, code: "invalid_profile" });
+  const phone = normalizeMobile(mobile, callingCodeFor(req.body, profile));
   if (!phone) return res.status(400).json({ error: "Enter a valid mobile number for the selected country." });
+  const country = resolvePhoneCountry(phone.e164, profile.phoneCountry);
+  if (!country.ok) return phoneCountryFailure(res, country);
   const passwordError = passwordProblem(password);
   if (passwordError) return res.status(400).json({ error: passwordError });
   const consents = req.body.consents || {};
@@ -194,10 +218,15 @@ async function register(req, res) {
   try {
     user = await prisma.user.create({
       data: {
-        name: cleanName,
+        name: names.name,
+        firstName: names.firstName,
+        lastName: names.lastName,
         email: cleanEmail,
         mobile: phone.e164,
         countryCode: phone.countryCode,
+        gender: profile.gender,
+        nationality: profile.nationality,
+        phoneCountry: country.phoneCountry,
         passwordHash: await hashPassword(password),
         isVerified: false,
         consents: { create: consentRows(req, consents) },
@@ -210,7 +239,7 @@ async function register(req, res) {
   }
 
   await recordSecurityEvent(req, EVENTS.REGISTER_STARTED, { userId: user.id, identifier: phone.e164 });
-  const result = await sendCode(phone.e164, "patient_register", phone.countryCode);
+  const result = await sendCode(phone.e164, "patient_register");
   if (result.throttled) return throttledResponse(res, result);
   res.json(codeStep(signTicket({ step: "register_otp", sub: user.id, dest: phone.e164 }), phone.e164));
 }
@@ -299,7 +328,7 @@ async function login(req, res) {
 
   if (user && !user.passwordHash) {
     if (req.body.email && viaFirebase(dest)) return useMobileInstead(res, "Please log in with your mobile number.");
-    const result = await sendCode(dest, "patient_login", user.countryCode);
+    const result = await sendCode(dest, "patient_login");
     if (result.throttled) return throttledResponse(res, result);
     return res.json({
       ...codeStep(signTicket({ step: "login_otp", sub: user.id, dest, needsPassword: true }), dest),
@@ -327,7 +356,7 @@ async function login(req, res) {
 
   // Only possible for an email login whose account has no email on file — not today.
   if (req.body.email && viaFirebase(dest)) return useMobileInstead(res, "Please log in with your mobile number.");
-  const result = await sendCode(dest, "patient_login", user.countryCode);
+  const result = await sendCode(dest, "patient_login");
   if (result.throttled) return throttledResponse(res, result);
   res.json(codeStep(signTicket({ step: "login_otp", sub: user.id, dest }), dest));
 }
@@ -380,7 +409,7 @@ async function forgotPassword(req, res) {
     return useMobileInstead(res, "Your email isn't verified yet. Please reset your password with your mobile number.");
   }
   if (user) {
-    const result = await sendCode(dest, "patient_password_reset", user.countryCode);
+    const result = await sendCode(dest, "patient_password_reset");
     if (result.throttled) return throttledResponse(res, result);
   }
   await recordSecurityEvent(req, EVENTS.PASSWORD_RESET_REQUESTED, {
@@ -472,7 +501,7 @@ async function resendOtp(req, res) {
     && (step.tv === undefined || step.tv === user.tokenVersion);
   if (!stillValid) return ticketFailure(res);
 
-  const result = await issueOtp(step.dest, purposeFor(step), step.countryCode || user.countryCode);
+  const result = await issueOtp(step.dest, purposeFor(step));
   if (result.throttled) return throttledResponse(res, result);
   res.json(sent);
 }
@@ -554,16 +583,20 @@ async function appleLogin(req, res) {
 // mobile gets a code; registerVerifyOtp finishes it. No password: they sign in with
 // Google/Apple, and are asked to set one if they ever log in with mobile/email instead.
 async function socialRegister(req, res) {
-  const { signupTicket, name, mobile, countryCode } = req.body;
-  if (!signupTicket || !name || !mobile) {
+  const { signupTicket, mobile } = req.body;
+  const names = readNameFields(req.body);
+  if (!signupTicket || names.missing || !mobile) {
     return res.status(400).json({ error: "signupTicket, name and mobile are required" });
   }
   const step = readTicket(signupTicket, "social_signup");
   if (!step) return ticketFailure(res);
-  const cleanName = String(name).trim();
-  if (cleanName.length < 2) return res.status(400).json({ error: "Enter a valid name." });
-  const phone = normalizeMobile(mobile, countryCode);
+  if (names.error) return res.status(400).json({ error: names.error });
+  const profile = readProfileFields(req.body);
+  if (profile.error) return res.status(400).json({ error: profile.error, code: "invalid_profile" });
+  const phone = normalizeMobile(mobile, callingCodeFor(req.body, profile));
   if (!phone) return res.status(400).json({ error: "Enter a valid mobile number for the selected country." });
+  const country = resolvePhoneCountry(phone.e164, profile.phoneCountry);
+  if (!country.ok) return phoneCountryFailure(res, country);
   const consents = req.body.consents || {};
   if (!hasRequiredConsents(consents)) return consentRequired(res);
 
@@ -588,10 +621,15 @@ async function socialRegister(req, res) {
   try {
     user = await prisma.user.create({
       data: {
-        name: cleanName,
+        name: names.name,
+        firstName: names.firstName,
+        lastName: names.lastName,
         email: step.email,
         mobile: phone.e164,
         countryCode: phone.countryCode,
+        gender: profile.gender,
+        nationality: profile.nationality,
+        phoneCountry: country.phoneCountry,
         [idField]: step.providerId,
         // The provider only issues the ticket for an email it has verified.
         emailVerifiedAt: new Date(),
@@ -609,7 +647,7 @@ async function socialRegister(req, res) {
     identifier: phone.e164,
     detail: { provider: step.provider },
   });
-  const result = await sendCode(phone.e164, "patient_register", phone.countryCode);
+  const result = await sendCode(phone.e164, "patient_register");
   if (result.throttled) return throttledResponse(res, result);
   res.json(codeStep(signTicket({ step: "register_otp", sub: user.id, dest: phone.e164 }), phone.e164));
 }
@@ -690,6 +728,11 @@ async function refreshAccessToken(req, res) {
   } catch (err) {
     return res.status(401).json({ error: "Invalid or expired refresh token" });
   }
+  // Admin sessions refresh only through POST /admin/refresh (database-backed, rotating). A legacy
+  // Admin refresh token must not mint new access tokens here.
+  if (payload.role === "admin") {
+    return res.status(401).json({ error: "Invalid or expired refresh token" });
+  }
 
   const claims = {
     sub: payload.sub,
@@ -751,9 +794,11 @@ async function updateMe(req, res) {
   const name = req.body.name === undefined ? undefined : String(req.body.name).trim();
   if (name !== undefined && name.length < 2) return res.status(400).json({ error: "Enter a valid name." });
 
+  const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { name: true } });
+  const renamed = !!name && name !== current?.name;
   const user = await prisma.user.update({
     where: { id: req.user.id },
-    data: { ...(name && { name }) },
+    data: renamed ? { name, firstName: null, lastName: null } : {},
     omit: { passwordHash: false },
   });
   res.json({ user: publicUser(user) });
@@ -786,12 +831,18 @@ async function requestContactChange(req, res) {
 
   let dest;
   let countryCode;
+  let phoneCountry;
   if (kind === "mobile") {
-    const phone = normalizeMobile(req.body.mobile, req.body.countryCode);
+    const profile = readProfileFields({ phoneCountry: req.body.phoneCountry });
+    if (profile.error) return res.status(400).json({ error: profile.error, code: "invalid_profile" });
+    const phone = normalizeMobile(req.body.mobile, callingCodeFor(req.body, profile));
     if (!phone) return res.status(400).json({ error: "Enter a valid mobile number for the selected country." });
+    const country = resolvePhoneCountry(phone.e164, profile.phoneCountry);
+    if (!country.ok) return phoneCountryFailure(res, country);
     if (phone.e164 === user.mobile) return res.status(400).json({ error: "That is already your mobile number." });
     dest = phone.e164;
     countryCode = phone.countryCode;
+    phoneCountry = country.phoneCountry;
   } else {
     dest = normalizeEmail(req.body.email);
     if (!EMAIL_RE.test(dest)) return res.status(400).json({ error: "Enter a valid email address." });
@@ -807,9 +858,9 @@ async function requestContactChange(req, res) {
     });
   }
 
-  const result = await sendCode(dest, kind === "mobile" ? "patient_change_mobile" : "patient_change_email", countryCode);
+  const result = await sendCode(dest, kind === "mobile" ? "patient_change_mobile" : "patient_change_email");
   if (result.throttled) return throttledResponse(res, result);
-  res.json(codeStep(signTicket({ step: "change_contact_otp", sub: user.id, kind, dest, countryCode, tv: user.tokenVersion }), dest));
+  res.json(codeStep(signTicket({ step: "change_contact_otp", sub: user.id, kind, dest, countryCode, phoneCountry, tv: user.tokenVersion }), dest));
 }
 
 // Change mobile/email, step 2: the code from the new number/inbox. Needs the same signed-in
@@ -833,7 +884,8 @@ async function verifyContactChange(req, res) {
     user = await prisma.user.update({
       where: { id: req.user.id },
       data: step.kind === "mobile"
-        ? { mobile: step.dest, countryCode: step.countryCode }
+        // A ticket from before phoneCountry existed has none: clear the old one rather than keep a country that no longer matches.
+        ? { mobile: step.dest, countryCode: step.countryCode, phoneCountry: step.phoneCountry ?? null }
         : { email: step.dest, emailVerifiedAt: new Date() },
       omit: { passwordHash: false },
     });

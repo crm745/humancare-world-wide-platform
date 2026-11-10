@@ -1,4 +1,18 @@
 const PDFDocument = require('pdfkit');
+const { MOBILITY_LABEL, URGENCY_LABEL, EQUIPMENT } = require('../../common/constants/request.constants');
+const { careLevelText } = require('../../common/utils/care-level');
+
+// A date-only value (a preferred date, a date of death) is stored as that calendar day at 00:00 UTC.
+// Read it in UTC: toDateString() uses the server's own timezone, so on a server west of UTC it
+// printed the day before. Same layout as before ("Tue Nov 10 2026").
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function formatDateOnly(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${WEEKDAYS[date.getUTCDay()]} ${MONTHS[date.getUTCMonth()]} ${day} ${date.getUTCFullYear()}`;
+}
 
 function row(doc, label, value) {
   if (value === null || value === undefined || value === '') return;
@@ -22,7 +36,7 @@ function streamRequestSummaryPdf(res, request) {
 
   // Mortal Remains: the name on the request is the deceased's.
   const mortal = /^mortal(_|$)/.test(request.serviceKey || '');
-  const day = (value) => (value ? new Date(value).toDateString() : null);
+  const day = (value) => (value ? formatDateOnly(value) : null);
   row(doc, mortal ? 'Deceased Name:' : 'Patient Name:', request.patientName);
   row(doc, 'Age / Gender:', [request.patientAge, request.patientGender].filter(Boolean).join(' / '));
   row(doc, 'Relation to the deceased:', request.deceasedRelation);
@@ -34,8 +48,13 @@ function streamRequestSummaryPdf(res, request) {
   row(doc, mortal ? 'Preferred transfer date:' : 'Date Of Service:', day(request.preferredDate));
   row(doc, 'Status:', request.status);
   row(doc, 'Submitted:', new Date(request.createdAt).toLocaleString());
-  if (request.description) row(doc, 'Description:', request.description);
-  if (request.specialRequirements) row(doc, 'Special Requirements:', request.specialRequirements);
+  row(doc, 'Urgency:', URGENCY_LABEL[request.urgency]);
+  if (request.description) row(doc, mortal ? 'Details:' : 'Condition & diagnosis:', request.description);
+  // Keys read as English labels; so do the older translated labels, which the PDF's built-in font
+  // cannot draw (Hindi, Marathi, Gujarati, Telugu and Arabic printed as garbage or not at all).
+  row(doc, 'Care level:', careLevelText(request.careLevel, { translateLegacy: true }));
+  row(doc, 'Patient mobility:', MOBILITY_LABEL[request.mobility]);
+  row(doc, 'Required on board:', EQUIPMENT.filter(([field]) => request[field] === true).map(([, label]) => label).join(', '));
 
   const stageEvents = request.case && request.case.stageEvents;
   if (stageEvents && stageEvents.length) {
@@ -54,4 +73,4 @@ function streamRequestSummaryPdf(res, request) {
   doc.end();
 }
 
-module.exports = { streamRequestSummaryPdf };
+module.exports = { streamRequestSummaryPdf, formatDateOnly };

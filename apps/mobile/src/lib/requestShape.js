@@ -32,3 +32,22 @@ export function toListItem(request) {
     display: formatDisplayDate(request.createdAt),
   };
 }
+
+// How a stored care level reads on screen. The backend stores machine keys ("care_icu,care_stable")
+// for Private Charter; older requests hold the labels of the language they were made in, and
+// anything else is free text. Only a piece that is exactly a known key is translated (into the
+// language the app is showing now); everything else is left as stored, byte for byte, so an old
+// label, a typed note or an odd comma is never reworded. Same rule as the backend's
+// care-level.js (PDF and Bitrix). `t` is the app's translate function.
+const CARE_LEVEL_KEYS = ['care_icu', 'care_stable', 'care_ambulatory', 'care_na'];
+
+export function careLevelText(value, t) {
+  if (typeof value !== 'string' || value === '') return value;
+  const pieces = value.split(',');
+  const keys = pieces.map((piece) => (CARE_LEVEL_KEYS.includes(piece.trim()) ? piece.trim() : null));
+  if (keys.every(Boolean)) return keys.map((key) => t(key)).join(', ');
+  return pieces.map((piece, i) => {
+    if (!keys[i]) return piece;
+    return `${piece.match(/^\s*/)[0]}${t(keys[i])}${piece.match(/\s*$/)[0]}`;
+  }).join(',');
+}

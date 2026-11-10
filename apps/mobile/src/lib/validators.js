@@ -5,6 +5,13 @@ export function isValidName(value) {
   return v.length >= 2 && /\p{L}/u.test(v);
 }
 
+// One of the two name fields (first name, last name): at least a letter, at most 50 characters,
+// the same limits as the server.
+export function isValidNamePart(value) {
+  const v = (value || '').trim();
+  return v.length >= 1 && v.length <= 50 && /\p{L}/u.test(v);
+}
+
 export function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((value || '').trim());
 }

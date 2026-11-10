@@ -20,6 +20,15 @@ require('dotenv').config({ path: '.env.test', override: true });
   }
 }
 
+// Fail closed before any test code runs: only the dedicated test database, mail only to the local
+// capture sink (or the console), uploads only in backend/.e2e-uploads. Suites that mock Prisma
+// fail here too, if backend/.env.test is missing, so a misconfigured run is never half-protected.
+{
+  const guard = require('../src/common/safety/test-database-guard');
+  guard.assertTestDatabaseUrl(process.env.DATABASE_URL);
+  guard.assertSafeTestEnvironment(process.env);
+}
+
 // Tests must never create leads in the real Bitrix24 CRM. .env.test can hold the live
 // webhook URL, and several suites (cases, corporate flows) run code that syncs to
 // Bitrix without mocking it — so drop the URL (bitrix.service then fails fast with

@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react';
-import { Dimensions, Image, ImageBackground, Modal, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { Dimensions, Image, ImageBackground, Modal, Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Check, ChevronDown, Download, Eye, EyeOff, FileText, X } from 'lucide-react-native';
+import { Check, ChevronDown, Download, Eye, EyeOff, FileText, Search, X } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { IMAGES } from '../data/images';
 import { IconButton } from './layout';
@@ -39,7 +39,7 @@ export function Sheet({ visible, onClose, title, children }) {
 // that genuinely need the room, like FilterSheet's whole form). This is just for a
 // flat list of choices, so it shouldn't take over the screen the way a bottom sheet
 // does, however many options there are.
-function Dropdown({ visible, onClose, title, children }) {
+function Dropdown({ visible, onClose, title, header, children }) {
   const { isRTL } = useApp();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -49,7 +49,8 @@ function Dropdown({ visible, onClose, title, children }) {
             <Text className="font-inter-black text-[15px] text-navy">{title}</Text>
             <IconButton onPress={onClose} className="h-[28px] w-[28px]"><X size={14} color="#45526B" /></IconButton>
           </View>
-          <ScrollView style={{ maxHeight: Dimensions.get('window').height * 0.5 }} showsVerticalScrollIndicator={false}>
+          {header}
+          <ScrollView style={{ maxHeight: Dimensions.get('window').height * 0.5 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {children}
           </ScrollView>
         </Pressable>
@@ -64,9 +65,31 @@ function Dropdown({ visible, onClose, title, children }) {
 // like its own separate field. labels is an optional { optionValue: displayText } map
 // (e.g. "+91" -> "IN +91") — the actual value stored/returned is unchanged, only what's
 // shown changes.
+//
+// A long list (countries, calling codes) gets a search box: typing narrows it by what is shown
+// ("emir") or by the value itself ("+971"), ignoring case and accents. Short lists have none.
+const SEARCH_FROM = 12;
+const plain = (text) => String(text || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
+
 export function Select({ value, options, onChange, title, large, bare, labels, placeholder, className = '' }) {
+  const { t } = useApp();
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const show = (o) => (labels && labels[o]) || o;
+  const searchable = options.length > SEARCH_FROM;
+  const q = plain(query);
+  const shown = searchable && q ? options.filter((o) => plain(show(o)).includes(q) || plain(o).includes(q)) : options;
+  const close = () => { setOpen(false); setQuery(''); };
+  const search = searchable ? (
+    <View className="mb-2.5 flex-row items-center gap-2 rounded-[10px] border-[1.5px] border-field bg-input px-3">
+      <Search size={15} color="#97A4B8" />
+      <TextInput
+        value={query} onChangeText={setQuery} autoCorrect={false} autoCapitalize="none" autoFocus={Platform.OS === 'web'}
+        accessibilityLabel={t('country_picker_search')} placeholder={t('country_picker_search')} placeholderTextColor="#97A4B8"
+        className="min-h-[44px] flex-1 font-inter text-[14px] text-ink"
+      />
+    </View>
+  ) : null;
   return (
     <>
       <Pressable
@@ -76,12 +99,13 @@ export function Select({ value, options, onChange, title, large, bare, labels, p
         <Text className={`${value ? '' : 'text-faint'} ${labels ? 'text-[13px]' : large ? 'text-[16.5px]' : 'text-[15px]'}`} numberOfLines={1}>{value ? show(value) : placeholder || title}</Text>
         <ChevronDown size={16} color="#97A4B8" />
       </Pressable>
-      <Dropdown visible={open} onClose={() => setOpen(false)} title={title}>
+      <Dropdown visible={open} onClose={close} title={title} header={search}>
         <View className="gap-1.5">
-          {options.map((o) => (
+          {shown.length === 0 ? <Text className="py-4 text-center text-[13.5px] text-muted">{t('country_picker_empty')}</Text> : null}
+          {shown.map((o) => (
             <Pressable
               key={o}
-              onPress={() => { onChange(o); setOpen(false); }}
+              onPress={() => { onChange(o); close(); }}
               className={`flex-row items-center justify-between rounded-lg border-[1.5px] px-3 py-2.5 ${o === value ? 'border-primary bg-primary-soft' : 'border-line bg-white'}`}
             >
               <Text className="font-inter-bold text-[13.5px] text-navy">{show(o)}</Text>
@@ -165,21 +189,6 @@ export function PasswordField({ label, value, onChangeText, placeholder, require
 }
 
 // 3-step progress dots for the request form (step 3 = review).
-export function StepWizard({ step }) {
-  return (
-    <View className="flex-row items-center gap-1.5 border-b border-line bg-white px-[18px] py-4">
-      {[1, 2, 3].map((i) => (
-        <View key={i} className={`flex-row items-center gap-1.5 ${i < 3 ? 'flex-1' : ''}`}>
-          <View className={`h-[26px] w-[26px] items-center justify-center rounded-full ${i < step ? 'bg-primary' : i === step ? 'bg-ink' : 'bg-line'}`}>
-            <Text className={`font-inter-black text-[12.5px] ${i <= step ? 'text-white' : 'text-faint'}`}>{i < step ? '✓' : i}</Text>
-          </View>
-          {i < 3 && <View className={`h-0.5 flex-1 ${i < step ? 'bg-primary' : 'bg-line'}`} />}
-        </View>
-      ))}
-    </View>
-  );
-}
-
 export function ServiceTile({ img, title, sub, onPress }) {
   return (
     <Pressable

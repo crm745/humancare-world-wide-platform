@@ -13,10 +13,23 @@ datasource db {
 model User {
   id           Int      @id @default(autoincrement())
   name         String
+  // The Create Account form asks for these two. `name` stays the full name ("first last") that
+  // the rest of the app shows and sends; these are null for accounts made before the split and
+  // for Google/Apple sign-ups, whose provider only gives one name. Nothing splits `name` to fill
+  // them in, because that would be a guess.
+  firstName    String?  @db.VarChar(50) @map("first_name")
+  lastName     String?  @db.VarChar(50) @map("last_name")
   email        String   @unique
   // E.164 (e.g. "+919876543210") so the same number can't be stored two ways.
   mobile       String?  @unique
   countryCode  String   @default("+91") @map("country_code")
+  // Asked on the sign-up form; null for accounts made before it did. Personal data: never
+  // written to a log.
+  gender       String?  @db.VarChar(20) // "male" | "female" | "other" | "prefer_not_to_say"
+  nationality  String?  @db.VarChar(2) // ISO 3166-1 alpha-2 code, e.g. "IN"
+  // The country picked for the phone's calling code. countryCode above is only the code
+  // ("+1"), which several countries share, so this says which one it was.
+  phoneCountry String?  @db.VarChar(2) @map("phone_country")
   // Null for accounts created before passwords were introduced (OTP-only) and for
   // Google/Apple accounts — the login flow makes the former set one on next login.
   passwordHash String?  @map("password_hash")
@@ -103,7 +116,9 @@ model AdminUser {
   id           Int      @id @default(autoincrement())
   name         String
   email        String   @unique
-  passwordHash String   @map("password_hash")
+  // Null while the account is only invited and has not chosen a password yet. Login code
+  // must treat null as "cannot sign in with a password", never pass it to bcrypt.
+  passwordHash String?  @map("password_hash")
   // "admin" handles day-to-day ops (cases, patients, corporates, tickets); "superadmin"
   // additionally manages other admin accounts and sensitive settings (the services
   // catalog today, billing later) — see requireSuperAdmin in auth.middleware.js.
@@ -111,9 +126,227 @@ model AdminUser {
   // Lets a regular admin review corporate registrations (list, approve, reject, provision).
   // Superadmins can always do so. Granted by a server-side script, never by the request.
   corporateReview Boolean @default(false) @map("corporate_review")
+  // "invited" | "pending_passkey" | "active" | "disabled". Accounts that existed before the
+  // Admin Lock System are "active". Admins are soft-disabled, never deleted.
+  status       String   @default("active") @db.VarChar(24)
+  emailVerifiedAt   DateTime? @map("email_verified_at")
+  // Failed password AND passkey attempts share this counter; it is reset only after both
+  // factors have succeeded.
+  failedLoginCount  Int       @default(0) @map("failed_login_count")
+  lockedUntil       DateTime? @map("locked_until")
+  passwordChangedAt DateTime? @map("password_changed_at")
+  lastLoginAt       DateTime? @map("last_login_at")
+  disabledAt        DateTime? @map("disabled_at")
+  disabledReason    String?   @db.VarChar(255) @map("disabled_reason")
+  // The Admin who disabled this account. A plain id with no foreign key, like the other
+  // "by" columns; the history must survive whatever happens to the referenced row.
+  disabledBy        Int?      @map("disabled_by")
   createdAt    DateTime @default(now()) @map("created_at")
+  // Existing rows get the time of the migration; it is maintained by Prisma from then on.
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  invitations       AdminInvitation[]
+  sessions          AdminSession[]
+  passkeys          AdminPasskey[]
+  challenges        AdminWebAuthnChallenge[]
+  recoveryTargets   AdminRecoveryRequest[]  @relation("RecoveryTarget")
+  recoveryRequested AdminRecoveryRequest[]  @relation("RecoveryRequester")
+  recoveryApprovals AdminRecoveryApproval[] @relation("RecoveryApprover")
 
+  @@index([status])
   @@map("admin_users")
+}
+
+// A request to regain access after losing every passkey. Normal recovery needs approval
+// from two different active Admins with the "superadmin" role; neither the target nor the
+// requester may approve (enforced in code, in one transaction). Kept permanently as security
+// history, so nothing that references it can be deleted.
+model AdminRecoveryRequest {
+  id                 Int       @id @default(autoincrement())
+  // The Admin who lost the passkey.
+  adminId            Int       @map("admin_id")
+  admin              AdminUser @relation("RecoveryTarget", fields: [adminId], references: [id], onDelete: Restrict)
+  // The authenticated Admin who filed it. Null when it was not filed by a signed-in Admin
+  // (a self-service request from the target's mailbox, or a server operator).
+  requestedByAdminId Int?      @map("requested_by_admin_id")
+  requestedBy        AdminUser? @relation("RecoveryRequester", fields: [requestedByAdminId], references: [id], onDelete: Restrict)
+  requestedVia       String    @db.VarChar(16) @map("requested_via")
+  requestIp          String?   @map("request_ip")
+  reason             String?   @db.VarChar(500)
+  status             String    @default("pending") @db.VarChar(24) // "pending" | "approved" | "completed" | "rejected" | "expired" | "cancelled"
+  approvalsRequired  Int       @default(2) @map("approvals_required")
+  approvedAt         DateTime? @map("approved_at")
+  expiresAt          DateTime  @map("expires_at")
+  completedAt        DateTime? @map("completed_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
+  approvals          AdminRecoveryApproval[]
+  invitations        AdminInvitation[]
+  challenges         AdminWebAuthnChallenge[]
+
+  @@index([adminId, status])
+  @@index([status, expiresAt])
+  @@index([requestedByAdminId])
+  @@map("admin_recovery_requests")
+}
+
+// The emailed, single-use link that activates an account or enrols / recovers a passkey.
+// Only a SHA-256 hash of the token is stored, never the token. Kept permanently.
+model AdminInvitation {
+  id                Int       @id @default(autoincrement())
+  adminId           Int       @map("admin_id")
+  admin             AdminUser @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  purpose           String    @db.VarChar(24) // "activation" | "passkey_enrollment" | "passkey_recovery"
+  // Set for a normal passkey recovery. Null for the other purposes, and for break-glass
+  // recovery issued through the separately authorised emergency path.
+  recoveryRequestId Int?      @map("recovery_request_id")
+  recoveryRequest   AdminRecoveryRequest? @relation(fields: [recoveryRequestId], references: [id], onDelete: Restrict)
+  tokenHash         String    @unique @db.Char(64) @map("token_hash")
+  // The address the link was sent to, as it was at the time.
+  sentToEmail       String    @map("sent_to_email")
+  expiresAt         DateTime  @map("expires_at")
+  usedAt            DateTime? @map("used_at")
+  revokedAt         DateTime? @map("revoked_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  challenges        AdminWebAuthnChallenge[]
+
+  @@index([adminId, createdAt])
+  @@index([expiresAt])
+  @@index([recoveryRequestId])
+  @@map("admin_invitations")
+}
+
+// A signed-in dashboard session, checked against this row on every request. At most two are
+// active per Admin (enforced in code under a row lock on admin_users). It locks after 30
+// minutes idle and ends at the absolute limit; both times are fixed when it is created or
+// last used. History is kept 365 days after expiry/revocation.
+model AdminSession {
+  id                Int       @id @default(autoincrement())
+  adminId           Int       @map("admin_id")
+  admin             AdminUser @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  lastActivityAt    DateTime  @default(now()) @map("last_activity_at")
+  // When the session locks for inactivity (lastActivityAt + 30 minutes), not when it ends.
+  idleExpiresAt     DateTime  @map("idle_expires_at")
+  // When the session ends regardless of activity (createdAt + 7 days).
+  absoluteExpiresAt DateTime  @map("absolute_expires_at")
+  lockedAt          DateTime? @map("locked_at")
+  // Failed passkey unlock attempts on this session, tracked apart from the account counter.
+  unlockFailedCount Int       @default(0) @map("unlock_failed_count")
+  unlockLockedUntil DateTime? @map("unlock_locked_until")
+  revokedAt         DateTime? @map("revoked_at")
+  revokedReason     String?   @db.VarChar(64) @map("revoked_reason")
+  // The Admin who revoked it; null when the system or a server operator did.
+  revokedBy         Int?      @map("revoked_by")
+  ipAddress         String?   @map("ip_address")
+  userAgent         String?   @db.VarChar(255) @map("user_agent")
+  refreshTokens     AdminRefreshToken[]
+  challenges        AdminWebAuthnChallenge[]
+
+  @@index([adminId, revokedAt, absoluteExpiresAt])
+  @@index([absoluteExpiresAt])
+  @@index([revokedAt])
+  @@map("admin_sessions")
+}
+
+// One refresh token of a session. Each use rotates it: the used token is marked and points at
+// its replacement, and presenting a used token again revokes the whole session. Only the
+// SHA-256 hash is stored. Rows are kept (not deleted) when a session is revoked; they are
+// purged with their session, children first.
+model AdminRefreshToken {
+  id           Int          @id @default(autoincrement())
+  sessionId    Int          @map("session_id")
+  session      AdminSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  tokenHash    String       @unique @db.Char(64) @map("token_hash")
+  expiresAt    DateTime     @map("expires_at")
+  usedAt       DateTime?    @map("used_at")
+  // The token that replaced this one when it was used. SET NULL (not Restrict) so the
+  // retention purge can remove old tokens without deleting them in chain order.
+  replacedById Int?         @unique @map("replaced_by_id")
+  replacedBy   AdminRefreshToken? @relation("RefreshChain", fields: [replacedById], references: [id], onDelete: SetNull)
+  replaces     AdminRefreshToken? @relation("RefreshChain")
+  revokedAt    DateTime?    @map("revoked_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  @@index([sessionId])
+  @@index([expiresAt])
+  @@map("admin_refresh_tokens")
+}
+
+// A registered WebAuthn credential. Only the public key is stored. The credential id is
+// case-sensitive but this database's collation is not, so lookups use credentialIdHash (a
+// SHA-256 hex digest) and the raw id is kept as bytes.
+model AdminPasskey {
+  id               Int       @id @default(autoincrement())
+  adminId          Int       @map("admin_id")
+  admin            AdminUser @relation(fields: [adminId], references: [id], onDelete: Restrict)
+  credentialIdHash String    @unique @db.Char(64) @map("credential_id_hash")
+  credentialId     Bytes     @map("credential_id")
+  publicKey        Bytes     @map("public_key")
+  signCount        Int       @default(0) @db.UnsignedInt @map("sign_count")
+  transports       Json?
+  aaguid           String?   @db.VarChar(36)
+  deviceType       String?   @db.VarChar(16) @map("device_type")
+  backedUp         Boolean?  @map("backed_up")
+  label            String?   @db.VarChar(100)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  lastUsedAt       DateTime? @map("last_used_at")
+  revokedAt        DateTime? @map("revoked_at")
+  revokedReason    String?   @db.VarChar(64) @map("revoked_reason")
+  // The Admin who revoked it; null when a server operator did.
+  revokedBy        Int?      @map("revoked_by")
+
+  @@index([adminId, revokedAt])
+  @@map("admin_passkeys")
+}
+
+// One Admin's decision on a recovery request. UNIQUE (request, approver) so nobody decides
+// twice; that the approver is an active "superadmin" and is neither the target nor the
+// requester is checked in code, in the same transaction that completes the recovery.
+model AdminRecoveryApproval {
+  id           Int       @id @default(autoincrement())
+  requestId    Int       @map("request_id")
+  request      AdminRecoveryRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  approverId   Int       @map("approver_id")
+  approver     AdminUser @relation("RecoveryApprover", fields: [approverId], references: [id], onDelete: Restrict)
+  // The approver's role at the moment of the decision.
+  approverRole String    @db.VarChar(16) @map("approver_role")
+  decision     String    @db.VarChar(16) // "approved" | "rejected"
+  reason       String?   @db.VarChar(500)
+  ipAddress    String?   @map("ip_address")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@unique([requestId, approverId])
+  @@index([approverId])
+  @@map("admin_recovery_approvals")
+}
+
+// A single-use WebAuthn challenge, bound to what it was issued for: an invitation
+// (registration), a recovery request (recovery_registration), or a session (unlock; a
+// registration from a signed-in session also binds here). Short-lived (2 minutes) and
+// cleaned up after it expires, so unlike the durable tables it cascades from the Admin.
+model AdminWebAuthnChallenge {
+  id                Int       @id @default(autoincrement())
+  adminId           Int       @map("admin_id")
+  admin             AdminUser @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  purpose           String    @db.VarChar(32) // "registration" | "authentication" | "unlock" | "recovery_registration"
+  challenge         String    @db.VarChar(191)
+  invitationId      Int?      @map("invitation_id")
+  invitation        AdminInvitation? @relation(fields: [invitationId], references: [id], onDelete: SetNull)
+  recoveryRequestId Int?      @map("recovery_request_id")
+  recoveryRequest   AdminRecoveryRequest? @relation(fields: [recoveryRequestId], references: [id], onDelete: SetNull)
+  sessionId         Int?      @map("session_id")
+  session           AdminSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  expiresAt         DateTime  @map("expires_at")
+  consumedAt        DateTime? @map("consumed_at")
+  ipAddress         String?   @map("ip_address")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  @@index([adminId, purpose, consumedAt])
+  @@index([expiresAt])
+  @@index([invitationId])
+  @@index([recoveryRequestId])
+  @@index([sessionId])
+  @@map("admin_webauthn_challenges")
 }
 
 model Service {
@@ -289,19 +522,36 @@ model ServiceRequest {
   origin            String
   destination       String
   country           String?
-  preferredDate     DateTime? @map("preferred_date")
+  // A calendar day, no time of day (SQL DATE). Written as a "YYYY-MM-DD" date at 00:00 UTC, which
+  // Prisma stores as exactly that day and reads back as 00:00 UTC of it: never shifted by a timezone.
+  preferredDate     DateTime? @map("preferred_date") @db.Date
   careLevel         String?   @map("care_level")
   description       String?   @db.Text
-  medicalSummary    String?   @db.Text @map("medical_summary")
-  additionalInfo    String?   @map("additional_info")
-  specialRequirements String? @db.Text @map("special_requirements")
   // Mortal Remains only (patientName then holds the deceased's name): who is asking,
   // and where and when the death happened.
   deceasedRelation  String?   @map("deceased_relation")
   placeOfDeath      String?   @map("place_of_death")
   dateOfDeath       DateTime? @map("date_of_death")
-  referralSource    String?   @map("referral_source")
-  documentUrl       String?   @map("document_url")
+  // The medical page of the New Request form. Mobility and the equipment flags are only set
+  // for patient-transport services (null otherwise, and on requests made before the page
+  // existed); urgency is null on those older requests too.
+  mobility          String?   @db.VarChar(16) // "bedridden" | "wheelchair" | "walking"
+  equipOxygen       Boolean?  @map("equip_oxygen")
+  equipCardiacMonitor Boolean? @map("equip_cardiac_monitor")
+  equipVentilator   Boolean?  @map("equip_ventilator")
+  urgency           String?   @db.VarChar(16) // "critical_6h" | "urgent_24h" | "planned"
+  // Private Charter only (null for every other service and for older requests): the cities the
+  // patient picked, as the server verified them against the GeoNames table (geonames_cities).
+  // `origin` / `destination` above keep the readable label ("Mumbai, Maharashtra, India") that
+  // every other part of the system shows. The timezone is the origin city's own, as used for the
+  // "no past date" check.
+  originGeonameId       Int?    @map("origin_geoname_id")
+  originCityName        String? @db.VarChar(200) @map("origin_city_name")
+  originCountryCode     String? @db.VarChar(2) @map("origin_country_code")
+  originTimezone        String? @db.VarChar(64) @map("origin_timezone")
+  destinationGeonameId  Int?    @map("destination_geoname_id")
+  destinationCityName   String? @db.VarChar(200) @map("destination_city_name")
+  destinationCountryCode String? @db.VarChar(2) @map("destination_country_code")
   referenceNumber   String    @unique @map("reference_number")
   status            String    @default("submitted")
   bitrixLeadId      Int?      @map("bitrix_lead_id")
@@ -312,7 +562,87 @@ model ServiceRequest {
   updatedAt         DateTime  @updatedAt @map("updated_at")
   case              Case?
 
+  // Request-first review workflow (Private Charter only; see backend/REQUEST-REVIEW-WORKFLOW.md).
+  // NULL on every older request and on every other service: those keep the original flow, where a
+  // Case is created together with the request. Otherwise one of: "awaiting_documents" (nothing
+  // uploaded yet), "in_review", "changes_requested" (an Admin asked for more or rejected a
+  // document), "approved" (the Case exists). The Case is created only on approval.
+  reviewStatus           String?   @map("review_status") @db.VarChar(24)
+  // When the first document arrived (the request then entered review).
+  submittedAt            DateTime? @map("submitted_at")
+  reviewedAt             DateTime? @map("reviewed_at")
+  // What the patient is told to provide next. Shown to the patient, so never an internal note.
+  documentsRequestReason String?   @db.Text @map("documents_request_reason")
+  requestDocuments       RequestDocument[]
+  requestEvents          RequestEvent[]
+
+  @@index([reviewStatus, createdAt])
   @@map("service_requests")
+}
+
+// One file a patient uploaded against a request in the review workflow. The file stays on disk and
+// every row is kept for good: a replaced or rejected document is marked, never deleted, so the
+// history of what was sent and decided survives. Nothing here is downloadable until scan_status is
+// "clean" (see request-review.service.js).
+model RequestDocument {
+  id                Int      @id @default(autoincrement())
+  serviceRequestId  Int      @map("service_request_id")
+  serviceRequest    ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Restrict)
+  originalName      String   @map("original_name")
+  // The file's name inside the uploads folder. Never sent to a client.
+  storageKey        String   @unique @map("storage_key")
+  sizeBytes         Int      @map("size_bytes")
+  mimeType          String?  @map("mime_type")
+  sha256            String?  @db.Char(64)
+  uploadedByUserId  Int      @map("uploaded_by_user_id")
+  uploadedAt        DateTime @default(now()) @map("uploaded_at")
+  // The earlier document this one replaces (a plain id: the old row is kept as it was).
+  replacesId        Int?     @map("replaces_id")
+  supersededAt      DateTime? @map("superseded_at")
+  // "pending" | "clean" | "infected" | "error". Only an explicit "OK" from ClamAV is "clean".
+  scanStatus        String   @default("pending") @map("scan_status") @db.VarChar(16)
+  scanEngine        String?  @map("scan_engine") @db.VarChar(40)
+  scanDetail        String?  @map("scan_detail") @db.VarChar(255)
+  scannedAt         DateTime? @map("scanned_at")
+  // Retry bookkeeping of the scan worker. Attempts are counted when an attempt is claimed (a crash
+  // mid-scan still uses one); NULL next-attempt = due now; while an attempt runs it is the lease end.
+  scanAttempts      Int      @default(0) @map("scan_attempts")
+  scanNextAttemptAt DateTime? @map("scan_next_attempt_at")
+  // "pending" | "approved" | "rejected"
+  reviewStatus      String   @default("pending") @map("review_status") @db.VarChar(16)
+  reviewedByAdminId Int?     @map("reviewed_by_admin_id")
+  reviewedAt        DateTime? @map("reviewed_at")
+  // Shown to the patient.
+  rejectionReason   String?  @db.Text @map("rejection_reason")
+  // The documents row created for it when the request was approved (a plain id).
+  caseDocumentId    Int?     @unique @map("case_document_id")
+
+  @@index([serviceRequestId])
+  @@index([scanStatus])
+  @@index([scanStatus, scanNextAttemptAt])
+  @@map("request_documents")
+}
+
+// Append-only business audit history of a request: uploads, scan results, review decisions,
+// requests for more documents, replacements, approval. Rows are only ever inserted (nothing in the
+// code updates or deletes one) and are not covered by any purge job. Deliberately not
+// security_events, which is a security log with a 365-day retention.
+model RequestEvent {
+  id               Int      @id @default(autoincrement())
+  serviceRequestId Int      @map("service_request_id")
+  serviceRequest   ServiceRequest @relation(fields: [serviceRequestId], references: [id], onDelete: Restrict)
+  documentId       Int?     @map("document_id")
+  action           String   @db.VarChar(40)
+  fromStatus       String?  @map("from_status") @db.VarChar(24)
+  toStatus         String?  @map("to_status") @db.VarChar(24)
+  // "patient" | "admin" | "system"
+  actorType        String   @map("actor_type") @db.VarChar(12)
+  actorId          Int?     @map("actor_id")
+  detail           Json?
+  occurredAt       DateTime @default(now()) @map("occurred_at")
+
+  @@index([serviceRequestId, occurredAt])
+  @@map("request_events")
 }
 
 // A Case is the corporate/ops-side tracking record for a request once it's being worked.
@@ -450,4 +780,52 @@ model Notification {
 
   @@index([recipientType, recipientId, readAt])
   @@map("notifications")
+}
+
+// The local GeoNames populated-place table that Private Charter origin and destination cities are
+// searched and verified against (no GeoNames account or network call at runtime). Filled by
+// scripts/import-geonames.js from the free GeoNames dump; see backend/GEONAMES-DATASET.md.
+//
+// Data: GeoNames (https://www.geonames.org), licensed CC BY 4.0. Only populated places (feature
+// class P) are loaded, without the historical, abandoned and destroyed ones, and the columns are
+// reduced to the ones below.
+//
+// `verifiedAt` is when an import last saw the record. A record older than GEONAMES_MAX_AGE_DAYS
+// (180 by default) is not accepted any more, so a dataset that is not refreshed fails closed.
+model GeonamesCity {
+  geonameId   Int      @id @map("geoname_id")
+  name        String   @db.VarChar(200)
+  asciiName   String   @db.VarChar(200) @map("ascii_name")
+  admin1Name  String?  @db.VarChar(200) @map("admin1_name")
+  countryCode String   @db.VarChar(2) @map("country_code")
+  featureCode String   @db.VarChar(10) @map("feature_code")
+  population  Int      @default(0)
+  timezone    String   @db.VarChar(64)
+  verifiedAt  DateTime @map("verified_at")
+  names       GeonamesCityName[]
+
+  // Covering indexes for the city search: a prefix range on the name carries each place's
+  // population too, so the biggest matches are found without reading the table rows (the search
+  // would otherwise take seconds on a short prefix over 5 million places).
+  @@index([name, population])
+  @@index([asciiName, population])
+  @@index([verifiedAt])
+  @@map("geonames_cities")
+}
+
+// Other names of a city in geonames_cities (translations, local spellings in other scripts, old
+// names, ASCII spellings: "München" for Munich), so the picker finds a city by any of them. The
+// city's own name and its id stay the canonical ones in every result: this table is only used to
+// FIND the city. Comes from the same dump line as the city, so it is refreshed with it, and goes
+// when the city goes. `population` repeats the city's, so a short query can be limited to bigger
+// places inside the index.
+model GeonamesCityName {
+  geonameId  Int          @map("geoname_id")
+  name       String       @db.VarChar(200)
+  population Int          @default(0)
+  city       GeonamesCity @relation(fields: [geonameId], references: [geonameId], onDelete: Cascade)
+
+  @@id([geonameId, name])
+  @@index([name, population])
+  @@map("geonames_city_names")
 }
