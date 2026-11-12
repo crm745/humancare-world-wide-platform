@@ -52,7 +52,7 @@ export default function EditProfile() {
   return (
     <Screen bg="bg-white">
       <TopBar title={t('edit_profile_title')} />
-      <Body contentClassName="px-[26px] pb-[26px] pt-5">
+      <Body contentClassName="px-[18px] pb-[26px] pt-5">
         <Text className="mb-[26px] text-center text-[14.5px] text-muted">{t('edit_profile_sub')}</Text>
         <View className="mb-[26px] items-center">
           <View className="h-16 w-16 items-center justify-center rounded-[18px] bg-primary-soft">

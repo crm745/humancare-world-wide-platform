@@ -95,10 +95,10 @@ describe('wiring (source checks)', () => {
   const tracking = read('../../app/tracking.js');
   const details = read('../../app/request-details.js');
 
-  test('request details opens tracking only through trackingRoute', () => {
+  test('request details: Documents opens the Documents tab of the old tracking page; Track Details opens the Tracking page', () => {
     expect(details).toMatch(/router\.push\(trackingRoute\(request, 'docs'\)\)/);
-    expect(details).toMatch(/router\.push\(trackingRoute\(request\)\)/);
-    expect(details).not.toMatch(/pathname: '\/tracking'/);
+    expect(details).toContain("pathname: '/request-tracking', params: { id: request.id }");
+    expect(details).not.toMatch(/router\.push\(trackingRoute\(request\)\)/);
   });
 
   test('tracking loads a patient request by its request id and a corporate Case by its own path, as before', () => {

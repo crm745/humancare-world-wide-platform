@@ -8,8 +8,8 @@ import { initialsOf, useApp } from '../state/AppContext';
 import { LANGUAGES } from '../data/mock';
 import { navReplace } from '../lib/nav';
 import { clearTokens } from '../lib/session';
-import { BottomNav, Screen, useScrollToTopOnTabTap } from '../components/layout';
-import { Text } from '../components/ui';
+import { BottomNav, Screen, TopBar, useScrollToTopOnTabTap } from '../components/layout';
+import { SectionLabel, Text } from '../components/ui';
 import { Sheet } from '../components/widgets';
 
 const TAB_BAR = 64;
@@ -66,8 +66,8 @@ function Row({ Icon, label, onPress, first }) {
 function Section({ label, rows }) {
   return (
     <View>
-      <Text className="font-inter-bold" style={{ marginTop: 4, marginLeft: 4, fontSize: 12, lineHeight: 16, letterSpacing: 0.96, color: '#5B6B84', textTransform: 'uppercase' }}>{label}</Text>
-      <View style={{ marginTop: 8, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E4E9F2', borderRadius: 18, overflow: 'hidden' }}>
+      <SectionLabel>{label}</SectionLabel>
+      <View style={{ backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E4E9F2', borderRadius: 16, overflow: 'hidden' }}>
         {rows.map((row, i) => <Row key={row.label} first={i === 0} {...row} />)}
       </View>
     </View>
@@ -107,16 +107,15 @@ export default function Profile() {
   const version = Constants.expoConfig?.version || '1.0.0';
 
   return (
-    <Screen bg="" style={{ backgroundColor: '#F5F8FC' }}>
+    <Screen>
+      <TopBar title={t('prof_title')} />
       <ScrollView
         ref={scrollRef}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: TAB_BAR + insets.bottom + 24 }}
         showsVerticalScrollIndicator={false}
       >
-        <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: 16, paddingTop: 8, gap: 16 }}>
-          <Text accessibilityRole="header" className="font-inter-black" style={{ fontSize: 26, lineHeight: 32, letterSpacing: -0.26, color: '#0D2340' }}>{t('prof_title')}</Text>
-
+        <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: 18, paddingTop: 16, gap: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
             <View style={{ width: 68, height: 68, borderRadius: 20, backgroundColor: '#E7F0FE', alignItems: 'center', justifyContent: 'center' }}>
               <Text className="font-inter-black" style={{ fontSize: 24, color: '#1A5FC4' }}>{initialsOf(profile.name || '')}</Text>

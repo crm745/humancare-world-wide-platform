@@ -26,11 +26,11 @@ export default function AllServices() {
   for (let i = 0; i < SERVICE_TILES.length; i += 2) rows.push(SERVICE_TILES.slice(i, i + 2));
 
   return (
-    <Screen bg="" style={{ backgroundColor: '#F5F8FC' }}>
+    <Screen>
       <TopBar title={t('filter_svc_all')} />
 
       <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: TAB_BAR + insets.bottom + sosH + 16 }} showsVerticalScrollIndicator={false}>
-        <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', padding: 14, gap: 10 }}>
+        <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', padding: 18, gap: 10 }}>
           {rows.map((row, r) => (
             <View key={r} style={{ flexDirection: 'row', gap: 10 }}>
               {row.map((s) => (

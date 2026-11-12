@@ -52,7 +52,7 @@ export default function ChangeContact() {
   return (
     <Screen bg="bg-white">
       <TopBar title={t(isMobile ? 'change_mobile_title' : 'change_email_title')} />
-      <Body contentClassName="px-[26px] pb-[26px] pt-5">
+      <Body contentClassName="px-[18px] pb-[26px] pt-5">
         <Text className="mb-[26px] text-center text-[14.5px] text-muted">
           {t('change_contact_current')} <Text className="font-inter-bold text-navy">{current}</Text>
         </Text>

@@ -9,7 +9,7 @@ export function LegalScreen({ titleKey, sections }) {
   return (
     <Screen>
       <TopBar title={t(titleKey)} />
-      <Body contentClassName="p-[22px]">
+      <Body contentClassName="p-[18px]">
         <Text className="mb-5 text-[12px] text-faint">Last updated: 1 January 2026</Text>
         {sections.map(([heading, body], i) => (
           <Text key={heading} className="mb-5">
