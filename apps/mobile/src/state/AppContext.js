@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getLocales } from 'expo-localization';
 import I18N from '../data/i18n.json';
+import { DEFAULT_LANGUAGE, isRtlLanguage, isSupportedLanguage, localeOf } from '../data/languages';
+import { setDateLocale } from '../lib/dateFormat';
+import { resolveInitialLanguage, saveLanguage } from '../lib/languagePreference';
+import { translate } from '../lib/translate';
 import { apiGet } from '../lib/api';
 import { getAccessToken, onSessionChange } from '../lib/session';
 import { createAuthStore } from '../lib/authState';
@@ -66,7 +72,11 @@ export function initialsOf(name) {
 }
 
 export function AppProvider({ children }) {
-  const [lang, setLang] = useState('EN');
+  // The language: restored (saved choice, else the phone's language, else English) before anything is shown, so no
+  // screen ever flashes the wrong language. Starting never writes; only choosing a language does.
+  const [lang, setLangState] = useState(DEFAULT_LANGUAGE);
+  const [langReady, setLangReady] = useState(false);
+  const langRef = useRef(DEFAULT_LANGUAGE);
   const [session, setSession] = useState('patient'); // 'patient' | 'corporate'
   const [profile, setProfile] = useState(INITIAL_PROFILE);
   const [draft, setDraft] = useState(INITIAL_DRAFT);
@@ -79,7 +89,28 @@ export function AppProvider({ children }) {
   const [serverErrors, setServerErrors] = useState(null);
   const toastTimer = useRef(null);
 
-  const t = useCallback((key) => (I18N[lang] && I18N[lang][key]) ?? I18N.EN[key] ?? key, [lang]);
+  const t = useCallback((key, values) => translate(I18N, lang, key, values), [lang]);
+
+  useEffect(() => {
+    let alive = true;
+    resolveInitialLanguage({ storage: AsyncStorage, getLocales }).then((code) => {
+      if (!alive) return;
+      langRef.current = code;
+      setDateLocale(localeOf(code));
+      setLangState(code);
+      setLangReady(true);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  // Chooses a language: an unknown code or the language already showing does nothing (and writes nothing).
+  const setLang = useCallback((code) => {
+    if (!isSupportedLanguage(code) || code === langRef.current) return;
+    langRef.current = code;
+    setDateLocale(localeOf(code));
+    setLangState(code);
+    saveLanguage(AsyncStorage, code);
+  }, []);
 
   const toast = useCallback((msg) => {
     setToastMsg(msg);
@@ -123,7 +154,8 @@ export function AppProvider({ children }) {
     () => ({
       lang,
       setLang,
-      isRTL: lang === 'AR',
+      isRTL: isRtlLanguage(lang),
+      locale: localeOf(lang),
       t,
       session,
       setSession,
@@ -140,9 +172,11 @@ export function AppProvider({ children }) {
       toast,
       toastMsg,
     }),
-    [lang, t, session, authStatus, retryAuth, profile, draft, updateDraft, serverErrors, toast, toastMsg]
+    [lang, setLang, t, session, authStatus, retryAuth, profile, draft, updateDraft, serverErrors, toast, toastMsg]
   );
 
+  // Nothing is drawn until the language is known (a moment at most); sign-in restoration above keeps running.
+  if (!langReady) return null;
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
