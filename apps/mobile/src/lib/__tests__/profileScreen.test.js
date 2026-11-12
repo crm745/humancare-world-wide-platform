@@ -20,8 +20,8 @@ describe('Profile screen', () => {
   test('rows open the screens that exist', () => {
     for (const route of ['/my-documents', '/notifications', '/privacy', '/help-support', '/terms']) expect(screen).toContain(`'${route}'`);
   });
-  test('Personal details and Payment (not decided / no screen yet) say "Coming soon"', () => {
-    expect(screen).toContain("t('prof_personal'), onPress: soon");
+  test('Personal details opens its screen for a patient and says "Coming soon" for a corporate; Payment (no screen yet) says "Coming soon"', () => {
+    expect(screen).toContain("t('prof_personal'), onPress: isCorporate ? soon : () => router.push('/personal-details')");
     expect(screen).toContain("t('prof_payment'), onPress: soon");
   });
   test('Emergency contacts is not on the screen', () => {

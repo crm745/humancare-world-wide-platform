@@ -1,7 +1,7 @@
 // Pure shaping of the patient's Tracking page (no React, no native modules), so it can be unit-tested.
 // Five steps, in order. A request's `status` says which one it is on; the Case's stage events (when a Case
 // exists) give the time each step was reached. A cancelled request stops at the step it had reached.
-import { formatDisplayDate } from './requestShape';
+import { formatDayMonth, formatTime } from './dateFormat';
 
 export const TRACKING_STEPS = [
   { key: 'submitted', title: 'trk_received', sub: 'trk_received_sub', chip: 'trk_chip_received' },
@@ -14,10 +14,8 @@ export const TRACKING_STEPS = [
 const indexOfStage = (stage) => TRACKING_STEPS.findIndex((s) => s.key === stage);
 
 const dateTime = (iso) => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  return `${formatDisplayDate(iso).replace(/ \d{4}$/, '')} ${time}`;
+  const day = formatDayMonth(iso);
+  return day ? `${day} ${formatTime(iso)}` : '';
 };
 
 // Where a request stands: the step it is on (0-4) and whether it was cancelled there.

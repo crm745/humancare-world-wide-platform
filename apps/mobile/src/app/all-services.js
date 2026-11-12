@@ -25,7 +25,7 @@ export default function AllServices() {
   useScrollToTopOnTabTap(scrollRef);
 
   return (
-    <Screen bg="" style={{ backgroundColor: '#F5F8FC' }}>
+    <Screen>
       <TopBar title={t('filter_svc_all')} />
 
       <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: TAB_BAR + insets.bottom + sosH + 16 }} showsVerticalScrollIndicator={false}>

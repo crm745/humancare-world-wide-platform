@@ -68,7 +68,7 @@ authRouter.post('/corporate/logout', corporateLogout);
 authRouter.post('/refresh', refreshAccessToken);
 authRouter.get('/me', requireAuth(undefined, { allowPasswordChangePending: true }), getMe);
 authRouter.patch('/me', requireAuth(['patient']), updateMe);
-// Mobile/email changes: current password, then an OTP to the new value.
+// Mobile/email changes: the new value, then an OTP to that new value (no password, no code to the old contact).
 authRouter.post('/me/contact', requireAuth(['patient']), patientLoginLimiter, otpSendIpLimiter, requestContactChange);
 authRouter.post('/me/contact/verify-otp', requireAuth(['patient']), otpVerifyLimiter, verifyContactChange);
 authRouter.post('/push-token', requireAuth(['patient']), savePushToken);

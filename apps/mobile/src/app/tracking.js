@@ -146,7 +146,7 @@ export default function Tracking() {
       </View>
 
       {tab === 'overview' && (
-        <Body contentClassName="p-[22px]">
+        <Body contentClassName="p-[18px]">
           <Card className="p-[18px]">
             <InfoRow className="py-[13px]" label={t('lbl_status')} valueNode={privateCharter ? <PrivateCharterStatusChip model={privateCharter} compact /> : <RequestStatusPill pill={item.reviewPill} status={item.status} />} />
             <InfoRow className="py-[13px]" label={t('lbl_service')} value={item.serviceType} />
@@ -158,7 +158,7 @@ export default function Tracking() {
         </Body>
       )}
       {tab === 'timeline' && (
-        <Body contentClassName="px-5 py-6">
+        <Body contentClassName="px-[18px] py-6">
           {privateCharter ? <PrivateCharterTimelineSection model={privateCharter} /> : <Timeline rows={stageEventsToTimeline(item.stageEvents, item.status)} />}
         </Body>
       )}

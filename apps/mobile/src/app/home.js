@@ -103,7 +103,7 @@ export default function Home() {
   const openTile = (s) => (s.route ? router.push(s.route) : openService(s.key));
 
   return (
-    <Screen bg="" style={{ backgroundColor: '#F5F8FC' }}>
+    <Screen>
       <HomeHeader hasUnread={hasUnread} onBell={() => router.push('/notifications')} />
 
       <ScrollView
@@ -113,7 +113,7 @@ export default function Home() {
         showsVerticalScrollIndicator={false}
         refreshControl={isCorporate ? undefined : <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: 16, paddingTop: 18 }}>
+        <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: 18, paddingTop: 18 }}>
           <Greeting name={isCorporate ? profile.name : firstName} />
 
           {isCorporate ? (
@@ -130,7 +130,7 @@ export default function Home() {
             </Pressable>
           ) : (
             <>
-              <BannerCarousel width={contentW - 32} tablet={tablet} onRequest={() => navReplace('/all-services')} />
+              <BannerCarousel width={contentW - 36} tablet={tablet} onRequest={() => navReplace('/all-services')} />
               {/* Only warn when a refresh failed while older requests are on screen; with nothing
                   to show, a failed first load looks the same as having no active request. */}
               {failed && requests.length > 0 && (

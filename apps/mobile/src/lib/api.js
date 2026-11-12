@@ -305,3 +305,104 @@ export async function apiUpload(path, file, isRetry = false, onProgress, fields)
   if (result.status < 200 || result.status >= 300) throw new Error(data.error || 'Upload failed. Please try again.');
   return data;
 }
+
+// ---- authenticated file downloads -----------------------------------------------------------------------------
+// A document or summary is a file, not JSON, so it cannot go through apiFetch; but it must follow exactly the same
+// session rules: held until the session is known (ensureAuthenticated), sent with the saved token, and on a 401 the
+// session is renewed ONCE through the same renewSession that apiFetch and apiUpload use (one shared refresh, the same
+// classification, the same guarded sign-out), then the download is tried once more. A second 401 is not retried:
+// the server is asked whether the session is still valid and the person is signed out only if it confirms it is not.
+//
+//   web     resolves { blob }  (read as a stream, so `onProgress(0..1)` follows the bytes when the server says how
+//                               many there are)
+//   phone   resolves { uri }   (the file is written to `destination`; `onProgress` follows the bytes written)
+//
+// A failure rejects with Error(message) carrying `status` and the server's `code` (e.g. 409 document_not_clean); a
+// network failure has code 'network'. A failed phone download never leaves the error body behind as a file.
+function downloadFailure(status, body) {
+  const err = new Error((body && body.error) || 'Download failed. Please try again.');
+  err.status = status;
+  err.code = body ? body.code : undefined;
+  return err;
+}
+
+async function readWebBody(res, onProgress) {
+  const total = Number(res.headers.get('content-length')) || 0;
+  const type = res.headers.get('content-type') || '';
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    const blob = await res.blob();
+    if (onProgress) onProgress(1);
+    return blob;
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let loaded = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    loaded += value.length;
+    if (onProgress && total > 0) onProgress(Math.min(loaded / total, 1));
+  }
+  if (onProgress) onProgress(1);
+  return new Blob(chunks, { type });
+}
+
+export async function apiDownload(path, { destination, onProgress, isRetry = false } = {}) {
+  if (!isRetry) await ensureAuthenticated();
+  const token = await getAccessToken();
+  if (!token) {
+    navReplace(loginRouteFor(getCurrentPath()));
+    throw notSignedIn();
+  }
+  const url = `${API_URL}${path}`;
+
+  if (Platform.OS === 'web') {
+    let res;
+    try {
+      res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    } catch {
+      throw unavailable();
+    }
+    if (res.status === 401 && !isRetry) {
+      await renewSession(token);
+      return apiDownload(path, { destination, onProgress, isRetry: true });
+    }
+    if (res.status === 401 && isRetry) await endSessionIfInvalid(token);
+    if (!res.ok) throw downloadFailure(res.status, await res.json().catch(() => null));
+    return { blob: await readWebBody(res, onProgress) };
+  }
+
+  const remove = () => FileSystem.deleteAsync(destination, { idempotent: true }).catch(() => undefined);
+  const task = FileSystem.createDownloadResumable(
+    url,
+    destination,
+    { headers: { Authorization: `Bearer ${token}` } },
+    (progress) => {
+      if (onProgress && progress.totalBytesExpectedToWrite > 0) onProgress(Math.min(progress.totalBytesWritten / progress.totalBytesExpectedToWrite, 1));
+    },
+  );
+  let result;
+  try {
+    result = await task.downloadAsync();
+  } catch {
+    await remove();
+    throw unavailable();
+  }
+  if (!result) {
+    await remove();
+    throw unavailable();
+  }
+  if (result.status === 200) return { uri: result.uri };
+
+  // Not a file: what was written is the server's error answer. Read what it says, then remove it.
+  let body = null;
+  try { body = JSON.parse(await FileSystem.readAsStringAsync(result.uri)); } catch { /* not JSON */ }
+  await remove();
+  if (result.status === 401 && !isRetry) {
+    await renewSession(token);
+    return apiDownload(path, { destination, onProgress, isRetry: true });
+  }
+  if (result.status === 401 && isRetry) await endSessionIfInvalid(token);
+  throw downloadFailure(result.status, body);
+}

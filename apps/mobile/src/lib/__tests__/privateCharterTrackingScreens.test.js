@@ -16,8 +16,8 @@ describe('request-tracking.js (patient)', () => {
   });
 
   test('keeps the generic tracking for every other service', () => {
-    expect(requestTracking).toMatch(/const view = request \? trackingView\(request\) : null;/);
-    expect(requestTracking).toMatch(/<LinearGradient/);
+    expect(requestTracking).toMatch(/const view = trackingView\(request\);/);
+    expect(requestTracking).toMatch(/<RouteCard/);
     expect(requestTracking).toMatch(/view\.steps\.map/);
   });
 
