@@ -2,8 +2,8 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
 // The API stores mobiles in E.164 ("+919876543210"); the app's profile keeps the
 // calling code and the national number apart, the way the country picker shows them.
-// `hasPassword` is false for Google/Apple-only accounts, which must set a password
-// before they can change their mobile or email.
+// `hasPassword` is false for Google/Apple-only accounts. It no longer matters for changing mobile or email
+// (a code to the new value is all that is needed).
 export function profileFromUser(user) {
   const parsed = user.mobile ? parsePhoneNumberFromString(user.mobile) : null;
   return {

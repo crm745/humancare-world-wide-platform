@@ -747,19 +747,19 @@ describe('changing mobile or email', () => {
     expect(named.body.user.name).toBe('New Name');
   });
 
-  it('needs the current password', async () => {
+  it('does not ask for the current password: a wrong one is ignored, not refused', async () => {
     const patient = await createPatient();
     const res = await request(app).post('/auth/me/contact').set(auth(patient.token))
-      .send({ kind: 'mobile', mobile: uniqueMobile(), countryCode: '+91', password: 'WrongPass999' });
-    expect(res.status).toBe(401);
-    expect(res.body.code).toBe('invalid_password');
+      .send({ kind: 'mobile', mobile: uniqueMobile(), countryCode: '+91' });
+    expect(res.status).toBe(200);
+    expect(res.body.code).not.toBe('invalid_password');
   });
 
   it('changes the mobile after a code sent to the NEW number', async () => {
     const patient = await createPatient();
     const newMobile = uniqueMobile();
     const start = await request(app).post('/auth/me/contact').set(auth(patient.token))
-      .send({ kind: 'mobile', mobile: newMobile, countryCode: '+91', password: patient.password });
+      .send({ kind: 'mobile', mobile: newMobile, countryCode: '+91' });
     expect(start.status).toBe(200);
     const code = codeSentTo(`+91${newMobile}`);
     expect(code).toMatch(/^\d{6}$/);
@@ -778,7 +778,7 @@ describe('changing mobile or email', () => {
     const patient = await createPatient();
     const newEmail = uniqueEmail();
     const start = await request(app).post('/auth/me/contact').set(auth(patient.token))
-      .send({ kind: 'email', email: newEmail, password: patient.password });
+      .send({ kind: 'email', email: newEmail });
     expect(start.status).toBe(200);
     const done = await request(app).post('/auth/me/contact/verify-otp').set(auth(patient.token))
       .send({ ticket: start.body.ticket, code: codeSentTo(newEmail) });
@@ -791,17 +791,17 @@ describe('changing mobile or email', () => {
     const a = await createPatient();
     const b = await createPatient();
     const taken = await request(app).post('/auth/me/contact').set(auth(a.token))
-      .send({ kind: 'mobile', mobile: b.mobile.slice(3), countryCode: '+91', password: a.password });
+      .send({ kind: 'mobile', mobile: b.mobile.slice(3), countryCode: '+91' });
     expect(taken.status).toBe(409);
 
     const start = await request(app).post('/auth/me/contact').set(auth(a.token))
-      .send({ kind: 'email', email: uniqueEmail(), password: a.password });
+      .send({ kind: 'email', email: uniqueEmail() });
     const hijack = await request(app).post('/auth/me/contact/verify-otp').set(auth(b.token)).send({ ticket: start.body.ticket, code: '123456' });
     expect(hijack.status).toBe(401);
     expect(hijack.body.code).toBe('ticket_invalid');
   });
 
-  it('asks an account without a password to set one first', async () => {
+  it('lets an account without a password (Google/Apple) change its email the same way', async () => {
     // A session for an account with no password, the way a Google-only account has one.
     const { user } = await createLegacyPatient();
     const { issuePatientTokens } = require('../src/modules/auth/auth.service');
@@ -809,9 +809,12 @@ describe('changing mobile or email', () => {
 
     const me = await request(app).get('/auth/me').set(auth(token));
     expect(me.body.user.hasPassword).toBe(false);
-    const res = await request(app).post('/auth/me/contact').set(auth(token)).send({ kind: 'email', email: uniqueEmail(), password: 'x' });
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe('password_required');
+    const email = uniqueEmail();
+    const start = await request(app).post('/auth/me/contact').set(auth(token)).send({ kind: 'email', email });
+    expect(start.status).toBe(200);
+    const done = await request(app).post('/auth/me/contact/verify-otp').set(auth(token)).send({ ticket: start.body.ticket, code: codeSentTo(email) });
+    expect(done.status).toBe(200);
+    expect(done.body.user.email).toBe(email);
   });
 });
 
@@ -957,7 +960,7 @@ describe('security event log', () => {
     const session = await request(app).post('/auth/login/verify-otp').send({ ticket: login.body.ticket, code: codeSentTo(patient.email) });
     const newMobile = uniqueMobile();
     const start = await request(app).post('/auth/me/contact').set('Authorization', `Bearer ${session.body.token}`)
-      .send({ kind: 'mobile', mobile: newMobile, countryCode: '+91', password: 'BrandNew456' });
+      .send({ kind: 'mobile', mobile: newMobile, countryCode: '+91' });
     await request(app).post('/auth/me/contact/verify-otp').set('Authorization', `Bearer ${session.body.token}`)
       .send({ ticket: start.body.ticket, code: codeSentTo(`+91${newMobile}`) });
 
@@ -1230,7 +1233,7 @@ describe('changing the mobile keeps mobile, country_code and phone_country toget
   const rand = (n) => String(Math.floor(Math.random() * 10 ** n)).padStart(n, '0');
   const auth = (token) => ({ Authorization: `Bearer ${token}` });
   const stored = (patient) => prisma.user.findUnique({ where: { id: patient.user.id } });
-  const start = (patient, body) => request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'mobile', password: patient.password, ...body });
+  const start = (patient, body) => request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'mobile', ...body });
   const verify = (patient, ticket, e164) => request(app).post('/auth/me/contact/verify-otp').set(auth(patient.token)).send({ ticket, code: codeSentTo(e164) });
   async function changeMobile(patient, body, e164) {
     const step = await start(patient, body);
@@ -1378,7 +1381,7 @@ describe('changing the mobile keeps mobile, country_code and phone_country toget
     const patient = await createPatient();
     const before = await stored(patient);
     const newEmail = uniqueEmail();
-    const step = await request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'email', email: newEmail, password: patient.password });
+    const step = await request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'email', email: newEmail });
     expect(step.status).toBe(200);
     const done = await request(app).post('/auth/me/contact/verify-otp').set(auth(patient.token)).send({ ticket: step.body.ticket, code: codeSentTo(newEmail) });
     expect(done.status).toBe(200);
@@ -1390,7 +1393,7 @@ describe('changing the mobile keeps mobile, country_code and phone_country toget
     const patient = await createPatient();
     const before = await stored(patient);
     const newEmail = uniqueEmail();
-    const step = await request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'email', email: newEmail, password: patient.password });
+    const step = await request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'email', email: newEmail });
     expect(step.status).toBe(200);
     const payload = require('jsonwebtoken').decode(step.body.ticket);
     expect(payload).toMatchObject({ step: 'change_contact_otp', kind: 'email', dest: newEmail });

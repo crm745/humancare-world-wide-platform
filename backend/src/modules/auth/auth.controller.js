@@ -786,7 +786,7 @@ async function getMe(req, res) {
   res.json({ user: publicUser(user) });
 }
 // Name only. Mobile and email are where the login code and password resets go, so they
-// change through requestContactChange/verifyContactChange (password + OTP) instead.
+// change through requestContactChange/verifyContactChange (a code to the new value) instead.
 async function updateMe(req, res) {
   if (req.body.mobile !== undefined || req.body.email !== undefined || req.body.countryCode !== undefined) {
     return res.status(400).json({ error: "Mobile number and email are changed with a verification code, not here." });
@@ -804,30 +804,15 @@ async function updateMe(req, res) {
   res.json({ user: publicUser(user) });
 }
 
-// Change mobile/email, step 1: the current password, then a code to the NEW value. A
-// stolen session alone (no password) can't move either login factor to someone else.
+// Change mobile/email, step 1: the new value, then a code sent to the NEW value only. This is the agreed product
+// rule: no current password and no code to the old contact, so it works the same for password, Google and Apple
+// accounts. The account is the signed-in one (from the token, never the body), and nothing changes until step 2.
 async function requestContactChange(req, res) {
-  const { kind, password } = req.body;
+  const { kind } = req.body;
   if (kind !== "mobile" && kind !== "email") return res.status(400).json({ error: 'kind must be "mobile" or "email"' });
-  if (!password) return res.status(400).json({ error: "password is required" });
 
-  const user = await prisma.user.findUnique({ where: { id: req.user.id }, omit: { passwordHash: false } });
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
   if (!user || !user.isVerified) return res.status(404).json({ error: "Account not found" });
-  if (!user.passwordHash) {
-    return res.status(403).json({ error: "Set a password to change your mobile or email.", code: "password_required" });
-  }
-  if (user.lockedUntil && user.lockedUntil > new Date()) return lockedResponse(res, user.lockedUntil);
-  if (!(await comparePassword(password, user.passwordHash))) {
-    await recordSecurityEvent(req, EVENTS.CONTACT_CHANGE_FAILED, { userId: user.id, detail: { kind, reason: "wrong_password" } });
-    if (await recordFailedLogin(user)) {
-      await recordSecurityEvent(req, EVENTS.ACCOUNT_LOCKED, { userId: user.id, detail: { minutes: LOCKOUT_MINUTES } });
-      return lockedResponse(res, new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000));
-    }
-    return res.status(401).json({ error: "Incorrect password.", code: "invalid_password" });
-  }
-  if (user.failedLoginCount) {
-    await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 0 } });
-  }
 
   let dest;
   let countryCode;
@@ -853,6 +838,7 @@ async function requestContactChange(req, res) {
   }
   const taken = await prisma.user.findFirst({ where: { [kind]: dest, isVerified: true, NOT: { id: user.id } } });
   if (taken) {
+    await recordSecurityEvent(req, EVENTS.CONTACT_CHANGE_FAILED, { userId: user.id, identifier: dest, detail: { kind, reason: "already_in_use" } });
     return res.status(409).json({
       error: kind === "mobile" ? "That mobile number is already in use by another account." : "That email is already in use by another account.",
     });

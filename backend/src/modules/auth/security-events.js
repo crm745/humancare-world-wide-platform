@@ -19,7 +19,7 @@ const EVENTS = {
   PASSWORD_RESET_REQUESTED: 'password_reset_requested',
   PASSWORD_RESET_COMPLETED: 'password_reset_completed',
   PASSWORD_SET: 'password_set', // first password for an account that had none
-  CONTACT_CHANGE_FAILED: 'contact_change_failed', // wrong current password
+  CONTACT_CHANGE_FAILED: 'contact_change_failed', // a contact change refused (the new mobile/email is already in use)
   MOBILE_CHANGED: 'mobile_changed',
   EMAIL_CHANGED: 'email_changed',
   SOCIAL_LOGIN_SUCCEEDED: 'social_login_succeeded',
