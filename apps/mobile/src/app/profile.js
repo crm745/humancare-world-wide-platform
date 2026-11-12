@@ -88,7 +88,8 @@ export default function Profile() {
   const soon = () => toast(t('prof_soon'));
 
   const account = [
-    { Icon: User, label: t('prof_personal'), onPress: soon },
+    // Personal details opens the patient's own account; a corporate account has no such screen yet.
+    { Icon: User, label: t('prof_personal'), onPress: isCorporate ? soon : () => router.push('/personal-details') },
     { Icon: FileText, label: t('prof_documents'), onPress: () => router.push('/my-documents') },
     { Icon: CreditCard, label: t('prof_payment'), onPress: soon },
   ];

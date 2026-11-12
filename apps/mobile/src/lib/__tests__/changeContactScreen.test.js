@@ -61,13 +61,25 @@ describe('errors and states', () => {
   });
 });
 
-describe('the legacy Edit profile opens the same flow for every account', () => {
+describe('Personal Details and the legacy Edit profile open the same flow for every account', () => {
+  test('personal-details: no hasPassword gate', () => {
+    const personal = read('../../app/personal-details.js');
+    expect(personal).toContain("router.push({ pathname: '/change-contact', params: { kind } })");
+    expect(personal).not.toContain('hasPassword');
+    expect(personal).not.toContain('change_needs_password');
+  });
   test('edit-profile: Change shows for every account and there is no "set a password first" note', () => {
     const edit = read('../../app/edit-profile.js');
     expect(edit).not.toContain('hasPassword');
     expect(edit).not.toContain('change_needs_password');
     expect(edit).not.toContain('cta_set_password');
     expect(edit).toContain("router.push({ pathname: '/change-contact', params: { kind } })");
+  });
+  test('after the code is verified the person lands on Personal details, not Profile', () => {
+    const otp = read('../../app/change-contact-otp.js');
+    expect(otp).toContain("next: '/personal-details'");
+    expect(otp).not.toContain("next: '/profile'");
+    expect(otp).toContain('<Redirect href="/personal-details" />');
   });
   test('the code screen\'s success message is translated', () => {
     const otp = read('../../app/change-contact-otp.js');

@@ -8,19 +8,19 @@ import { profileFromUser } from '../lib/profile';
 import { usePhoneCode } from '../lib/usePhoneCode';
 
 // Change mobile or email, step 2: the code sent to the new number/inbox. On success the
-// profile is updated and the person goes back to their Profile.
+// profile is updated and the person goes back to Personal details (reloaded, so the new value shows).
 export default function ChangeContactOtp() {
   const { t, toast } = useApp();
   const [step] = useState(() => getAuthStep('change-contact-otp'));
   const { proof, resend } = usePhoneCode(step);
-  if (!step) return <Redirect href="/edit-profile" />;
+  if (!step) return <Redirect href="/personal-details" />;
   const { ticket, contact, kind } = step;
 
   const onVerify = async (code) => {
     const data = await apiPost('/auth/me/contact/verify-otp', { ticket, ...(await proof(code)) });
     clearAuthSteps();
     toast(t(kind === 'mobile' ? 'change_mobile_updated' : 'change_email_updated'));
-    return { profile: profileFromUser(data.user), next: '/profile' };
+    return { profile: profileFromUser(data.user), next: '/personal-details' };
   };
 
   return (

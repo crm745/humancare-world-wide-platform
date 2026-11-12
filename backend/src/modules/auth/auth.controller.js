@@ -47,13 +47,20 @@ const CONSENT_VERSION = "2026-11-07";
 // three keys; their sign-ups are recorded under the wording they were actually shown.
 const LEGACY_CONSENT_VERSION = "2026-10-26";
 
-// Only the fields the app needs — never the hash, lockout counters or token version.
+// What a patient's own account looks like in an API response: an ALLOW-LIST, so a column added to `users` later is
+// private until it is added here. It never carries the password hash, the lockout counters, the token version, the
+// Google/Apple ids or the device's push token (those stay in the database for the backend's own use).
 // `hasPassword` is included when the row was loaded with its hash, so Edit Profile knows
 // whether a Google-only account must set a password before changing mobile/email.
+const PUBLIC_USER_FIELDS = [
+  "id", "name", "firstName", "lastName", "email", "mobile", "countryCode", "phoneCountry", "gender", "nationality",
+  "isVerified", "emailVerifiedAt", "createdAt",
+];
 
 function publicUser(user) {
-  const { passwordHash, failedLoginCount: _count, lockedUntil: _lock, tokenVersion: _tv, ...safe } = user;
-  return "passwordHash" in user ? { ...safe, hasPassword: !!passwordHash } : safe;
+  const safe = {};
+  for (const key of PUBLIC_USER_FIELDS) if (key in user) safe[key] = user[key];
+  return "passwordHash" in user ? { ...safe, hasPassword: !!user.passwordHash } : safe;
 }
 //the function for getting the session for the user after the login and registration and social login and also for the corporate login and refreshing the access token and also for the getMe
 // Tokens + profile for a freshly signed-in patient.
@@ -785,20 +792,46 @@ async function getMe(req, res) {
   if (!user) return res.status(404).json({ error: "Account not found" });
   res.json({ user: publicUser(user) });
 }
-// Name only. Mobile and email are where the login code and password resets go, so they
-// change through requestContactChange/verifyContactChange (a code to the new value) instead.
+// The patient's own personal details: the name (the full name, or first and last name), gender and nationality.
+// Mobile and email are where the login code and password resets go, so they change through
+// requestContactChange/verifyContactChange (a code to the new value) instead. Only the fields read below can change:
+// nothing else in the body (verification flags, ids, tokens, the push token, ...) is ever looked at, and the
+// account is always the one in the token, never one named in the body. Everything is checked before anything is
+// written, so a refused request changes nothing.
 async function updateMe(req, res) {
-  if (req.body.mobile !== undefined || req.body.email !== undefined || req.body.countryCode !== undefined) {
+  const body = req.body || {};
+  if (body.mobile !== undefined || body.email !== undefined || body.countryCode !== undefined || body.phoneCountry !== undefined) {
     return res.status(400).json({ error: "Mobile number and email are changed with a verification code, not here." });
   }
-  const name = req.body.name === undefined ? undefined : String(req.body.name).trim();
-  if (name !== undefined && name.length < 2) return res.status(400).json({ error: "Enter a valid name." });
 
-  const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { name: true } });
-  const renamed = !!name && name !== current?.name;
+  const data = {};
+
+  // Name: first and last name together, or a single full name (as before).
+  const hasParts = body.firstName !== undefined || body.lastName !== undefined;
+  if (hasParts) {
+    const names = readNameFields(body);
+    if (names.error) return res.status(400).json({ error: names.error });
+    Object.assign(data, { name: names.name, firstName: names.firstName, lastName: names.lastName });
+  } else if (body.name !== undefined) {
+    const name = String(body.name).trim();
+    if (name.length < 2) return res.status(400).json({ error: "Enter a valid name." });
+    const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { name: true } });
+    // A new single name no longer matches a stored first/last pair, so those are cleared (never guessed).
+    if (name !== current?.name) Object.assign(data, { name, firstName: null, lastName: null });
+  }
+
+  // Gender and nationality: the same values the sign-up form accepts, exactly. Only what is sent is changed.
+  const sent = (value) => value !== undefined && value !== null && value !== "";
+  if (sent(body.gender) || sent(body.nationality)) {
+    const profile = readProfileFields({ gender: body.gender, nationality: body.nationality });
+    if (profile.error) return res.status(400).json({ error: profile.error });
+    if (sent(body.gender)) data.gender = profile.gender;
+    if (sent(body.nationality)) data.nationality = profile.nationality;
+  }
+
   const user = await prisma.user.update({
     where: { id: req.user.id },
-    data: renamed ? { name, firstName: null, lastName: null } : {},
+    data,
     omit: { passwordHash: false },
   });
   res.json({ user: publicUser(user) });
