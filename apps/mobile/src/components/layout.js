@@ -62,13 +62,27 @@ export function BackButton({ onPress = goBack, className = '' }) {
   );
 }
 
-// White header bar: back button, centred title, optional right-hand element.
+// The one header bar for every screen that has one (All Services, Tracking, Requests, Documents, ...): white, a
+// 44 px soft back button, the title next to it, and an optional right-hand element. Keep every screen on this
+// component so the header looks the same everywhere.
 export function TopBar({ title, onBack, right, left }) {
+  const { t, isRTL } = useApp();
   return (
-    <View className="flex-row items-center justify-between border-b border-line bg-white px-[18px] pb-4 pt-[22px]">
-      {left || <BackButton onPress={onBack} />}
-      {title ? <Text className="font-inter-bold text-[15.5px] text-ink">{title}</Text> : null}
-      {right || <View className="w-8" />}
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 12, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E4E9F2' }}>
+      {left || (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('home_back')}
+          onPress={onBack || goBack}
+          style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#EEF3FB', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <View style={isRTL ? { transform: [{ scaleX: -1 }] } : null}>
+            <ChevronLeft size={20} color="#0D2340" strokeWidth={2.4} />
+          </View>
+        </Pressable>
+      )}
+      {title ? <Text className="font-inter-black" accessibilityRole="header" style={{ flex: 1, fontSize: 16, color: '#0D2340' }}>{title}</Text> : <View style={{ flex: 1 }} />}
+      {right}
     </View>
   );
 }

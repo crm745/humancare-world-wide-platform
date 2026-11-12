@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import I18N from '../data/i18n.json';
 import { apiGet } from '../lib/api';
-import { getAccessToken } from '../lib/session';
+import { getAccessToken, onSessionChange } from '../lib/session';
+import { createAuthStore } from '../lib/authState';
 import { profileFromUser } from '../lib/profile';
 import { draftForService, needsCareLevel } from '../lib/requestForm';
 import { clearErrorsForPatch } from '../lib/privateCharter';
@@ -69,6 +70,9 @@ export function AppProvider({ children }) {
   const [session, setSession] = useState('patient'); // 'patient' | 'corporate'
   const [profile, setProfile] = useState(INITIAL_PROFILE);
   const [draft, setDraft] = useState(INITIAL_DRAFT);
+  // Whether there is a valid session: 'loading' until the saved one has been checked with the server, then
+  // 'authed', 'anon' (none, or refused) or 'unreachable' (the server could not be asked). AuthGate reads it.
+  const [authStatus, setAuthStatus] = useState('loading');
   const [toastMsg, setToastMsg] = useState(null);
   // The API's field errors from the last refused submission, { apiField: message } or null. Kept
   // apart from the draft so the answers are never touched; changing a field clears its own error.
@@ -88,25 +92,32 @@ export function AppProvider({ children }) {
     setServerErrors((errors) => clearErrorsForPatch(errors, patch));
   }, []);
 
-  // Runs on every app/provider mount — not just the splash screen's — so a saved
-  // session still gets a real name/email loaded even when the browser is reloaded
-  // (or the app re-launched) directly on an already-authenticated screen like Home,
-  // not just when the user walks through Splash first.
-  useEffect(() => {
-    (async () => {
-      const token = await getAccessToken();
-      if (!token) return;
-      try {
-        const data = await apiGet('/auth/me');
-        const restored = profileFromMe(data);
-        setProfile(restored.profile);
-        setSession(restored.session);
-      } catch {
-        // Invalid/expired session — apiFetch already clears the tokens and redirects
-        // to Welcome on an unrecoverable 401, nothing more to do here.
+  // The authentication state (lib/authState.js). It becomes 'authed' only when the server accepted the saved
+  // session, or has just issued credentials (a login); saving or renewing tokens grants nothing by itself.
+  const authStore = useMemo(() => createAuthStore({
+    getToken: getAccessToken,
+    fetchMe: (signal) => apiGet('/auth/me', { signal, validation: true }),
+    onChange: (status, me) => {
+      setAuthStatus(status);
+      if (status === 'authed' && me) {
+        // Loads the real name/email, also after a reload straight onto a protected screen.
+        try {
+          const restored = profileFromMe(me);
+          setProfile(restored.profile);
+          setSession(restored.session);
+        } catch { /* a profile that cannot be read leaves the session valid; the screens show what they have */ }
       }
-    })();
-  }, []);
+    },
+  }), []);
+
+  useEffect(() => {
+    // Signing in (a login, an account activation) or out (tokens cleared) is announced by lib/session.js.
+    const unsubscribe = onSessionChange((signedIn) => (signedIn ? authStore.signedIn() : authStore.signedOut()));
+    Promise.resolve().then(authStore.validate);
+    return unsubscribe;
+  }, [authStore]);
+
+  const retryAuth = authStore.retry;
 
   const value = useMemo(
     () => ({
@@ -116,6 +127,8 @@ export function AppProvider({ children }) {
       t,
       session,
       setSession,
+      authStatus,
+      retryAuth,
       isCorporate: session === 'corporate',
       profile,
       setProfile,
@@ -127,7 +140,7 @@ export function AppProvider({ children }) {
       toast,
       toastMsg,
     }),
-    [lang, t, session, profile, draft, updateDraft, serverErrors, toast, toastMsg]
+    [lang, t, session, authStatus, retryAuth, profile, draft, updateDraft, serverErrors, toast, toastMsg]
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

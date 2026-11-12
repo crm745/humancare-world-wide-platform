@@ -5,8 +5,8 @@ import { initialsOf, useApp } from '../state/AppContext';
 import { goBack } from '../lib/nav';
 import { apiPatch } from '../lib/api';
 import { isValidName } from '../lib/validators';
-import { BackButton, Body, Screen } from '../components/layout';
-import { Button, Field, FieldLabel, Heading, Spacer, Text } from '../components/ui';
+import { Body, Screen, TopBar } from '../components/layout';
+import { Button, Field, FieldLabel, Spacer, Text } from '../components/ui';
 
 // Name saves here. Mobile and email are where login codes and password resets go, so
 // each has its own Change flow (current password + a code to the new value). An account
@@ -51,10 +51,9 @@ export default function EditProfile() {
 
   return (
     <Screen bg="bg-white">
-      <View className="px-[26px] pt-[26px]"><BackButton /></View>
+      <TopBar title={t('edit_profile_title')} />
       <Body contentClassName="px-[26px] pb-[26px] pt-5">
-        <Heading className="text-center text-[23.5px]">{t('edit_profile_title')}</Heading>
-        <Text className="mb-[26px] mt-2.5 text-center text-[14.5px] text-muted">{t('edit_profile_sub')}</Text>
+        <Text className="mb-[26px] text-center text-[14.5px] text-muted">{t('edit_profile_sub')}</Text>
         <View className="mb-[26px] items-center">
           <View className="h-16 w-16 items-center justify-center rounded-[18px] bg-primary-soft">
             <Text className="font-inter-black text-[21px] text-primary">{initialsOf(name)}</Text>

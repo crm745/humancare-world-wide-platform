@@ -9,6 +9,10 @@ import { reviewPill, reviewState } from './requestDocuments';
 // request is approved, so the same link keeps working before and after approval.
 export const trackingRoute = (request, tab) => ({ pathname: '/tracking', params: { id: request.id, ...(tab ? { tab } : {}) } });
 
+// Whether a loaded request is the one the route asks for (the route id is a string, the request id a number).
+// A screen that stays mounted when the id changes uses it so it never shows the previous request as the new one.
+export const isRequestFor = (request, id) => request != null && typeof request === 'object' && request.id != null && id != null && String(request.id) === String(id);
+
 export function trackingItemFromRequest(request) {
   const c = request.case;
   return {
@@ -26,6 +30,10 @@ export function trackingItemFromRequest(request) {
     workflow: reviewState(request) !== null,
     reviewPill: reviewPill(request),
     request: reviewState(request) !== null ? request : null,
+    // The complete original request, for every patient request (legacy or review workflow), so a tracking
+    // model can be built from the fields the flattening above drops (serviceKey, reviewStatus, case.status...).
+    // Patient items only: trackingItemFromCase never has it, so a corporate Case cannot reach that model.
+    rawRequest: request,
   };
 }
 

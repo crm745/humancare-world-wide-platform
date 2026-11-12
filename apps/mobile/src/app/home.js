@@ -141,7 +141,7 @@ export default function Home() {
               )}
               {!loaded && slow && <ActiveRequestSkeleton />}
               {activeRequest && (
-                <ActiveRequestCard request={activeRequest} onTrack={() => router.push({ pathname: '/request-details', params: { id: current.id } })} />
+                <ActiveRequestCard request={activeRequest} onTrack={() => router.push({ pathname: '/request-tracking', params: { id: current.id } })} />
               )}
             </>
           )}

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { useApp } from '../state/AppContext';
 import { navReplace } from '../lib/nav';
-import { saveTokens } from '../lib/session';
+import { beginSignIn, saveTokens } from '../lib/session';
+import { hasValidTokens, postSignInRoute } from '../lib/tokens';
 import { clearAuthSteps } from '../lib/authFlow';
 import { BackButton, Body, Screen } from './layout';
 import { Button, Input, Heading, Spacer, Text } from './ui';
@@ -64,22 +65,31 @@ export function OtpScreen({ titleKey, identifier, contact, note, session, compac
 
   const verify = async () => {
     if (!otpComplete(code)) { setError('Enter all 6 digits.'); return; }
-    if (!onVerify) { setSession(session); navReplace('/home'); return; }
+    // A code screen with nothing to verify the code against cannot sign anyone in: no session without credentials.
+    if (!onVerify) { toast('This step cannot be completed. Please go back and try again.'); return; }
 
     setBusy(true);
     try {
+      // Numbered before the request goes out: if this answer arrives after a newer sign-in began, or after a
+      // sign-out, saveTokens refuses it (a stale answer can never restore a session).
+      const attempt = beginSignIn();
       const result = await onVerify(code, currentId);
       if (result.next) {
         if (result.profile) setProfile(result.profile);
         navReplace(result.next);
         return;
       }
-      await saveTokens({ token: result.token, refreshToken: result.refreshToken });
+      // Signing in needs usable credentials and a session kind this app knows (patient or corporate), each
+      // going to its own destination. Checked before anything is stored or announced.
+      const destination = postSignInRoute(session);
+      if (!destination || !hasValidTokens(result)) throw Object.assign(new Error('We could not complete sign-in. Please try again.'), { code: 'invalid_credentials_response' });
+      await saveTokens({ token: result.token, refreshToken: result.refreshToken }, { signIn: true, attempt });
       clearAuthSteps();
       if (result.profile) setProfile(result.profile);
       setSession(session);
-      navReplace('/home');
+      navReplace(destination);
     } catch (err) {
+      if (err.code === 'stale_sign_in') return; // replaced by a newer sign-in or a sign-out: nothing to show
       const message = otpErrorMessage(err);
       if (!message) { toast(err.message || 'Could not verify code'); return; }
       setError(message);
