@@ -44,6 +44,39 @@ describe('the new value is validated before anything is sent', () => {
   });
 });
 
+describe('adding a mobile to an account that has none', () => {
+  test('the title and the hint say "Add", not "Change", when there is no current number', () => {
+    expect(screen).toContain("t(isMobile ? (current ? 'change_mobile_title' : 'change_mobile_add_title') : 'change_email_title')");
+    expect(screen).toContain("t(isMobile ? (current ? 'change_mobile_hint' : 'change_mobile_add_hint') : 'change_email_hint')");
+  });
+  test('the add texts exist in all six languages and are translated', () => {
+    expect(i18n.EN.change_mobile_add_title).toBe('Add Mobile Number');
+    for (const lang of Object.keys(i18n)) {
+      expect(i18n[lang].change_mobile_add_title).toBeTruthy();
+      expect(i18n[lang].change_mobile_add_hint).toBeTruthy();
+      if (lang !== 'EN') {
+        expect(i18n[lang].change_mobile_add_title).not.toBe(i18n.EN.change_mobile_add_title);
+        expect(i18n[lang].change_mobile_add_hint).not.toBe(i18n.EN.change_mobile_add_hint);
+      }
+    }
+  });
+  test('the add hint does not talk about a "current number" that does not exist', () => {
+    for (const lang of Object.keys(i18n)) expect(i18n[lang].change_mobile_add_hint).not.toMatch(/current|stays the same/i);
+  });
+});
+
+describe('the "Current:" line', () => {
+  test('an account with no mobile yet shows no "Current:" line (not "Current: +91")', () => {
+    expect(screen).toContain("const current = isMobile ? (profile.phone ? `${profile.cc} ${profile.phone}` : '') : profile.email;");
+    expect(screen).toContain('{current ? (');
+    expect(screen).toContain("{t('change_contact_current')} <Text");
+    expect(screen.indexOf('{current ? (')).toBeLessThan(screen.indexOf("t('change_contact_current')"));
+  });
+  test('the line is built only from a real number, so a bare calling code can never be shown', () => {
+    expect(screen).not.toMatch(/`\$\{profile\.cc\} \$\{profile\.phone\}`\s*:\s*profile\.email/);
+  });
+});
+
 describe('errors and states', () => {
   test('a refusal about the value (in use, wrong format, too soon) shows under the form; a server failure is a toast', () => {
     expect(screen).toContain('if (err.status && err.status < 500) setFormError(err.message);');
@@ -55,7 +88,7 @@ describe('errors and states', () => {
     expect(i18n.EN.change_send_email_btn).toBe('Send OTP to New Email');
   });
   test('the hint says nothing changes until the code is entered', () => {
-    expect(screen).toContain("t(isMobile ? 'change_mobile_hint' : 'change_email_hint')");
+    expect(screen).toContain("(current ? 'change_mobile_hint' : 'change_mobile_add_hint') : 'change_email_hint'");
     expect(i18n.EN.change_mobile_hint).toMatch(/stays the same until you enter the code/);
     expect(i18n.EN.change_email_hint).toMatch(/stays the same until you enter the code/);
   });

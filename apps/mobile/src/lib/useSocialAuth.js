@@ -13,9 +13,10 @@ import { GoogleMark, AppleMark } from '../components/SocialMarks';
 export function useSocialAuth({ toast, afterSocialLogin }) {
   // Each attempt is numbered before its request goes out (see session.js beginSignIn), so an answer that arrives after
   // a newer sign-in or a sign-out is refused instead of restoring a session.
-  // An existing account is signed straight in. Someone new gets a sign-up ticket with the
-  // name and email the provider vouched for, and finishes on complete-profile.js (mobile
-  // + consents). Without a ticket (provider hadn't verified the email) it's the full form.
+  // An existing account is signed straight in, and so is a new Google user whose email Google verified (the backend
+  // creates the account; mobile and the rest are added later from Personal Details). A new Apple user gets a sign-up
+  // ticket with the name and email Apple vouched for, and finishes on complete-profile.js (mobile + consents). Without
+  // a ticket (the provider hadn't verified the email) it's the full form.
   const onFailed = (err) => {
     if (err.code === 'stale_sign_in') return; // replaced by a newer sign-in or a sign-out
     if (err.code === 'no_account' && err.data?.signupTicket) {

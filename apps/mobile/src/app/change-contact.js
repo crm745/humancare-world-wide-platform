@@ -46,15 +46,19 @@ export default function ChangeContact() {
     }
   };
 
-  const current = isMobile ? `${profile.cc} ${profile.phone}` : profile.email;
+  // The number or email the account has now. An account with no mobile yet (a Google sign-up) has nothing to show, so
+  // the line is left out rather than reading "Current: +91".
+  const current = isMobile ? (profile.phone ? `${profile.cc} ${profile.phone}` : '') : profile.email;
 
   return (
     <Screen bg="bg-white">
-      <TopBar title={t(isMobile ? 'change_mobile_title' : 'change_email_title')} />
+      <TopBar title={t(isMobile ? (current ? 'change_mobile_title' : 'change_mobile_add_title') : 'change_email_title')} />
       <Body contentClassName="px-[18px] pb-[26px] pt-5">
-        <Text className="mb-[26px] text-center text-[14.5px] text-muted">
-          {t('change_contact_current')} <Text className="font-inter-bold text-navy">{current}</Text>
-        </Text>
+        {current ? (
+          <Text className="mb-[26px] text-center text-[14.5px] text-muted">
+            {t('change_contact_current')} <Text className="font-inter-bold text-navy">{current}</Text>
+          </Text>
+        ) : null}
         <View className="gap-[18px]">
           {isMobile ? (
             <View>
@@ -71,7 +75,7 @@ export default function ChangeContact() {
               error={email && !ready ? t('change_err_email') : undefined}
             />
           )}
-          <Text className="text-[13.5px] leading-5 text-muted">{t(isMobile ? 'change_mobile_hint' : 'change_email_hint')}</Text>
+          <Text className="text-[13.5px] leading-5 text-muted">{t(isMobile ? (current ? 'change_mobile_hint' : 'change_mobile_add_hint') : 'change_email_hint')}</Text>
         </View>
         {formError ? <Text className="mt-4 text-center text-[13.5px] text-danger">{formError}</Text> : null}
         <Spacer />

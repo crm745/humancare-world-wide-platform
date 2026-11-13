@@ -59,17 +59,21 @@ describe('the screen', () => {
     // the only apiGet is inside load(), which the mount effect skips in preview mode...
     expect(screen.match(/apiGet\(/g)).toHaveLength(1);
     expect(screen).toContain('useEffect(() => { if (!ALERTS_PREVIEW) load(); }, []);');
-    // ...and Mark Read returns before its only apiPost in preview mode
-    expect(screen.match(/apiPost\(/g)).toHaveLength(1);
-    const markAll = screen.slice(screen.indexOf('const markAllRead'), screen.indexOf('return (\n    <Screen>'));
-    expect(markAll.indexOf('if (ALERTS_PREVIEW)')).toBeGreaterThan(-1);
-    expect(markAll.indexOf('return;')).toBeLessThan(markAll.indexOf('apiPost('));
+    // ...and there is no write at all: the "Mark read" button is gone, so nothing calls apiPost
+    expect(screen).not.toContain('apiPost');
+    expect(screen).not.toContain('markAllRead');
     // the preview rows read and clear local state only
     expect(screen).toContain('onRead={(id) => setPreview((rows) => markAlertRead(rows, id))}');
   });
+  test('there is no "Mark read" button on the notifications page, in either mode', () => {
+    expect(screen).not.toContain('btn_mark_read');
+    expect(screen).not.toContain('Mark read');
+    expect(screen).not.toContain('/notifications/read-all');
+    expect(screen).toContain("<TopBar title={t('notifications_title')} />");
+    expect(screen).not.toMatch(/<TopBar[^>]*right=/);
+  });
   test('the existing API-based behaviour is unchanged when the preview is off', () => {
     expect(screen).toContain("apiGet('/notifications')");
-    expect(screen).toContain("apiPost('/notifications/read-all', {})");
     expect(screen).toContain('No notifications yet.');
     expect(screen).toContain('{loading && <LoadingState />}');
     expect(screen).toContain('${read ? \'opacity-55\' : \'\'}');

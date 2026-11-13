@@ -48,7 +48,7 @@ authRouter.post('/password/forgot/verify-otp', otpVerifyLimiter, verifyPasswordR
 authRouter.post('/password/set', setPassword);
 authRouter.post('/google', googleLogin);
 authRouter.post('/apple', appleLogin);
-// New Google/Apple people: mobile + consents, then the same OTP step as /register.
+// New Apple people (a new Google user is signed up directly by /google): mobile + consents, then the same OTP step as /register.
 authRouter.post('/social/register', otpSendIpLimiter, otpRequestLimiter, socialRegister);
 
 // Corporates authenticate with password + OTP (two factors, since these accounts

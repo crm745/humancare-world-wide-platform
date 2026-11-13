@@ -40,7 +40,8 @@ function SectionCard({ Icon, title, action, children }) {
   );
 }
 
-// One contact detail with its Change action: the label, the value, and Change on the right (a 44-point target).
+// One contact detail with its action: the label, the value, and on the right "Change" (or "Add" when there is no value
+// yet), a 44-point target.
 function ContactRow({ label, value, onChange, last, t }) {
   return (
     <View className={`flex-row items-center gap-3 py-2.5 ${last ? '' : 'border-b border-divider'}`}>
@@ -48,8 +49,8 @@ function ContactRow({ label, value, onChange, last, t }) {
         <Text className="text-[12.5px] text-faint">{label}</Text>
         <Text className="mt-0.5 font-inter-bold text-[14px] text-ink" selectable>{value || '—'}</Text>
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel={`${t('cta_change')} ${label}`} onPress={onChange} className="min-h-[44px] justify-center pl-3">
-        <Text className="font-inter-bold text-[13.5px] text-primary">{t('cta_change')}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={`${t(value ? 'cta_change' : 'cta_add')} ${label}`} onPress={onChange} className="min-h-[44px] justify-center pl-3">
+        <Text className="font-inter-bold text-[13.5px] text-primary">{t(value ? 'cta_change' : 'cta_add')}</Text>
       </Pressable>
     </View>
   );

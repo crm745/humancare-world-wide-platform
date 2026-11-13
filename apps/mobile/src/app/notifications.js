@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { Bell, Clock, FileText, FileWarning, Hospital, Loader, MessageSquare, Plane, CircleCheck } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
-import { apiGet, apiPost } from '../lib/api';
+import { apiGet } from '../lib/api';
 import { goBack } from '../lib/nav';
-import { ALERTS_PREVIEW_ITEMS, groupAlerts, markAlertRead, markAllAlertsRead } from '../lib/alertsPreview';
+import { ALERTS_PREVIEW_ITEMS, groupAlerts, markAlertRead } from '../lib/alertsPreview';
 import { TRACKING_PALETTE as P } from '../lib/tracking/palette';
 import { Body, Screen, TopBar } from '../components/layout';
 import { Button, Card, Spacer, Text } from '../components/ui';
@@ -84,27 +84,9 @@ export default function Notifications() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once on mount (never in preview mode)
   useEffect(() => { if (!ALERTS_PREVIEW) load(); }, []);
 
-  const markAllRead = async () => {
-    if (ALERTS_PREVIEW) {
-      setPreview(markAllAlertsRead);
-      toast('All notifications marked as read.');
-      return;
-    }
-    try {
-      await apiPost('/notifications/read-all', {});
-      setItems((rows) => rows.map((r) => ({ ...r, readAt: new Date().toISOString() })));
-      toast('All notifications marked as read.');
-    } catch (err) {
-      toast(err.message);
-    }
-  };
-
   return (
     <Screen>
-      <TopBar
-        title={t('notifications_title')}
-        right={<Text className="font-inter-bold text-[13px] text-primary" style={ALERTS_PREVIEW ? { color: P.brand } : undefined} onPress={markAllRead}>{t('btn_mark_read')}</Text>}
-      />
+      <TopBar title={t('notifications_title')} />
       <Body contentClassName="gap-2.5 px-[18px] py-4">
         {ALERTS_PREVIEW ? (
           <AlertGroups items={preview} onRead={(id) => setPreview((rows) => markAlertRead(rows, id))} t={t} />

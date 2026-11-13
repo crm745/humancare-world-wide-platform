@@ -21,3 +21,4 @@ export function profileFromUser(user) {
     hasPassword: user.hasPassword !== false,
   };
 }
+ 

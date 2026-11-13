@@ -89,8 +89,18 @@ describe('B. Contact Information', () => {
   test('email and mobile each have a Change action, and neither is an edit box', () => {
     expect(screen).toContain("onChange={() => goChange('email')}");
     expect(screen).toContain("onChange={() => goChange('mobile')}");
-    expect(screen).toContain("t('cta_change')");
+    expect(screen).toContain("t(value ? 'cta_change' : 'cta_add')");
     expect(screen).not.toMatch(new RegExp('<Field[^>]*(email|mobile)', 'i'));
+  });
+  test('a contact with no value yet says "Add" instead of "Change", on the button and in its accessibility label', () => {
+    expect(screen).toContain("accessibilityLabel={`${t(value ? 'cta_change' : 'cta_add')} ${label}`}");
+    expect(screen.split("t(value ? 'cta_change' : 'cta_add')").length - 1).toBe(2); // the label and the visible text
+    expect(i18n.EN.cta_add).toBe('Add');
+    for (const lang of ['HI', 'MR', 'GU', 'TE', 'AR']) {
+      expect(i18n[lang].cta_add).toBeTruthy();
+      expect(i18n[lang].cta_add).not.toBe(i18n.EN.cta_add);
+      expect(i18n[lang].cta_add).not.toBe(i18n[lang].cta_change);
+    }
   });
   test('Change opens the code flow for every account: nothing about a password gets in the way', () => {
     expect(screen).toContain("const goChange = (kind) => router.push({ pathname: '/change-contact', params: { kind } });");

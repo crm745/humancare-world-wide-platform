@@ -528,6 +528,25 @@ function socialEmailInUse(res) {
   });
 }
 
+// A new Google user whose email Google has verified is signed up on the spot, with nothing else asked: the account
+// holds the name and email Google vouched for (the email is already verified, so the account is too). Mobile, gender
+// and nationality are added later from Personal Details (the mobile through the usual code to the new number). No
+// consent rows are written here, by product decision. A half-finished sign-up for the same email or Google id is
+// replaced, as the form sign-up does. Returns the new user, or null when another request created the account first.
+async function createGoogleUser(payload) {
+  const email = normalizeEmail(payload.email);
+  const name = String(payload.name || "").trim().slice(0, 100) || email.split("@")[0];
+  await prisma.user.deleteMany({ where: { OR: [{ email }, { googleId: payload.providerId }], isVerified: false } });
+  try {
+    return await prisma.user.create({
+      data: { name, email, googleId: payload.providerId, emailVerifiedAt: new Date(), isVerified: true },
+    });
+  } catch (err) {
+    if (err.code === "P2002") return null;
+    throw err;
+  }
+}
+
 async function socialSignIn(req, res, provider, payload) {
   let user;
   try {
@@ -535,13 +554,30 @@ async function socialSignIn(req, res, provider, payload) {
   } catch (err) {
     if (!(err instanceof SocialEmailInUseError || err instanceof SocialNoAccountError)) throw err;
     const noAccount = err instanceof SocialNoAccountError;
+    // Only an email the provider has verified can become the account's (already verified) email.
+    const canSignUp = noAccount && payload.email && payload.emailVerified;
+    if (canSignUp && provider === "google") {
+      let created = await createGoogleUser(payload);
+      if (!created) {
+        // Created in the meantime by another request (a double tap): sign in to that account, or refuse if it is not theirs.
+        try {
+          created = await findSocialUser({ provider, ...payload });
+        } catch (again) {
+          if (!(again instanceof SocialEmailInUseError || again instanceof SocialNoAccountError)) throw again;
+          return socialEmailInUse(res);
+        }
+      } else {
+        await recordSecurityEvent(req, EVENTS.REGISTER_COMPLETED, { userId: created.id, detail: { provider, direct: true } });
+      }
+      await recordSecurityEvent(req, EVENTS.SOCIAL_LOGIN_SUCCEEDED, { userId: created.id, detail: { provider } });
+      return res.json(await sessionFor(created.id));
+    }
     await recordSecurityEvent(req, EVENTS.SOCIAL_LOGIN_REFUSED, {
       identifier: payload.email,
       detail: { provider, reason: noAccount ? "no_account" : "email_not_verified" },
     });
     if (!noAccount) return socialEmailInUse(res);
-    // Only an email the provider has verified can become the account's (already verified) email.
-    if (!payload.email || !payload.emailVerified) return socialNoAccount(res);
+    if (!canSignUp) return socialNoAccount(res);
     return res.status(404).json({
       error: "Finish creating your account.",
       code: "no_account",
