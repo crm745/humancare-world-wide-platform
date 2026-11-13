@@ -390,14 +390,16 @@ describe('POST /requests: Private Charter persistence', () => {
       urgency: 'urgent_24h',
       // the cities as the server verified them, and the readable labels everything else shows
       origin: 'Dubai, United Arab Emirates',
-      originGeonameId: IDS.DUBAI,
       originCityName: 'Dubai',
       originCountryCode: 'AE',
-      originTimezone: 'Asia/Dubai',
       destination: 'Mumbai, Maharashtra, India',
-      destinationGeonameId: IDS.MUMBAI,
       destinationCountryCode: 'IN',
     });
+    // the geoname ids and the timezone are stored, but are not sent to the phone
+    expect(res.body.request).not.toHaveProperty('originGeonameId');
+    expect(res.body.request).not.toHaveProperty('originTimezone');
+    const storedRequest = await prisma.serviceRequest.findUnique({ where: { id: res.body.request.id } });
+    expect(storedRequest).toMatchObject({ originGeonameId: IDS.DUBAI, originTimezone: 'Asia/Dubai', destinationGeonameId: IDS.MUMBAI });
     const saved = await prisma.case.findUnique({ where: { serviceRequestId: res.body.request.id } });
     expect(saved.urgency).toBe('urgent');
     expect(saved).toMatchObject({ origin: 'Dubai, United Arab Emirates', destination: 'Mumbai, Maharashtra, India' });

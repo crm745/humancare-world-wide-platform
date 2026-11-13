@@ -17,6 +17,7 @@ const {
 } = require('../../common/constants/request.constants');
 const { validatePrivateCharterRequest, isObject } = require('./private-charter.validation');
 const { resolveCityRefs } = require('../geo/geo.service');
+const { toPatientRequest, toPatientRequests } = require('./request-response');
 
 const REQUIRED_FIELDS = ['serviceType', 'patientName', 'origin', 'destination'];
 const { REQUIRED_SERVICE_BY_KEY } = require('../bitrix/bitrix-lead');
@@ -89,7 +90,7 @@ async function submitRequest(req, res, next) {
       // Which legacy formats are still arriving, by field name only: never the values.
       if (legacy.length) console.info('[legacy-format] privatecharter:', legacy.join(', '));
       const request = await createRequest(req.user.id, data);
-      return res.status(201).json({ request });
+      return res.status(201).json({ request: toPatientRequest(request) });
     }
     const missing = REQUIRED_FIELDS.filter((field) => !req.body[field]);
     if (missing.length) {
@@ -103,7 +104,7 @@ async function submitRequest(req, res, next) {
     const medicalError = medicalFieldsError(req.body);
     if (medicalError) return res.status(400).json({ error: medicalError });
     const request = await createRequest(req.user.id, req.body);
-    res.status(201).json({ request });
+    res.status(201).json({ request: toPatientRequest(request) });
   } catch (err) {
     next(err);
   }
@@ -112,7 +113,7 @@ async function submitRequest(req, res, next) {
 async function listMyRequests(req, res, next) {
   try {
     const requests = await listRequestsForUser(req.user.id, { status: req.query.status });
-    res.json({ requests });
+    res.json({ requests: toPatientRequests(requests) });
   } catch (err) {
     next(err);
   }
@@ -126,7 +127,7 @@ async function listMyRequests(req, res, next) {
 async function getMyRequestById(req, res, next) {
   try {
     const request = await getRequestForUser(req.user.id, req.params.id);
-    res.json({ request });
+    res.json({ request: toPatientRequest(request) });
   } catch (err) {
     next(err);
   }
