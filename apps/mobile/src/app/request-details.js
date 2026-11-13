@@ -15,7 +15,6 @@ import { detailsView, needsClamp } from '../lib/requestDetailsView';
 import { Screen, Body } from '../components/layout';
 import { LoadError, LoadingState } from '../components/LoadingState';
 import { ServiceIcon } from '../components/home/ServiceIcon';
-import { useReportFixedBar } from '../components/sos/hooks';
 import AdditionalDocuments from '../components/request/AdditionalDocuments';
 import DocumentHistory from '../components/request/DocumentHistory';
 import ReviewBanner from '../components/request/ReviewBanner';
@@ -279,10 +278,6 @@ export default function RequestDetails() {
   const { id } = useLocalSearchParams();
   const [request, setRequest] = useState(null);
   const [failed, setFailed] = useState(false);
-  // The "Open live tracking" bar is this screen's own fixed bottom bar: its height is reported so the floating SOS button sits above it.
-  const [barHeight, setBarHeight] = useState(0);
-  const view = request ? detailsView(request, t) : null;
-  useReportFixedBar(view && view.showTrackingBar ? barHeight : 0);
 
   useEffect(() => {
     if (!id) return;
@@ -309,6 +304,7 @@ export default function RequestDetails() {
     );
   }
 
+  const view = detailsView(request, t);
   // A workflow request's status is said the same way in the shared message as on the card.
   const pill = reviewPill(request);
 
@@ -378,7 +374,7 @@ export default function RequestDetails() {
         </View>
       </Body>
       {view.showTrackingBar ? (
-        <View onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: C.line, paddingTop: 12, paddingHorizontal: 16, paddingBottom: 20 + insets.bottom }}>
+        <View style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: C.line, paddingTop: 12, paddingHorizontal: 16, paddingBottom: 20 + insets.bottom }}>
           <Pressable
             accessibilityRole="button" accessibilityLabel={t('rd_open_tracking')}
             onPress={() => router.push({ pathname: '/request-tracking', params: { id: request.id } })}

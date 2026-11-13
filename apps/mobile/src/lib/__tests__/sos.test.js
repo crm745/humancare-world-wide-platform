@@ -73,45 +73,32 @@ describe('where the floating SOS button shows', () => {
 });
 
 describe('where it sits', () => {
-  test('on a tab screen: 16 above the tab bar (64 plus the inset)', () => {
-    for (const route of TAB_SCREENS) {
-      expect(S.fabBottom({ pathname: route, insetBottom: 0 })).toBe(80);
-      expect(S.fabBottom({ pathname: route, insetBottom: 34 })).toBe(114);
-    }
+  test('the same place on every screen: 16 above where the tab bar ends (64 plus the inset)', () => {
+    expect(S.fabBottom({ insetBottom: 0 })).toBe(80);
+    expect(S.fabBottom({ insetBottom: 34 })).toBe(114);
+    expect(S.fabBottom({ insetBottom: 24 })).toBe(104);
   });
-  test('above a screen\'s own fixed bar: 16 above that bar', () => {
-    expect(S.fabBottom({ pathname: '/request-details', insetBottom: 34, barHeight: 118 })).toBe(134);
-    expect(S.fabBottom({ pathname: '/request-details', insetBottom: 0, barHeight: 84 })).toBe(100);
-  });
-  test('on a screen with neither: 16 above the bottom inset', () => {
-    expect(S.fabBottom({ pathname: '/notifications', insetBottom: 0 })).toBe(16);
-    expect(S.fabBottom({ pathname: '/notifications', insetBottom: 24 })).toBe(40);
-  });
-  test('a tab screen ignores a stale bar, and odd numbers count as none', () => {
-    expect(S.fabBottom({ pathname: '/profile', insetBottom: 10, barHeight: 500 })).toBe(90);
-    expect(S.fabBottom({ pathname: '/notifications', insetBottom: NaN, barHeight: -4 })).toBe(16);
-    expect(S.fabBottom({ pathname: '/notifications', insetBottom: undefined })).toBe(16);
+  test('odd numbers count as no inset, and it does not depend on the screen or on a bar of its own', () => {
+    expect(S.fabBottom({ insetBottom: NaN })).toBe(80);
+    expect(S.fabBottom({ insetBottom: -4 })).toBe(80);
+    expect(S.fabBottom({ insetBottom: undefined })).toBe(80);
+    expect(S.fabBottom()).toBe(80);
+    expect(S.fabBottom({ insetBottom: 10, pathname: '/request-details', barHeight: 118 })).toBe(90);
+    expect(S.fabBottom({ insetBottom: 10, pathname: '/notifications' })).toBe(90);
   });
   test('a scrolling screen gets 96 more at its end while it shows, and nothing otherwise', () => {
     expect(S.fabContentPad(true)).toBe(96);
     expect(S.fabContentPad(false)).toBe(0);
   });
-  test('the numbers are the design\'s', () => {
+  test('the numbers are the design values', () => {
     expect([S.FAB_CORE, S.FAB_RIGHT, S.FAB_GAP, S.FAB_RING, S.TAB_BAR_HEIGHT]).toEqual([56, 16, 16, 80, 64]);
   });
-});
-
-describe('the fixed-bar store', () => {
-  test('it keeps the last height, tells listeners only when it changes, and ignores nonsense', () => {
-    const seen = [];
-    const off = S.subscribeFixedBar(() => seen.push(S.getFixedBar()));
-    S.setFixedBar(84); S.setFixedBar(84); S.setFixedBar(0); S.setFixedBar(NaN); S.setFixedBar(-3);
-    expect(seen).toEqual([84, 0]);
-    off();
-    S.setFixedBar(50);
-    expect(seen).toEqual([84, 0]);
-    expect(S.getFixedBar()).toBe(50);
-    S.setFixedBar(0);
+  test('there is no per-screen lift left in the code: no bar store, no tab-route switch', () => {
+    const lib = read('../sos.js');
+    expect(lib).not.toMatch(/setFixedBar|getFixedBar|subscribeFixedBar|isTabRoute|TAB_ROUTES|barHeight/);
+    const hooks = read('../../components/sos/hooks.js');
+    expect(hooks).not.toMatch(/useFixedBarHeight|useReportFixedBar|useFocusEffect/);
+    expect(read('../../app/request-details.js')).not.toMatch(/useReportFixedBar|barHeight|setBarHeight/);
   });
 });
 
@@ -156,9 +143,9 @@ describe('the button and the pulse (source checks)', () => {
     expect(fab).toContain('onPress={() => setOpen(true)}');
     expect(fab).toContain("import { SosModal } from './SosModal';");
   });
-  test('it sits 16 from the right and above the bar, with the 80 box centred on the core', () => {
+  test('it sits 16 from the right and 16 above where the tab bar ends, with the 80 box centred on the core', () => {
     expect(fab).toContain('right: FAB_RIGHT - RING_INSET, bottom: bottom - RING_INSET');
-    expect(fab).toContain('const bottom = fabBottom({ pathname, insetBottom: insets.bottom, barHeight });');
+    expect(fab).toContain('const bottom = fabBottom({ insetBottom: insets.bottom });');
     expect(fab).toContain('pointerEvents="box-none"');
   });
   test('it is mounted once, in the root layout, under the sign-in cover and the toast', () => {
@@ -190,12 +177,6 @@ describe('the same flow as the Home banner', () => {
   test('Services has no red banner of its own any more; Home keeps it', () => {
     expect(read('../../app/all-services.js')).not.toContain('SosBar');
     expect(read('../../app/home.js')).toContain('<SosBar bottom={TAB_BAR + insets.bottom}');
-  });
-  test('Request Details reports the height of its own bar, only while it is drawn and in front', () => {
-    const screen = read('../../app/request-details.js');
-    expect(screen).toContain('useReportFixedBar(view && view.showTrackingBar ? barHeight : 0);');
-    expect(screen).toContain('onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)}');
-    expect(read('../../components/sos/hooks.js')).toContain('useFocusEffect(');
   });
   test('the scrolling screens leave 96 more at the end while the button shows', () => {
     expect(read('../../components/layout.js')).toContain('+ insets.bottom + fabPad }}');

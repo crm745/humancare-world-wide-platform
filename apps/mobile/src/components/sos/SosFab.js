@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Phone } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
 import { FAB_CORE, FAB_RIGHT, FAB_RING, PULSE, fabBottom } from '../../lib/sos';
-import { useFixedBarHeight, useKeyboardOpen, useSosFabVisible } from './hooks';
+import { useKeyboardOpen, useSosFabVisible } from './hooks';
 import { SosModal } from './SosModal';
 
 const RED = '#C53030';
@@ -22,7 +22,6 @@ export function SosFab() {
   const insets = useSafeAreaInsets();
   const visible = useSosFabVisible();
   const keyboardOpen = useKeyboardOpen(true);
-  const barHeight = useFixedBarHeight();
   const [open, setOpen] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
   // 0 = the pulse has just started, 1 = it is over (scale at its biggest, fully see-through). It rests at 1. It is created at 0
@@ -58,7 +57,7 @@ export function SosFab() {
 
   if (!show) return open ? <SosModal visible onClose={() => setOpen(false)} /> : null;
 
-  const bottom = fabBottom({ pathname, insetBottom: insets.bottom, barHeight });
+  const bottom = fabBottom({ insetBottom: insets.bottom });
   const scale = progress.interpolate({ inputRange: [0, 1], outputRange: [PULSE.scaleFrom, PULSE.scaleTo] });
   const opacity = progress.interpolate({ inputRange: [0, 1], outputRange: [PULSE.opacityFrom, PULSE.opacityTo] });
 

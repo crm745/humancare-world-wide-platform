@@ -5,7 +5,7 @@
 // shows and WHERE it sits.
 export const FAB_CORE = 56; // the red circle (the only tappable part)
 export const FAB_RIGHT = 16; // the core's distance from the right edge
-export const FAB_GAP = 16; // the core's distance above whatever is under it
+export const FAB_GAP = 16; // the core's distance above where the tab bar ends
 export const FAB_RING = 80; // the pulse ring, the biggest of the circles
 export const FAB_CONTENT_PAD = 96; // extra room at the end of a scrolling screen, so the last item clears the button
 export const TAB_BAR_HEIGHT = 64; // the bottom tab bar (BottomNav), before the safe-area inset
@@ -14,9 +14,6 @@ const normalise = (pathname) => {
   const path = String(pathname || '/').split('?')[0].split('#')[0];
   return path.length > 1 ? path.replace(/\/+$/, '') : '/';
 };
-
-// The screens that carry the bottom tab bar, and show this button above it.
-export const TAB_ROUTES = ['/all-services', '/my-requests', '/profile'];
 
 // Routes with no button. Home keeps its own red banner. The splash, Getting Started, login, create account and OTP /
 // password screens are for someone who is not signed in yet. Corporate screens are matched by prefix, the request form
@@ -43,17 +40,12 @@ export function sosFabVisible({ pathname, authStatus, isCorporate = false, keybo
   return !isHiddenRoute(pathname);
 }
 
-export const isTabRoute = (pathname) => TAB_ROUTES.includes(normalise(pathname));
-
-// How far the button's core sits above the bottom of the screen.
-//   a tab screen                              16 above the tab bar (64 + the inset)
-//   a screen with its own fixed bottom bar    16 above THAT bar (`barHeight` is its whole height, inset included)
-//   anything else                             16 above the bottom safe-area inset
-export function fabBottom({ pathname, insetBottom = 0, barHeight = 0 }) {
+// How far the button's core sits above the bottom of the screen: the SAME place on every screen, 16 above where the tab bar
+// ends (64 plus the bottom inset). Tab screens have the bar there; the other screens leave that space empty, so the button
+// does not move when you go from one screen to another.
+export function fabBottom({ insetBottom = 0 } = {}) {
   const inset = Number.isFinite(insetBottom) && insetBottom > 0 ? insetBottom : 0;
-  if (isTabRoute(pathname)) return TAB_BAR_HEIGHT + inset + FAB_GAP;
-  if (Number.isFinite(barHeight) && barHeight > 0) return barHeight + FAB_GAP;
-  return inset + FAB_GAP;
+  return TAB_BAR_HEIGHT + inset + FAB_GAP;
 }
 
 // The extra bottom padding a scrolling screen gets while the button shows.
@@ -64,19 +56,3 @@ export const emergencyUrl = (tel) => `tel:${tel}`;
 
 // ---- the pulse -----------------------------------------------------------------------------------------------------
 export const PULSE = Object.freeze({ runs: 3, duration: 1800, rest: 500, scaleFrom: 0.86, scaleTo: 1.2, opacityFrom: 0.6, opacityTo: 0 });
-
-// A fixed bottom bar on the screen in front reports its height here, so the button can sit above it. A plain store
-// (no React) with one value; components/sos/useFixedBar.js connects screens to it.
-let fixedBar = 0;
-const listeners = new Set();
-export const getFixedBar = () => fixedBar;
-export function setFixedBar(height) {
-  const next = Number.isFinite(height) && height > 0 ? Math.round(height) : 0;
-  if (next === fixedBar) return;
-  fixedBar = next;
-  listeners.forEach((fn) => fn());
-}
-export function subscribeFixedBar(fn) {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
-}
