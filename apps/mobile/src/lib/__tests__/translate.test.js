@@ -69,7 +69,17 @@ describe('interpolation', () => {
     expect(translate(DICT, 'EN', 'greet', null)).toBe('Welcome, {{name}}');
     expect(interpolate('a {{ b }} c', { b: 1 })).toBe('a 1 c');
   });
-  test('no real translation uses a placeholder yet, so nothing existing changes', () => {
-    for (const lang of Object.keys(real)) for (const text of Object.values(real[lang])) expect(text).not.toContain('{{');
+  test('a {{placeholder}} in a real translation is well formed, and every language has the same ones', () => {
+    const PLACEHOLDER = new RegExp('[{][{][A-Za-z0-9_.]+[}][}]', 'g');
+    const names = (text) => (text.match(PLACEHOLDER) || []).sort().join();
+    for (const key of Object.keys(real.EN)) {
+      for (const lang of Object.keys(real)) {
+        const text = real[lang][key];
+        if (typeof text !== 'string') continue;
+        // nothing is left of the braces once the whole placeholders are taken out
+        expect(text.replace(PLACEHOLDER, '')).not.toMatch(/[{][{]|[}][}]/);
+        expect(names(text)).toBe(names(real.EN[key]));
+      }
+    }
   });
 });
