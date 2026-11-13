@@ -35,51 +35,92 @@ describe('palette', () => {
   });
 });
 
-describe('the Tracking screen', () => {
-  test('uses the shared TopBar, Body and Card', () => {
-    expect(screen).toContain("import { Body, Screen, TopBar } from '../components/layout'");
-    expect(screen).toContain("import { Card, Text } from '../components/ui'");
-    expect(screen).toContain('<TopBar title={t(\'trk_title\')} />');
-    expect(screen).toContain('<Body contentClassName="px-[18px] py-6">');
+describe('the Tracking Details screen is drawn to the design', () => {
+  const card = read('../../components/tracking/TrackingDetails.js');
+  const parts = read('../../components/request/DetailsParts.js');
+  test('the header is the shared one: white, 76 tall, a 48x48 back button, the title and nothing else', () => {
+    expect(screen).toContain("import { ScreenHeader } from '../components/request/DetailsParts';");
+    expect(screen).toContain("<ScreenHeader title={t('tracking_details_title')}");
+    expect(parts).toContain("height: 76, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1");
+    expect(parts).toContain('width: 48, height: 48, borderRadius: 14, backgroundColor: C.soft');
+    expect(parts).toContain('fontFamily: FONT[800], fontSize: 18, lineHeight: 24, color: C.navy');
+    expect(screen).toContain("backgroundColor: '#F2F6FC'");
   });
-  test('no gradient hero, no monospace font, no oversized halo', () => {
-    expect(screen).not.toMatch(/LinearGradient|expo-linear-gradient/);
-    expect(screen).not.toMatch(/Menlo|monospace|fontFamily/);
-    expect(screen).not.toMatch(new RegExp('opacity: 0.16|width: 40, height: 40'));
+  test('the route card is navy, radius 22, padding 18, 18 between its parts', () => {
+    expect(card).toContain("backgroundColor: NAVY, borderRadius: 22, padding: 18, gap: 18");
+    expect(card).toContain("const NAVY = '#0D2340';");
+    expect(card).toContain("const SOFT_TEXT = '#A9BAD3';");
   });
-  test('the route is an arc over a faint grid, with the aircraft in the middle and the cities under their markers', () => {
-    expect(screen).toContain("from 'react-native-svg'");
-    expect(screen).toContain('strokeDasharray="2 5"'); // the dotted route
-    expect(screen).toContain('const mid = quad(p0, c, p2, 0.5)'); // the aircraft sits in the middle, always
-    expect(screen.match(new RegExp('cityName[(]', 'g')).length).toBeGreaterThanOrEqual(2);
-    expect(screen).toContain('fill="#FFFFFF" />'); // the aircraft is white, clear on the blue
-    expect(screen).toContain('backgroundColor: P.brand, borderColor: P.brand'); // the route card is the brand blue, not white
+  test('the reference, the badge and the service name are drawn from the design\'s sizes', () => {
+    expect(card).toContain("fontFamily: FONT[600], fontSize: 13, lineHeight: 18, letterSpacing: 0.26, color: SOFT_TEXT");
+    expect(card).toContain("paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.14)'");
+    expect(card).toContain("fontFamily: FONT[800], fontSize: 11.5, lineHeight: 14, letterSpacing: 0.575, textTransform: 'uppercase'");
+    expect(card).toContain('fontFamily: FONT[800], fontSize: 18, lineHeight: 24, color: \'#FFFFFF\'');
   });
-  test('the route and the timeline are each in a Card, and the colours come from the palette', () => {
-    expect(screen.match(/<Card /g)).toHaveLength(2);
-    expect(screen).toContain("from '../lib/tracking/palette'");
-    expect(screen).not.toMatch(/#2F3A8E|#1A73E8|#A9B3F0/);
-    const hexes = [...new Set(screen.match(new RegExp('#[0-9A-Fa-f]{6}', 'g')) || [])];
-    expect(hexes).toEqual(['#FFFFFF']); // every other colour comes from the palette; only white is inline
+  test('the route: the cities at 24/30/800 up to 120 wide, a 32 chip with the request\'s own icon at 16, the dashed and solid lines, the dot and the ring', () => {
+    expect(card).toContain("maxWidth: 120, flexShrink: 1");
+    expect(card).toContain("fontFamily: FONT[800], fontSize: 24, lineHeight: 30, color: '#FFFFFF'");
+    expect(card).toContain('const CHIP = 32;');
+    expect(card).toContain('<ServiceIcon serviceKey={serviceKey} size={16} color="#FFFFFF"');
+    expect(card).toContain('stroke="rgba(169,186,211,0.45)" strokeWidth={2} strokeDasharray="4 4"');
+    expect(card).toContain("backgroundColor: 'rgba(26,115,232,0.25)'"); // the 5px halo
+    expect(card).toContain('width: 8, height: 8, borderRadius: 4, backgroundColor: \'#FFFFFF\'');
+    expect(card).toContain('width: 10, height: 10, borderRadius: 5, borderWidth: 2, borderColor: \'#FFFFFF\'');
+    expect(card).not.toMatch(/rotate/); // the chip is not turned
   });
-  test('the type sizes are Request Details\' (20 heading, 12.5 reference and body, 14.5 titles, 11.5 chip)', () => {
-    for (const size of ['text-[20px]', 'text-[12.5px]', 'text-[14.5px]', 'text-[11.5px]']) expect(screen).toContain(size);
-    expect(screen).not.toMatch(/fontSize: (28|17|13)\b/);
+  test('the footer: a 14 top padding and a faint line, 6-tall segments with a 4 gap, the current title and "Step X of N", "Updated ..."', () => {
+    expect(card).toContain("paddingTop: 14, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)', gap: 8");
+    expect(card).toContain("flexDirection: 'row', gap: 4");
+    expect(card).toContain("height: 6, borderRadius: 3, backgroundColor: s === 'on' ? '#FFFFFF' : s === 'dim' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.2)'");
+    expect(card).toContain("t('mr_step_of', { n: d.index + 1, total: d.total })");
+    expect(card).toContain("t('rd_updated', { when: d.updated })");
+    expect(card).toContain('{d.updated ?'); // hidden when there is no event
   });
-  test('timeline indicators are 26 px', () => {
-    expect(screen).toContain('h-[26px] w-[26px]');
+  test('the timeline: a "Progress" label over a card, 24px markers (check, ring and dot, grey ring), connectors, and the step text', () => {
+    expect(card).toContain("t('td_progress')");
+    expect(card).toContain('paddingTop: 18, paddingHorizontal: 16, paddingBottom: 4');
+    expect(card).toContain('<Check size={12} color="#FFFFFF" strokeWidth={3.4} />');
+    expect(card).toContain("borderWidth: 3, borderColor: BLUE");
+    expect(card).toContain("borderWidth: 2, borderColor: '#D5DCE7'");
+    expect(card).toContain("width: 2, backgroundColor: step.state === 'done' ? BLUE : C.line");
+    expect(card).toContain('paddingTop: 1, paddingBottom: 16, gap: 2');
+    expect(card).toContain('fontSize: 14.5, lineHeight: 21');
+    expect(card).toContain("t('timeline_pending')");
+    expect(card).toContain("step.state === 'pending' && !step.stopped"); // a cancelled stop step shows its time, not "Pending"
+  });
+  test('the list is a list, its current step is marked, and the route card has its own label', () => {
+    expect(card).toContain('role="list" accessibilityRole="list"');
+    expect(card).toContain('role="listitem"');
+    expect(card).toContain("aria-current={current ? 'step' : undefined}");
+    expect(card).toContain('accessibilityLabel={d.accessibilityLabel}');
+  });
+  test('it draws the steps it is given: no step name, step count or text is written into the screen', () => {
+    for (const source of [card, screen]) {
+      expect(source).not.toMatch(/trk_received|trk_medical|trk_quote|trk_progress|trk_completed|tcp_m_|Request received|Mission in progress|Flight scheduled/);
+      expect(source).not.toMatch(/length === 4|length === 5|\[0, 1, 2, 3|Array\.from\(\{ length: [0-9]/);
+    }
+    expect(card).toContain('d.steps.map(');
+    expect(card).toContain('d.segments.map(');
+  });
+  test('no stage notes, no share, no invented operational information, no gradient or monospace', () => {
+    const code = (src) => src.split(String.fromCharCode(10)).filter((l) => !l.trim().startsWith('//') && !l.includes('{/*')).join(String.fromCharCode(10));
+    expect(code(card)).not.toMatch(/\.note\b|Share|ETA|coordinator|distance|LinearGradient|Menlo|monospace/);
+    expect(code(read('../trackingDetailsView.js'))).not.toMatch(/\.note\b/);
+  });
+  test('the admin\'s "changes required" message (above Progress) and the "Open request" button (below it) are kept', () => {
+    expect(card.indexOf('<Message ')).toBeLessThan(card.indexOf("<Section title={t('td_progress')}>"));
+    expect(card.indexOf("<Section title={t('td_progress')}>")).toBeLessThan(card.indexOf("t('tcp_open_request')"));
+    expect(card).toContain('d.openRequest && onOpenRequest');
+    expect(card).toContain("t('tcp_changes_label')");
   });
   test('the tracking logic and the API call are unchanged', () => {
     expect(screen).toContain('apiGet(`/requests/me/${id}`)');
-    expect(screen).toContain("trackingView(request)");
-    expect(screen).toContain("routeProgress(view)");
+    expect(screen).toContain('buildTrackingDetails(request, t)');
+    const adapter = read('../trackingDetailsView.js');
+    expect(adapter).toContain('trackingView(request)');
+    expect(adapter).toContain('buildPrivateCharterTracking(request)');
     const logic = read('../requestTracking.js');
     expect(logic).toContain("{ key: 'submitted', title: 'trk_received'");
     expect(logic).toContain("{ key: 'payment', title: 'trk_quote'");
-  });
-  test('no share, no invented operational information', () => {
-    // comments may say what is not shown, so only code is checked
-    const code = screen.split(String.fromCharCode(10)).filter((l) => !l.trim().startsWith('//') && !l.includes('{/*')).join(String.fromCharCode(10));
-    expect(code).not.toMatch(new RegExp('Share|ETA|coordinator|aircraft|distance'));
   });
 });

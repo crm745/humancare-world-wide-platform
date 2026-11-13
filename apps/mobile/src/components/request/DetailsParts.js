@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Platform, Text, View } from 'react-native';
+import { Platform, Pressable, Text, View } from 'react-native';
+import { ChevronLeft } from 'lucide-react-native';
 import Svg, { Line } from 'react-native-svg';
 
 // The building blocks of the Request Details screen, drawn to the design: a section label above a white card, and a
@@ -73,5 +74,20 @@ export function StatusLayout({ bg, fg, Icon, title, text, children }) {
         </View>
       </View>
     </Card>
+  );
+}
+
+// The header of Request Details and Tracking Details: white, 76 tall, a 1px bottom line, a 48x48 back button and a title.
+export function ScreenHeader({ title, backLabel, isRTL, onBack }) {
+  return (
+    <View style={{ height: 76, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: C.line }}>
+      <Pressable
+        accessibilityRole="button" accessibilityLabel={backLabel} onPress={onBack}
+        style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: C.soft, alignItems: 'center', justifyContent: 'center' }}
+      >
+        <View style={isRTL ? { transform: [{ scaleX: -1 }] } : null}><ChevronLeft size={22} color={C.navy} strokeWidth={2.4} /></View>
+      </Pressable>
+      <Text accessibilityRole="header" numberOfLines={2} style={{ flex: 1, minWidth: 0, fontFamily: FONT[800], fontSize: 18, lineHeight: 24, color: C.navy }}>{title}</Text>
+    </View>
   );
 }

@@ -10,15 +10,20 @@ const tracking = read('../../app/tracking.js');
 const component = read('../../components/tracking/PrivateCharterTracking.js');
 
 describe('request-tracking.js (patient)', () => {
-  test('uses the model only for Private Charter, built from the raw request', () => {
-    expect(requestTracking).toMatch(/isPrivateCharterTracking\(request\) \? buildPrivateCharterTracking\(request\) : null/);
-    expect(requestTracking).toMatch(/if \(model\) \{\s+return \(\s+<Screen bg="bg-white">/);
+  const adapter = read('../trackingDetailsView.js');
+
+  test('uses the Private Charter model only for Private Charter, built from the raw request', () => {
+    expect(requestTracking).toMatch(/const details = useMemo\(\(\) => buildTrackingDetails\(request, t\), \[request, t\]\);/);
+    expect(adapter).toMatch(/const charter = isPrivateCharterTracking\(request\);/);
+    expect(adapter).toMatch(/const model = charter \? buildPrivateCharterTracking\(request\) : null;/);
+    expect(adapter).toMatch(/const steps = charter \? charterSteps\(model, t\) : genericSteps\(request, t\);/);
   });
 
-  test('keeps the generic tracking for every other service', () => {
-    expect(requestTracking).toMatch(/const view = trackingView\(request\);/);
-    expect(requestTracking).toMatch(/<RouteCard/);
-    expect(requestTracking).toMatch(/view\.steps\.map/);
+  test('keeps the generic tracking for every other service, and draws whatever steps the model returns', () => {
+    expect(adapter).toMatch(/const view = trackingView\(request\);/);
+    expect(adapter).toMatch(/view\.steps\.map\(/);
+    expect(adapter).toMatch(/model\.milestones\.filter\(/);
+    expect(read('../../components/tracking/TrackingDetails.js')).toMatch(/d\.steps\.map\(/);
   });
 
   test('loads on focus, with no mount effect that could fetch a second time', () => {
@@ -37,7 +42,7 @@ describe('request-tracking.js (patient)', () => {
   });
 
   test('every hook runs before the early return', () => {
-    const early = requestTracking.indexOf('if (model) {');
+    const early = requestTracking.indexOf('if (!details) {');
     const after = requestTracking.slice(early);
     expect(after).not.toMatch(/\buse(State|Effect|Memo|Callback|Ref|FocusEffect|App|WindowDimensions|SafeAreaInsets|LocalSearchParams)\(/);
   });
@@ -190,7 +195,8 @@ describe('service eligibility: only the canonical privatecharter key uses the ne
   });
 
   test('the screens decide only through isPrivateCharterTracking, with no alias of their own', () => {
-    [requestTracking, tracking].forEach((source) => {
+    // Tracking Details decides inside its adapter (lib/trackingDetailsView.js); the Tracking tabs decide in the screen itself.
+    [read('../trackingDetailsView.js'), tracking].forEach((source) => {
       expect(source).toMatch(/isPrivateCharterTracking\(/);
       expect(source).not.toMatch(/normalizeServiceKey|'air'|"air"/);
     });

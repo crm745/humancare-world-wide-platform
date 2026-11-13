@@ -27,6 +27,9 @@
   "sos_modal_body": "This will immediately call our 24/7 emergency line at {{number}}.",
   "sos_modal_cancel": "Cancel",
   "sos_modal_call": "Call Now",
+  "td_pickup": "Pickup",
+  "td_dropoff": "Drop-off",
+  "td_progress": "Progress",
   "sos_btn": "SOS",
   "nav_home": "Home",
 
@@ -612,6 +615,9 @@
   "sos_modal_body": "इससे तुरंत हमारी 24/7 आपातकालीन लाइन {{number}} पर कॉल लग जाएगा।",
   "sos_modal_cancel": "रद्द करें",
   "sos_modal_call": "अभी कॉल करें",
+  "td_pickup": "पिकअप",
+  "td_dropoff": "ड्रॉप-ऑफ",
+  "td_progress": "प्रगति",
   "sos_btn": "SOS",
   "nav_home": "होम",
 
@@ -1122,6 +1128,9 @@
   "sos_modal_body": "यामुळे आमच्या 24/7 आपत्कालीन लाईनवर {{number}} लगेच कॉल जाईल.",
   "sos_modal_cancel": "रद्द करा",
   "sos_modal_call": "आता कॉल करा",
+  "td_pickup": "पिकअप",
+  "td_dropoff": "ड्रॉप-ऑफ",
+  "td_progress": "प्रगती",
   "sos_btn": "SOS",
   "nav_home": "होम",
 
@@ -1632,6 +1641,9 @@
   "sos_modal_body": "આથી તરત જ અમારી 24/7 ઇમરજન્સી લાઇન {{number}} પર કૉલ લાગશે.",
   "sos_modal_cancel": "રદ કરો",
   "sos_modal_call": "હમણાં કૉલ કરો",
+  "td_pickup": "પિકઅપ",
+  "td_dropoff": "ડ્રોપ-ઓફ",
+  "td_progress": "પ્રગતિ",
   "sos_btn": "SOS",
   "nav_home": "હોમ",
 
@@ -2142,6 +2154,9 @@
   "sos_modal_body": "ఇది వెంటనే మా 24/7 అత్యవసర లైన్ {{number}} కు కాల్ చేస్తుంది.",
   "sos_modal_cancel": "రద్దు చేయి",
   "sos_modal_call": "ఇప్పుడే కాల్ చేయండి",
+  "td_pickup": "పికప్",
+  "td_dropoff": "డ్రాప్-ఆఫ్",
+  "td_progress": "పురోగతి",
   "sos_btn": "SOS",
   "nav_home": "హోమ్",
 
@@ -2652,6 +2667,9 @@
   "sos_modal_body": "سيؤدي هذا إلى الاتصال فورًا بخط الطوارئ لدينا على مدار الساعة على الرقم {{number}}.",
   "sos_modal_cancel": "إلغاء",
   "sos_modal_call": "اتصل الآن",
+  "td_pickup": "نقطة الانطلاق",
+  "td_dropoff": "نقطة الوصول",
+  "td_progress": "التقدم",
   "sos_btn": "SOS",
   "nav_home": "الرئيسية",
 
