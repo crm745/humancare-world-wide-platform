@@ -36,7 +36,7 @@ export function SosBar({ bottom, onLayout }) {
     <>
       <View
         onLayout={onLayout}
-        style={{ position: 'absolute', left: 0, right: 0, bottom, backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E4E9F2', paddingHorizontal: 12, paddingVertical: 8 }}
+        style={{ position: 'absolute', left: 0, right: 0, bottom, paddingHorizontal: 12, paddingVertical: 8 }}
       >
         <Pressable
           accessibilityRole="button"

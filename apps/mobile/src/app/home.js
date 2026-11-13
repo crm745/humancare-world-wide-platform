@@ -23,7 +23,7 @@ import { SosBar } from '../components/home/SosBar';
 
 const TAB_BAR = 64;
 const MAX_WIDTH = 720;
-const HOME_TILES = SERVICE_TILES.slice(0, 6);
+const HOME_TILES = SERVICE_TILES.slice(0, 8);
 // What the app tracks for a request: submitted -> in progress -> completed.
 const STEP_BY_STATUS = { submitted: 1, in_progress: 2 };
 const TOTAL_STEPS = 3;
@@ -148,7 +148,6 @@ export default function Home() {
 
           <ServicesGrid
             services={HOME_TILES}
-            columns={tablet ? 4 : 3}
             onPressService={openTile}
             onViewAll={() => navReplace('/all-services')}
           />

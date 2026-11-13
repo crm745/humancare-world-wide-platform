@@ -1,7 +1,7 @@
 /* global describe, test, expect, __dirname */
 const fs = require('fs');
 const path = require('path');
-const { trackingRoute, trackingItemFromRequest, trackingItemFromCase } = require('../trackingItem');
+const { trackingRoute, trackingItemFromRequest, trackingItemFromCase, isRequestFor } = require('../trackingItem');
 
 const read = (relative) => fs.readFileSync(path.join(__dirname, relative), 'utf8');
 
@@ -83,11 +83,90 @@ describe('trackingItemFromRequest: older requests and other services are unchang
   });
 });
 
+describe('trackingItemFromRequest: the raw request is kept on every patient item', () => {
+  const FULL = {
+    ...base, reviewStatus: 'approved', submittedAt: '2026-11-01T09:00:00Z', reviewedAt: '2026-11-02T10:00:00Z', documentsRequestReason: null,
+    originCityName: 'Mumbai', originCountryCode: 'IN', destinationCityName: 'Dubai', destinationCountryCode: 'AE', createdAt: '2026-11-01T08:00:00Z',
+    case: { id: 77, status: 'scheduled', stageEvents: EVENTS, documents: CASE_DOCS },
+  };
+
+  test('a review-workflow request keeps the very same object', () => {
+    expect(trackingItemFromRequest(FULL).rawRequest).toBe(FULL);
+  });
+
+  test('a legacy request (no review status) keeps it too, although item.request stays null', () => {
+    const legacy = { ...base, reviewStatus: null, serviceKey: 'privatecharter', case: { id: 9, status: 'in_progress', stageEvents: EVENTS, documents: [] } };
+    const item = trackingItemFromRequest(legacy);
+    expect(item.rawRequest).toBe(legacy);
+    expect(item.request).toBeNull();
+    expect(item.workflow).toBe(false);
+  });
+
+  test('a request with no Case and a request of another service keep it as well', () => {
+    const noCase = { ...base, reviewStatus: undefined };
+    const other = { ...base, serviceType: 'Air Ambulance', serviceKey: 'air', reviewStatus: null };
+    expect(trackingItemFromRequest(noCase).rawRequest).toBe(noCase);
+    expect(trackingItemFromRequest(other).rawRequest).toBe(other);
+  });
+
+  test('the fields a tracking model needs survive, including the ones the flat item drops', () => {
+    const { rawRequest } = trackingItemFromRequest(FULL);
+    ['serviceKey', 'status', 'reviewStatus', 'submittedAt', 'reviewedAt', 'documentsRequestReason', 'originCityName', 'originCountryCode', 'destinationCityName', 'destinationCountryCode', 'createdAt']
+      .forEach((key) => expect(rawRequest).toHaveProperty(key, FULL[key]));
+    expect(rawRequest.case).toEqual({ id: 77, status: 'scheduled', stageEvents: EVENTS, documents: CASE_DOCS });
+    // the flat item alone has no way to say what the Case status is
+    expect(trackingItemFromRequest(FULL)).not.toHaveProperty('serviceKey');
+  });
+
+  test('the existing flattened properties are unchanged by keeping the raw request', () => {
+    const item = trackingItemFromRequest(FULL);
+    const { rawRequest, ...rest } = item;
+    expect(Object.keys(rest).sort()).toEqual(['destination', 'documents', 'mortal', 'origin', 'patientLabel', 'referenceNumber', 'request', 'reviewPill', 'serviceType', 'stageEvents', 'status', 'workflow']);
+    expect(rawRequest).toBe(FULL);
+  });
+});
+
+describe('isRequestFor: a loaded request belongs to the id on the route', () => {
+  test('the route id is a string and the request id a number, and they still match', () => {
+    expect(isRequestFor({ id: 5 }, '5')).toBe(true);
+    expect(isRequestFor({ id: 5 }, 5)).toBe(true);
+    expect(isRequestFor({ id: '5' }, 5)).toBe(true);
+  });
+
+  test('a request for another id is not the one asked for (the id changed while the screen stayed mounted)', () => {
+    expect(isRequestFor({ id: 5 }, '6')).toBe(false);
+    expect(isRequestFor({ id: 5 }, '05')).toBe(false);
+    expect(isRequestFor({ id: 5 }, '')).toBe(false);
+  });
+
+  test('nothing loaded, no id, or something that is not a request is never a match', () => {
+    [null, undefined, 5, 'x'].forEach((value) => expect(isRequestFor(value, '5')).toBe(false));
+    expect(isRequestFor({ id: 5 }, null)).toBe(false);
+    expect(isRequestFor({ id: 5 }, undefined)).toBe(false);
+    expect(isRequestFor({}, undefined)).toBe(false);
+    expect(isRequestFor({ id: undefined }, 'undefined')).toBe(false);
+    expect(isRequestFor({ id: null }, 'null')).toBe(false);
+  });
+
+  test('a patient item matches through its raw request, and a corporate item never does', () => {
+    const item = trackingItemFromRequest({ ...base, id: 12 });
+    expect(isRequestFor(item.rawRequest, '12')).toBe(true);
+    expect(isRequestFor(item.rawRequest, '13')).toBe(false);
+    expect(isRequestFor(trackingItemFromCase({ referenceNumber: 'C', patientName: 'P' }).rawRequest, '12')).toBe(false);
+  });
+});
+
 describe('trackingItemFromCase (corporate)', () => {
   test('keeps the Case shape and never becomes a workflow item', () => {
     const item = trackingItemFromCase({ referenceNumber: 'CASE-1001', serviceType: 'Air', origin: 'A', destination: 'B', status: 'in_progress', patientName: 'P', stageEvents: EVENTS, documents: CASE_DOCS });
     expect(item).toMatchObject({ referenceNumber: 'CASE-1001', status: 'in_progress', patientLabel: 'P', stageEvents: EVENTS, documents: CASE_DOCS, workflow: false, reviewPill: null, request: null });
     expect(trackingItemFromCase({ referenceNumber: 'C', patientName: 'P' })).toMatchObject({ stageEvents: [], documents: [] });
+  });
+
+  test('a corporate item carries no raw request, so it can never reach the patient Private Charter model', () => {
+    const item = trackingItemFromCase({ referenceNumber: 'CASE-1001', serviceType: 'Private Charter Air Ambulance Service', serviceKey: 'privatecharter', status: 'in_progress', patientName: 'P' });
+    expect(item).not.toHaveProperty('rawRequest');
+    expect(Object.keys(item).sort()).toEqual(['destination', 'documents', 'origin', 'patientLabel', 'referenceNumber', 'request', 'reviewPill', 'serviceType', 'stageEvents', 'status', 'workflow']);
   });
 });
 

@@ -1,16 +1,22 @@
 import { Pressable, View } from 'react-native';
-import { ChevronRight } from 'lucide-react-native';
+import { ChevronRight, LayoutGrid } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
 import { Text } from '../ui';
-import { ServiceIconTile } from './ServiceIcon';
+import { ServiceIcon } from './ServiceIcon';
 
-// "Our Services" title, the "View all services" link, and the first tiles.
-// `services` are entries of the app's own SERVICE_TILES; `columns` is 3 on phones, 4 on
-// wide screens. Rows are laid out one at a time so every tile in a row is equally tall.
-export function ServicesGrid({ services, columns, onPressService, onViewAll }) {
+const NAVY = '#0D2340';
+const COLUMNS = 4;
+const MAX_SERVICES = 7;
+
+// "Our Services" title, the "View all services" link, and the first seven services plus a
+// "More" tile (the eighth cell) that opens All Services. `services` are entries of the app's own SERVICE_TILES.
+// Always four columns; the `columns` prop that Home still passes is no longer used.
+// Rows are laid out one at a time so every tile in a row is equally tall.
+export function ServicesGrid({ services, onPressService, onViewAll }) {
   const { t } = useApp();
+  const items = [...services.slice(0, MAX_SERVICES), { key: '__more', more: true }];
   const rows = [];
-  for (let i = 0; i < services.length; i += columns) rows.push(services.slice(i, i + columns));
+  for (let i = 0; i < items.length; i += COLUMNS) rows.push(items.slice(i, i + COLUMNS));
   return (
     <View>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -20,22 +26,28 @@ export function ServicesGrid({ services, columns, onPressService, onViewAll }) {
           <ChevronRight size={14} color="#1A5FC4" strokeWidth={2.6} />
         </Pressable>
       </View>
-      <View style={{ gap: 10 }}>
+      <View style={{ gap: 12 }}>
         {rows.map((row, r) => (
-          <View key={r} style={{ flexDirection: 'row', gap: 10 }}>
+          <View key={r} style={{ flexDirection: 'row', gap: 8 }}>
             {row.map((s) => (
               <Pressable
                 key={s.key}
                 accessibilityRole="button"
-                accessibilityLabel={t(s.title)}
-                onPress={() => onPressService(s)}
-                style={{ flex: 1, minWidth: 0, minHeight: 98, backgroundColor: '#FFFFFF', borderRadius: 16, paddingHorizontal: 5, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', gap: 8, shadowColor: '#0D2340', shadowOpacity: 0.06, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 1 }}
+                accessibilityLabel={s.more ? t('home_more') : t(s.title)}
+                onPress={() => (s.more ? onViewAll() : onPressService(s))}
+                style={{ flex: 1, minWidth: 0, alignItems: 'center', gap: 6 }}
               >
-                <ServiceIconTile serviceKey={s.key} />
-                <Text className="font-inter-bold" style={{ fontSize: 12, lineHeight: 16, color: '#17233D', textAlign: 'center' }}>{t(s.title)}</Text>
+                <View style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E4E9F2', alignItems: 'center', justifyContent: 'center' }}>
+                  {s.more
+                    ? <LayoutGrid size={22} color={NAVY} strokeWidth={1.8} />
+                    : <ServiceIcon serviceKey={s.key} size={24} color={NAVY} fill={NAVY} fillOpacity={0.12} />}
+                </View>
+                <Text className="font-inter-medium" numberOfLines={3} style={{ fontSize: 10.5, lineHeight: 14, color: NAVY, textAlign: 'center' }}>
+                  {s.more ? t('home_more') : t(s.title)}
+                </Text>
               </Pressable>
             ))}
-            {row.length < columns && Array.from({ length: columns - row.length }, (_, k) => <View key={`pad${k}`} style={{ flex: 1, minWidth: 0 }} />)}
+            {row.length < COLUMNS && Array.from({ length: COLUMNS - row.length }, (_, k) => <View key={`pad${k}`} style={{ flex: 1, minWidth: 0 }} />)}
           </View>
         ))}
       </View>

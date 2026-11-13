@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Check } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { apiGet } from '../lib/api';
@@ -10,6 +10,10 @@ import { TRACKING_PALETTE as P, toneFor } from '../lib/tracking/palette';
 import { Body, Screen, TopBar } from '../components/layout';
 import { Card, Text } from '../components/ui';
 import { LoadError, LoadingState } from '../components/LoadingState';
+import PrivateCharterTracking from '../components/tracking/PrivateCharterTracking';
+import { buildPrivateCharterTracking } from '../lib/tracking/privateCharterTracking';
+import { isPrivateCharterTracking } from '../lib/tracking/serviceFamily';
+import { isRequestFor } from '../lib/trackingItem';
 
 // The patient's tracking page, opened from "Track request" on Home: where the request is, nothing else. It is
 // built from the same pieces as Request Details (TopBar, Body, Card, the same type sizes), with the official logo
@@ -99,16 +103,60 @@ function Step({ step, last, t }) {
 export default function RequestTracking() {
   const { t, toast } = useApp();
   const { id } = useLocalSearchParams();
-  const [request, setRequest] = useState(null);
+  const [loadedRequest, setLoadedRequest] = useState(null);
   const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    if (!id) return;
-    apiGet(`/requests/me/${id}`)
-      .then((data) => setRequest(data.request))
-      .catch((err) => { setFailed(true); toast(err.message); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per id
-  }, [id]);
+  // Only a request that belongs to the id on the route is ever shown: if the id changes while this screen stays
+  // mounted, the previous request is not displayed as the new one while the new one loads.
+  const request = isRequestFor(loadedRequest, id) ? loadedRequest : null;
+
+  const loaded = useRef(false);
+  const loadedForId = useRef(null);
+
+  // Loads on the first focus and again whenever the patient comes back to this screen. What is on screen stays
+  // while it reloads (no spinner); a failed reload keeps it and only says so. The failed state is for a screen
+  // that never loaded. A response that arrives after the screen lost focus or closed is ignored.
+  useFocusEffect(
+    useCallback(() => {
+      if (!id) return undefined;
+      // A different id starts over: nothing is loaded for it yet, and an old failure is not its failure.
+      // The same id (coming back to the screen) keeps what is shown and refreshes in the background.
+      if (loadedForId.current !== String(id)) {
+        loadedForId.current = String(id);
+        loaded.current = false;
+        setFailed(false);
+      }
+      let active = true;
+      apiGet(`/requests/me/${id}`)
+        .then((data) => {
+          if (!active) return;
+          loaded.current = true;
+          setFailed(false);
+          setLoadedRequest(data.request);
+        })
+        .catch((err) => {
+          if (!active) return;
+          if (!loaded.current) setFailed(true);
+          toast(err.message);
+        });
+      return () => { active = false; };
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- reload per id and focus; toast does not change what is fetched
+    }, [id]),
+  );
+
+  // Private Charter only (by service key); every other service keeps the generic tracking below.
+  const model = useMemo(() => (request && isPrivateCharterTracking(request) ? buildPrivateCharterTracking(request) : null), [request]);
+
+  if (model) {
+    return (
+      <Screen bg="bg-white">
+        <TopBar title={t('tracking_details_title')} />
+        <Body contentClassName="px-[18px] py-4">
+          <PrivateCharterTracking model={model} onOpenRequest={() => router.push({ pathname: '/request-details', params: { id: request.id } })} />
+        </Body>
+      </Screen>
+    );
+  }
 
   if (!request) {
     return (
