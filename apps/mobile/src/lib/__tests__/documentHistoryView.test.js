@@ -163,15 +163,16 @@ describe('wiring (source checks)', () => {
   const banner = read('../../components/request/ReviewBanner.js');
 
   test('the screen shows the banner, the history and the upload card, and refreshes them all from one reload', () => {
-    expect(screen).toMatch(/<ReviewBanner request=\{request\} \/>/);
-    expect(screen).toMatch(/<DocumentHistory request=\{request\} \/>/);
+    expect(screen).toMatch(/if \(s\.kind === 'review'\) return <ReviewBanner request=\{request\} \/>;/);
+    expect(screen).toMatch(/<DocumentHistory request=\{request\} styled \/>/);
     expect(screen).toMatch(/<AdditionalDocuments request=\{request\} onUploaded=\{reload\} \/>/);
     expect(screen).toMatch(/const reload = \(\) => apiGet\(`\/requests\/me\/\$\{id\}`\)\s*\.then\(\(\{ request: r \}\) => setRequest\(r\)\)/);
   });
 
-  test('the Documents row uses the summary and always opens the tracking documents tab', () => {
-    expect(screen).toMatch(/const docsLabel = documentsSummary\(request\)/);
-    expect(screen).toMatch(/onPress=\{\(\) => router\.push\(trackingRoute\(request, 'docs'\)\)\}/);
+  test('the Documents section lists every file of the request (documentRows), and only a Case document opens', () => {
+    expect(screen).toMatch(/const view = detailsView\(request, t\)/);
+    expect(screen).toMatch(/const docs = view\.documents;/);
+    expect(screen).toMatch(/downloadAndShare\(`\/documents\/\$\{doc\.id\}\/file`, doc\.name\)/);
     expect(screen).not.toMatch(/request\.case\?\.documents/);
   });
 

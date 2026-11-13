@@ -1,28 +1,29 @@
-import { View } from 'react-native';
+import { Clock } from 'lucide-react-native';
+import { Text, View } from 'react-native';
 import { reviewBanner } from '../../lib/requestDocuments';
-import { Text } from '../ui';
+import { C, FONT, StatusLayout, WRAP } from './DetailsParts';
 
 const TONE = {
-  warning: { box: 'border-warning bg-warning-soft', text: 'text-warning' },
-  info: { box: 'border-primary bg-primary-soft', text: 'text-primary-dark' },
-  success: { box: 'border-success bg-success-soft', text: 'text-success' },
+  warning: { bg: '#FDF0DA', fg: '#8F4C08' },
+  info: { bg: '#E7F0FE', fg: '#1A5FC4' },
 };
 
-// Where a request in the review workflow stands, and what the Admin asked for while changes are
-// requested. Nothing for older requests and other services.
+// Where a request in the review workflow stands while it waits (for documents, for the patient's answer, or with
+// the Admin), drawn as the screen's status card: the tile, where it stands, and what the Admin asked for while changes
+// are requested. Nothing for older requests and other services, and nothing once approved (the status card says so).
 export default function ReviewBanner({ request }) {
   const banner = reviewBanner(request);
   if (!banner) return null;
-  const tone = TONE[banner.tone];
+  if (banner.key === 'approved') return null;
+  const tone = TONE[banner.tone] || TONE.info;
   return (
-    <View className={`mb-6 rounded-xl border px-3.5 py-3 ${tone.box}`} accessibilityRole="summary">
-      <Text className={`font-inter-bold text-[14px] ${tone.text}`}>{banner.title}</Text>
+    <StatusLayout bg={tone.bg} fg={tone.fg} Icon={Clock} title={banner.title}>
       {banner.reason && (
-        <View className="mt-2">
-          <Text className="text-[12px] text-faint">What we need from you</Text>
-          <Text className="mt-0.5 text-[13.5px] leading-5 text-ink">{banner.reason}</Text>
+        <View style={{ marginTop: 8 }}>
+          <Text style={{ fontFamily: FONT[600], fontSize: 12.5, lineHeight: 16, color: C.muted }}>What we need from you</Text>
+          <Text style={[{ marginTop: 2, fontFamily: FONT[500], fontSize: 13.5, lineHeight: 19, color: C.ink }, WRAP]}>{banner.reason}</Text>
         </View>
       )}
-    </View>
+    </StatusLayout>
   );
 }
