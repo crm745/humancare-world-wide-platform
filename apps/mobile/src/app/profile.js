@@ -9,6 +9,7 @@ import { LANGUAGES } from '../data/mock';
 import { navReplace } from '../lib/nav';
 import { clearTokens } from '../lib/session';
 import { BottomNav, Screen, TopBar, useScrollToTopOnTabTap } from '../components/layout';
+import { useSosFabPad } from '../components/sos/hooks';
 import { SectionLabel, Text } from '../components/ui';
 import { Sheet } from '../components/widgets';
 
@@ -77,6 +78,7 @@ function Section({ label, rows }) {
 export default function Profile() {
   const { t, isCorporate, profile, toast } = useApp();
   const insets = useSafeAreaInsets();
+  const fabPad = useSosFabPad();
   const [langSheet, setLangSheet] = useState(false);
   const scrollRef = useRef(null);
   useScrollToTopOnTabTap(scrollRef);
@@ -113,7 +115,7 @@ export default function Profile() {
       <ScrollView
         ref={scrollRef}
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: TAB_BAR + insets.bottom + 24 }}
+        contentContainerStyle={{ paddingBottom: TAB_BAR + insets.bottom + 24 + fabPad }}
         showsVerticalScrollIndicator={false}
       >
         <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: 18, paddingTop: 16, gap: 16 }}>

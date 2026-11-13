@@ -199,7 +199,7 @@ describe('wiring', () => {
   test('the gate is mounted in the root layout, over the navigator', () => {
     const layout = read('../../app/_layout.js');
     expect(layout).toContain("import { AuthGate } from '../components/AuthGate'");
-    expect(layout).toMatch(/<Stack[^>]*\/>\s*<AuthGate \/>/);
+    expect(layout).toMatch(/<Stack[^>]*\/>\s*<SosFab \/>\s*<AuthGate \/>/);
   });
   test('the app context checks the saved session with the server and follows token changes', () => {
     const ctx = read('../../state/AppContext.js');

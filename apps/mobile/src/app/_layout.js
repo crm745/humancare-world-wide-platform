@@ -13,6 +13,7 @@ import { Inter_800ExtraBold } from '@expo-google-fonts/inter/800ExtraBold';
 import { AppProvider, useApp } from '../state/AppContext';
 import { Toast } from '../components/widgets';
 import { AuthGate } from '../components/AuthGate';
+import { SosFab } from '../components/sos/SosFab';
 
 function Shell() {
   const { isRTL } = useApp();
@@ -21,6 +22,7 @@ function Shell() {
     <View className="flex-1 bg-canvas" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#F2F6FC' } }} />
+      <SosFab />
       <AuthGate />
       <Toast />
     </View>

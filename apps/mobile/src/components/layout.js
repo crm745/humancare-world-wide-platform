@@ -6,6 +6,7 @@ import { ChevronLeft, FileText, House, LayoutGrid, User } from 'lucide-react-nat
 import { useApp } from '../state/AppContext';
 import { emitTabReselect, goBack, navReplace, onTabReselect } from '../lib/nav';
 import { Text, cx } from './ui';
+import { useSosFabPad } from './sos/hooks';
 
 // Full-height screen with safe-area padding. `bg` is a Tailwind background class.
 export function Screen({ children, bg = 'bg-canvas', padded, className = '', style }) {
@@ -27,6 +28,8 @@ const BOTTOM_GAP = 32;
 export const Body = forwardRef(function Body({ children, className = '', contentClassName = '', withNav, grow = true }, ref) {
   const insets = useSafeAreaInsets();
   const inner = useRef(null);
+  // Room at the end for the floating SOS button, on the screens that show it (see lib/sos.js).
+  const fabPad = useSosFabPad();
   // Tapping the active tab again scrolls this screen back to the top.
   useEffect(() => (withNav ? onTabReselect(() => inner.current?.scrollTo({ y: 0, animated: true })) : undefined), [withNav]);
   return (
@@ -34,7 +37,7 @@ export const Body = forwardRef(function Body({ children, className = '', content
       ref={(node) => { inner.current = node; if (typeof ref === 'function') ref(node); else if (ref) ref.current = node; }}
       className={`flex-1 ${className}`}
       contentContainerClassName={`${grow ? 'flex-grow' : ''} ${contentClassName}`}
-      contentContainerStyle={{ paddingBottom: (withNav ? 64 : 0) + BOTTOM_GAP + insets.bottom }}
+      contentContainerStyle={{ paddingBottom: (withNav ? 64 : 0) + BOTTOM_GAP + insets.bottom + fabPad }}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
     >

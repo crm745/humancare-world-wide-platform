@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { ChevronRight } from 'lucide-react-native';
@@ -9,7 +9,7 @@ import { BottomNav, Screen, TopBar, useScrollToTopOnTabTap } from '../components
 import { Text } from '../components/ui';
 import { openService } from '../components/ServiceGrid';
 import { ServiceIcon } from '../components/home/ServiceIcon';
-import { SosBar } from '../components/home/SosBar';
+import { useSosFabPad } from '../components/sos/hooks';
 
 const TAB_BAR = 64;
 const MAX_WIDTH = 720;
@@ -20,7 +20,7 @@ const NAVY = '#0D2340';
 export default function AllServices() {
   const { t, isRTL } = useApp();
   const insets = useSafeAreaInsets();
-  const [sosH, setSosH] = useState(72);
+  const fabPad = useSosFabPad();
   const scrollRef = useRef(null);
   useScrollToTopOnTabTap(scrollRef);
 
@@ -28,7 +28,7 @@ export default function AllServices() {
     <Screen>
       <TopBar title={t('filter_svc_all')} />
 
-      <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: TAB_BAR + insets.bottom + sosH + 16 }} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: TAB_BAR + insets.bottom + 16 + fabPad }} showsVerticalScrollIndicator={false}>
         <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', padding: 14, gap: 12 }}>
           {SERVICE_TILES.map((s) => (
             <Pressable
@@ -53,7 +53,6 @@ export default function AllServices() {
         </View>
       </ScrollView>
 
-      <SosBar bottom={TAB_BAR + insets.bottom} onLayout={(e) => setSosH(e.nativeEvent.layout.height)} />
       <BottomNav />
     </Screen>
   );

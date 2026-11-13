@@ -348,7 +348,7 @@ describe('the header', () => {
 
 describe('the list and its states', () => {
   test('the list: padding 16 top, 23 sides, 24 bottom (plus the tab bar), a 12 gap; newest first (the filters sort)', () => {
-    expect(screen).toContain('paddingTop: 16, paddingHorizontal: 23, paddingBottom: 24 + TAB_BAR + insets.bottom, gap: 12');
+    expect(screen).toContain('paddingTop: 16, paddingHorizontal: 23, paddingBottom: 24 + TAB_BAR + insets.bottom + fabPad, gap: 12');
     expect(screen).toContain('applyFilters(requests, filters, today)');
   });
   test('the same request, and a card opens the same details screen as before', () => {

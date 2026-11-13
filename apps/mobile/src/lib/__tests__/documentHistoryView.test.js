@@ -170,7 +170,7 @@ describe('wiring (source checks)', () => {
   });
 
   test('the Documents section lists every file of the request (documentRows), and only a Case document opens', () => {
-    expect(screen).toMatch(/const view = detailsView\(request, t\)/);
+    expect(screen).toMatch(/const view = request \? detailsView\(request, t\) : null;/);
     expect(screen).toMatch(/const docs = view\.documents;/);
     expect(screen).toMatch(/downloadAndShare\(`\/documents\/\$\{doc\.id\}\/file`, doc\.name\)/);
     expect(screen).not.toMatch(/request\.case\?\.documents/);

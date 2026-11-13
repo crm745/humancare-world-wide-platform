@@ -10,6 +10,7 @@ import { goBack } from '../lib/nav';
 import { toListItem } from '../lib/requestShape';
 import { cardView, statusCounts } from '../lib/myRequestsView';
 import { BottomNav, Screen, useScrollToTopOnTabTap } from '../components/layout';
+import { useSosFabPad } from '../components/sos/hooks';
 import { FilterSheet } from '../components/FilterSheet';
 import { LoadingState } from '../components/LoadingState';
 import { RequestCard } from '../components/requests/RequestCard';
@@ -24,6 +25,7 @@ const FILTER_SERVICES = Object.entries(SERVICE_LABELS).map(([value, labelKey]) =
 export default function MyRequests() {
   const { t, toast, isRTL } = useApp();
   const insets = useSafeAreaInsets();
+  const fabPad = useSosFabPad();
   const params = useLocalSearchParams();
   const [status, setStatus] = useState(params.status || 'all');
   const [query, setQuery] = useState('');
@@ -82,7 +84,7 @@ export default function MyRequests() {
       <ScrollView
         ref={scrollRef}
         style={{ flex: 1 }}
-        contentContainerStyle={{ flexGrow: 1, paddingTop: 16, paddingHorizontal: 23, paddingBottom: 24 + TAB_BAR + insets.bottom, gap: 12 }}
+        contentContainerStyle={{ flexGrow: 1, paddingTop: 16, paddingHorizontal: 23, paddingBottom: 24 + TAB_BAR + insets.bottom + fabPad, gap: 12 }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
