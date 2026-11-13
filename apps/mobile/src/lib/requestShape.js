@@ -1,4 +1,5 @@
 import SERVICES from '../data/services.json';
+import { formatDate } from './dateFormat';
 
 // Backend uses 'in_progress'; the UI (Pill, filters, i18n keys) uses 'progress'.
 const STATUS_TO_UI = { submitted: 'submitted', in_progress: 'progress', completed: 'completed', cancelled: 'cancelled' };
@@ -16,9 +17,9 @@ export function serviceKeyFromTitle(title) {
   return TITLE_TO_KEY[title] || 'air';
 }
 
-export function formatDisplayDate(iso) {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+// "05 Oct 2026" in the language the app is showing (or the locale passed); '' for a missing or invalid date.
+export function formatDisplayDate(iso, locale) {
+  return formatDate(iso, locale);
 }
 
 // Shapes one backend ServiceRequest into what the My Requests list / filters expect.

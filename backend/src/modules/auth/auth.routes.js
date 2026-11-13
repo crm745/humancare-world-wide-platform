@@ -48,7 +48,7 @@ authRouter.post('/password/forgot/verify-otp', otpVerifyLimiter, verifyPasswordR
 authRouter.post('/password/set', setPassword);
 authRouter.post('/google', googleLogin);
 authRouter.post('/apple', appleLogin);
-// New Google/Apple people: mobile + consents, then the same OTP step as /register.
+// New Apple people (a new Google user is signed up directly by /google): mobile + consents, then the same OTP step as /register.
 authRouter.post('/social/register', otpSendIpLimiter, otpRequestLimiter, socialRegister);
 
 // Corporates authenticate with password + OTP (two factors, since these accounts
@@ -68,7 +68,7 @@ authRouter.post('/corporate/logout', corporateLogout);
 authRouter.post('/refresh', refreshAccessToken);
 authRouter.get('/me', requireAuth(undefined, { allowPasswordChangePending: true }), getMe);
 authRouter.patch('/me', requireAuth(['patient']), updateMe);
-// Mobile/email changes: current password, then an OTP to the new value.
+// Mobile/email changes: the new value, then an OTP to that new value (no password, no code to the old contact).
 authRouter.post('/me/contact', requireAuth(['patient']), patientLoginLimiter, otpSendIpLimiter, requestContactChange);
 authRouter.post('/me/contact/verify-otp', requireAuth(['patient']), otpVerifyLimiter, verifyContactChange);
 authRouter.post('/push-token', requireAuth(['patient']), savePushToken);

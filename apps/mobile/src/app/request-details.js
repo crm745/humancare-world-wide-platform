@@ -125,7 +125,7 @@ export default function RequestDetails() {
   return (
     <Screen>
       <TopBar title={t('request_details_title')} />
-      <Body contentClassName="px-5 py-6">
+      <Body contentClassName="px-[18px] py-6">
         <Text className="mb-[5px] text-[12.5px] text-faint">{request.referenceNumber}</Text>
         <View className="mb-6 flex-row items-center justify-between">
           <Text className="font-inter-black text-[20px] text-navy">{request.serviceType}</Text>
@@ -154,7 +154,7 @@ export default function RequestDetails() {
         <DocumentHistory request={request} />
         <AdditionalDocuments request={request} onUploaded={reload} />
         <Spacer />
-        <Button title={t('btn_track_details')} onPress={() => router.push(trackingRoute(request))} />
+        <Button title={t('btn_track_details')} onPress={() => router.push({ pathname: '/request-tracking', params: { id: request.id } })} />
       </Body>
     </Screen>
   );

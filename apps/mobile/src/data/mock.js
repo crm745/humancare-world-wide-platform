@@ -1,3 +1,4 @@
+import { supportedLanguages } from './languages';
 // Mock data mirroring interactive-prototype/app.html. Replace with API calls
 // (see docs/ROADMAP.md §3) once the mobile app is wired to the backend.
 import { COUNTRY_NAME_BY_ISO } from './countries';
@@ -79,14 +80,8 @@ export const FAQS = [
   { q: 'faq_q4', a: 'We have offices across 8 regions — India, UAE, Oman, Turkey, Canada, Kenya, Bangladesh and Singapore — plus a global network of 3,500+ partner hospitals.' },
 ];
 
-export const LANGUAGES = [
-  { code: 'EN', name: 'English', label: 'English (EN)' },
-  { code: 'HI', name: 'हिंदी (Hindi)', label: 'हिंदी (HI)' },
-  { code: 'MR', name: 'मराठी (Marathi)', label: 'मराठी (MR)' },
-  { code: 'GU', name: 'ગુજરાતી (Gujarati)', label: 'ગુજરાતી (GU)' },
-  { code: 'TE', name: 'తెలుగు (Telugu)', label: 'తెలుగు (TE)' },
-  { code: 'AR', name: 'العربية (Arabic)', label: 'العربية (AR)' },
-];
+// The language list is the registry's (data/languages.js); this keeps the { code, name, label } shape the sheet reads.
+export const LANGUAGES = supportedLanguages();
 
 // Full set of ITU-T E.164 international calling codes, so the country selector isn't
 // limited to a handful of markets. India/UAE/UK/US lead the list since they're our

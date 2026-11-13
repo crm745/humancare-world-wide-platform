@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../state/AppContext';
 import { SERVICE_TILES } from '../../data/mock';
 import { goBack } from '../../lib/nav';
-import { BackButton, Screen } from '../layout';
+import { Screen, TopBar } from '../layout';
 import { Button, Text } from '../ui';
 import { ServiceIconTile } from '../home/ServiceIcon';
 
@@ -120,10 +120,7 @@ export function RequestFrame({ step, children, firstError, onInvalid, onNext, ne
     <Screen bg="bg-canvas">
       {/* On a wide screen (tablet, browser) the form stays one centred column, like Home. */}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, width: '100%', maxWidth: 560, alignSelf: 'center' }}>
-        <View className="flex-row items-center gap-2.5 border-b border-line bg-white px-[18px] pb-3 pt-4">
-          <BackButton onPress={goBack} className="h-11 w-11" />
-          <Text className="flex-1 font-inter-black text-[17px] text-navy" accessibilityRole="header">{t('req_title')}</Text>
-        </View>
+        <TopBar title={t('req_title')} onBack={goBack} />
         <StepBar step={step} />
         <ScrollView
           ref={scrollRef} className="flex-1" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}

@@ -19,8 +19,8 @@ const PAGES = [
 // Create Account.
 const finish = () => router.push('/login');
 
-// Getting Started: two swipeable pages. Only the middle (illustration, heading, text)
-// scrolls when it doesn't fit; the dots and the button stay pinned at the bottom. The
+// Getting Started: two swipeable pages. The middle (illustration, heading, text)
+// is sized to fit and only scrolls if it truly cannot; the dots and the button stay pinned at the bottom. The
 // pager is laid out left to right even in Arabic, so page order and offsets stay the
 // same on every platform.
 export default function Welcome() {
@@ -35,6 +35,10 @@ export default function Welcome() {
   const indexRef = useRef(0);
   const [index, setIndex] = useState(0);
   const [listH, setListH] = useState(0);
+  const [overflows, setOverflows] = useState(false);
+  const [textH, setTextH] = useState(110); // heading + text, measured, because they wrap differently on every width
+  const layoutH = useRef(0);
+  const contentH = useRef(0);
   const [reduceMotion, setReduceMotion] = useState(false);
   const pageLabel = t('onboard_page').replace('{n}', index + 1).replace('{total}', PAGES.length);
 
@@ -82,10 +86,12 @@ export default function Welcome() {
     }
   };
 
-  const illustrationWidth = (() => {
-    const fit = Math.min(pageW - side * 2, 360);
-    return short ? Math.min(fit, height * 0.3 * 1.2) : fit; // 6:5, so height = width / 1.2
-  })();
+  // The page is sized to fit, so it does not scroll: what is not the illustration (Skip row, dots, button and gaps)
+  // take 180 + the bottom inset, the heading and text are measured, and the illustration gets what is left (6:5, so
+  // height = width / 1.2). Only when even that does not fit (very large system text) does it scroll.
+  const topPad = short ? 16 : 40;
+  const roomForImage = listH ? listH - (48 + 116 + 16) - textH - insets.bottom - topPad : Infinity;
+  const illustrationWidth = Math.max(96, Math.min(pageW - side * 2, 360, roomForImage * 1.2));
 
   return (
     <View style={{ flex: 1, backgroundColor: '#FFFFFF', paddingTop: insets.top, direction: 'ltr' }}>
@@ -118,22 +124,28 @@ export default function Welcome() {
                   </View>
                   <ScrollView
                     style={{ flex: 1 }}
-                    contentContainerStyle={{ flexGrow: 1, alignItems: 'center', paddingHorizontal: side, paddingTop: short ? 16 : 62, paddingBottom: 16 }}
+                    contentContainerStyle={{ flexGrow: 1, alignItems: 'center', paddingHorizontal: side, paddingTop: topPad, paddingBottom: 16 }}
                     showsVerticalScrollIndicator={false}
+                    bounces={false}
+                    scrollEnabled={overflows}
+                    onLayout={(e) => { layoutH.current = e.nativeEvent.layout.height; setOverflows(contentH.current > layoutH.current + 1); }}
+                    onContentSizeChange={(_, h) => { contentH.current = h; setOverflows(h > layoutH.current + 1); }}
                   >
                     <Image
                       source={item.image}
                       accessible={false}
                       importantForAccessibility="no"
                       resizeMode="contain"
-                      style={{ width: illustrationWidth, aspectRatio: 6 / 5 }}
+                      style={{ width: illustrationWidth, height: illustrationWidth / 1.2 }}
                     />
+                    <View onLayout={(e) => setTextH(Math.round(e.nativeEvent.layout.height))} style={{ alignItems: 'center' }}>
                     <Text className="font-inter-black" style={{ fontSize: 28, lineHeight: 34, letterSpacing: -0.3, color: '#0F1630', textAlign: 'center', marginTop: 40 }}>
                       {t(item.title)}
                     </Text>
                     <Text style={{ fontSize: 18, lineHeight: 26, color: '#2A3042', textAlign: 'center', maxWidth: item.bodyMaxWidth, marginTop: 12 }}>
                       {t(item.body)}
                     </Text>
+                    </View>
                   </ScrollView>
 
                   <View style={{ paddingHorizontal: side, paddingBottom: 24 + insets.bottom }}>

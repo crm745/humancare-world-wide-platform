@@ -559,6 +559,7 @@ describe('Google/Apple sign-in', () => {
       jest.doMock('../src/modules/auth/auth.service', () => ({
         ...jest.requireActual('../src/modules/auth/auth.service'),
         verifyGoogleIdToken: async () => google,
+        verifyAppleIdToken: async () => google,
       }));
       ctx = {
         app: require('../src/app').app,
@@ -580,15 +581,130 @@ describe('Google/Apple sign-in', () => {
     ...overrides,
   });
 
-  it('gives a brand-new Google user a sign-up ticket with their Google name and email, and creates nothing', async () => {
+  it('gives a brand-new Apple user a sign-up ticket with their Apple name and email, and creates nothing', async () => {
     const google = newGoogleUser();
     await withFakeGoogle(google, async ({ app: gApp }) => {
-      const res = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const res = await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' });
       expect(res.status).toBe(404);
       expect(res.body.code).toBe('no_account');
       expect(res.body.signupTicket).toEqual(expect.any(String));
       expect(res.body.profile).toEqual({ name: 'New Person', email: google.email });
       expect(await prisma.user.findFirst({ where: { email: google.email } })).toBeNull();
+    });
+  });
+
+  const bearer = (token) => ({ Authorization: `Bearer ${token}` });
+  const googleSignIn = (gApp) => request(gApp).post('/auth/google').send({ idToken: 'fake' });
+
+  it('signs a brand-new Google user straight in: the account is made from what Google vouched for, with no mobile and no consents', async () => {
+    const google = newGoogleUser();
+    await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
+      const res = await googleSignIn(gApp);
+      expect(res.status).toBe(200);
+      expect(res.body.token).toEqual(expect.any(String));
+      expect(res.body.refreshToken).toEqual(expect.any(String));
+      expect(res.body.signupTicket).toBeUndefined();
+      expect(res.body.user).toMatchObject({ name: 'New Person', email: google.email, mobile: null, isVerified: true, hasPassword: false });
+      const row = await gPrisma.user.findFirst({ where: { email: google.email }, include: { consents: true } });
+      expect(row).toMatchObject({ googleId: google.providerId, isVerified: true, mobile: null, gender: null, nationality: null, firstName: null, lastName: null });
+      expect(row.emailVerifiedAt).not.toBeNull();
+      expect(row.consents).toEqual([]);
+
+      const me = await request(gApp).get('/auth/me').set(bearer(res.body.token));
+      expect(me.status).toBe(200);
+      expect(me.body.user.id).toBe(row.id);
+      expect(me.body.user.mobile).toBeNull();
+
+      const again = await googleSignIn(gApp);
+      expect(again.status).toBe(200);
+      expect(again.body.user.id).toBe(row.id);
+      expect(await gPrisma.user.count({ where: { email: google.email } })).toBe(1);
+    });
+  });
+
+  it('uses the part of the email before the @ when Google gave no name', async () => {
+    const google = { ...newGoogleUser(), name: '' };
+    await withFakeGoogle(google, async ({ app: gApp }) => {
+      const res = await googleSignIn(gApp);
+      expect(res.status).toBe(200);
+      expect(res.body.user.name).toBe(google.email.split('@')[0]);
+    });
+  });
+
+  it('never creates an account for an email Google has not verified', async () => {
+    const google = { ...newGoogleUser(), emailVerified: false };
+    await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
+      const res = await googleSignIn(gApp);
+      expect(res.status).toBe(404);
+      expect(res.body.signupTicket).toBeUndefined();
+      expect(await gPrisma.user.count({ where: { email: google.email } })).toBe(0);
+    });
+  });
+
+  it('replaces a half-finished form sign-up for the same email, and leaves a verified account alone', async () => {
+    const pending = registerBody();
+    await request(app).post('/auth/register').send(pending); // never verified
+    await withFakeGoogle({ ...newGoogleUser(), email: pending.email }, async ({ app: gApp, prisma: gPrisma }) => {
+      const res = await googleSignIn(gApp);
+      expect(res.status).toBe(200);
+      expect(await gPrisma.user.count({ where: { email: pending.email } })).toBe(1);
+      expect((await gPrisma.user.findFirst({ where: { email: pending.email } })).isVerified).toBe(true);
+    });
+    const { user } = await createLegacyPatient(); // verified account whose email was never verified
+    await withFakeGoogle({ ...newGoogleUser(), email: user.email }, async ({ app: gApp, prisma: gPrisma }) => {
+      const res = await googleSignIn(gApp);
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('email_in_use');
+      expect(await gPrisma.user.count({ where: { email: user.email } })).toBe(1);
+      expect((await gPrisma.user.findUnique({ where: { id: user.id } })).googleId).toBeNull();
+    });
+  });
+
+  it('two sign-ins at the same moment create one account and both get it', async () => {
+    const google = newGoogleUser();
+    await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
+      const [one, two] = await Promise.all([googleSignIn(gApp), googleSignIn(gApp)]);
+      expect([one.status, two.status]).toEqual([200, 200]);
+      expect(one.body.user.id).toBe(two.body.user.id);
+      expect(await gPrisma.user.count({ where: { email: google.email } })).toBe(1);
+    });
+  });
+
+  it('records the sign-up and the sign-in without the token or the address', async () => {
+    const google = newGoogleUser();
+    await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
+      const res = await googleSignIn(gApp);
+      const events = await gPrisma.securityEvent.findMany({ where: { userId: res.body.user.id }, orderBy: { id: 'asc' } });
+      expect(events.map((e) => e.event)).toEqual(['register_completed', 'social_login_succeeded']);
+      expect(events[0].detail).toEqual({ provider: 'google', direct: true });
+      const text = JSON.stringify(events);
+      expect(text).not.toContain(google.email);
+      expect(text).not.toContain('fake');
+      expect(text).not.toContain(res.body.token);
+    });
+  });
+
+  it('lets that account add its mobile later with a code to the new number (no password needed)', async () => {
+    await withFakeGoogle(newGoogleUser(), async ({ app: gApp, deliverOtp: sent }) => {
+      const session = await googleSignIn(gApp);
+      const national = uniqueMobile();
+      const step = await request(gApp).post('/auth/me/contact').set(bearer(session.body.token)).send({ kind: 'mobile', mobile: national, countryCode: '+91' });
+      expect(step.status).toBe(200);
+      const code = sent.mock.calls.filter((c) => c[0] === `+91${national}`).pop()[1];
+      const done = await request(gApp).post('/auth/me/contact/verify-otp').set(bearer(session.body.token)).send({ ticket: step.body.ticket, code });
+      expect(done.status).toBe(200);
+      expect(done.body.user.mobile).toBe(`+91${national}`);
+    });
+  });
+
+  it('still gives a brand-new Apple user the sign-up ticket (mobile, OTP and consents)', async () => {
+    const apple = newGoogleUser();
+    await withFakeGoogle(apple, async ({ app: gApp, prisma: gPrisma }) => {
+      const res = await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' });
+      expect(res.status).toBe(404);
+      expect(res.body.code).toBe('no_account');
+      expect(res.body.signupTicket).toEqual(expect.any(String));
+      expect(await gPrisma.user.count({ where: { email: apple.email } })).toBe(0);
     });
   });
 
@@ -600,17 +716,17 @@ describe('Google/Apple sign-in', () => {
     });
   });
 
-  it('signs a new Google user up with mobile + OTP + consents, then signs them straight in next time', async () => {
+  it('signs a new Apple user up with mobile + OTP + consents, then signs them straight in next time', async () => {
     const google = newGoogleUser();
     await withFakeGoogle(google, async ({ app: gApp, deliverOtp: sent }) => {
-      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const first = await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' });
       const body = socialBody(first.body.signupTicket);
       const started = await request(gApp).post('/auth/social/register').send(body);
       expect(started.status).toBe(200);
       expect(started.body.ticket).toEqual(expect.any(String));
 
       // Nothing can sign in before the mobile is proven.
-      expect((await request(gApp).post('/auth/google').send({ idToken: 'fake' })).status).toBe(404);
+      expect((await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' })).status).toBe(404);
 
       const mobile = `+91${body.mobile}`;
       const code = sent.mock.calls.filter((c) => c[0] === mobile).pop()[1];
@@ -620,21 +736,21 @@ describe('Google/Apple sign-in', () => {
       expect(done.body.user).toMatchObject({ name: 'New Person', email: google.email, mobile, hasPassword: false });
 
       const user = await prisma.user.findFirst({ where: { email: google.email }, include: { consents: true } });
-      expect(user.googleId).toBe(google.providerId);
+      expect(user.appleId).toBe(google.providerId);
       expect(user.emailVerifiedAt).not.toBeNull();
       expect(user.consents.map((c) => [c.type, c.accepted]).sort()).toEqual([
         ['marketing', true], ['medical_disclaimer', true], ['terms_privacy', true],
       ]);
 
-      const again = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const again = await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' });
       expect(again.status).toBe(200);
       expect(again.body.user.id).toBe(user.id);
     });
   });
 
-  it('refuses the Google sign-up without the required consents or with a made-up ticket', async () => {
+  it('refuses the Apple sign-up without the required consents or with a made-up ticket', async () => {
     await withFakeGoogle(newGoogleUser(), async ({ app: gApp }) => {
-      const { body } = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const { body } = await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' });
       const noConsent = await request(gApp).post('/auth/social/register')
         .send(socialBody(body.signupTicket, { consents: { termsPrivacy: false } }));
       expect(noConsent.status).toBe(400);
@@ -646,10 +762,10 @@ describe('Google/Apple sign-in', () => {
     });
   });
 
-  it('saves gender, nationality and phone country from the Google sign-up step', async () => {
+  it('saves gender, nationality and phone country from the Apple sign-up step', async () => {
     const google = newGoogleUser();
     await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
-      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const first = await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' });
       const res = await request(gApp).post('/auth/social/register')
         .send(socialBody(first.body.signupTicket, { gender: 'male', nationality: 'AE', phoneCountry: 'IN' }));
       expect(res.status).toBe(200);
@@ -659,10 +775,10 @@ describe('Google/Apple sign-in', () => {
     });
   });
 
-  it('refuses bad gender, nationality or phone country on the Google sign-up step, and creates nothing', async () => {
+  it('refuses bad gender, nationality or phone country on the Apple sign-up step, and creates nothing', async () => {
     const google = newGoogleUser();
     await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
-      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const first = await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' });
       for (const bad of [{ gender: 'Male' }, { nationality: 'india' }, { phoneCountry: 'ZZ' }]) {
         const res = await request(gApp).post('/auth/social/register').send(socialBody(first.body.signupTicket, bad));
         expect(res.status).toBe(400);
@@ -675,10 +791,10 @@ describe('Google/Apple sign-in', () => {
     });
   });
 
-  it('checks the phone country against the number on the Google sign-up step, and infers it for an older app', async () => {
+  it('checks the phone country against the number on the Apple sign-up step, and infers it for an older app', async () => {
     const google = newGoogleUser();
     await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
-      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const first = await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' });
       const wrong = await request(gApp).post('/auth/social/register')
         .send(socialBody(first.body.signupTicket, { mobile: `416555${Date.now().toString().slice(-4)}`, countryCode: '+1', phoneCountry: 'US' }));
       expect(wrong.status).toBe(400);
@@ -694,7 +810,7 @@ describe('Google/Apple sign-in', () => {
   it('keeps the provider\'s single name as the full name, with first and last name empty', async () => {
     const google = newGoogleUser();
     await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
-      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const first = await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' });
       const res = await request(gApp).post('/auth/social/register').send(socialBody(first.body.signupTicket));
       expect(res.status).toBe(200);
       expect(await gPrisma.user.findFirst({ where: { email: google.email } })).toMatchObject({ name: 'New Person', firstName: null, lastName: null });
@@ -704,7 +820,7 @@ describe('Google/Apple sign-in', () => {
   it('takes first and last name when the provider gave none', async () => {
     const google = newGoogleUser();
     await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
-      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const first = await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' });
       const res = await request(gApp).post('/auth/social/register')
         .send(socialBody(first.body.signupTicket, { name: undefined, firstName: 'Kiran', lastName: 'Shah' }));
       expect(res.status).toBe(200);
@@ -712,10 +828,10 @@ describe('Google/Apple sign-in', () => {
     });
   });
 
-  it('signs a Google user up with only the Terms and Privacy consent', async () => {
+  it('signs a Apple user up with only the Terms and Privacy consent', async () => {
     const google = newGoogleUser();
     await withFakeGoogle(google, async ({ app: gApp, prisma: gPrisma }) => {
-      const first = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const first = await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' });
       const res = await request(gApp).post('/auth/social/register').send(socialBody(first.body.signupTicket, { consents: { termsPrivacy: true } }));
       expect(res.status).toBe(200);
       const user = await gPrisma.user.findFirst({ where: { email: google.email }, include: { consents: true } });
@@ -723,10 +839,10 @@ describe('Google/Apple sign-in', () => {
     });
   });
 
-  it('refuses a Google sign-up with a mobile number that already has an account', async () => {
+  it('refuses a Apple sign-up with a mobile number that already has an account', async () => {
     const patient = await createPatient();
     await withFakeGoogle(newGoogleUser(), async ({ app: gApp }) => {
-      const { body } = await request(gApp).post('/auth/google').send({ idToken: 'fake' });
+      const { body } = await request(gApp).post('/auth/apple').send({ idToken: 'fake', name: 'New Person' });
       const res = await request(gApp).post('/auth/social/register')
         .send(socialBody(body.signupTicket, { mobile: patient.mobile.replace('+91', '') }));
       expect(res.status).toBe(409);
@@ -747,19 +863,19 @@ describe('changing mobile or email', () => {
     expect(named.body.user.name).toBe('New Name');
   });
 
-  it('needs the current password', async () => {
+  it('does not ask for the current password: a wrong one is ignored, not refused', async () => {
     const patient = await createPatient();
     const res = await request(app).post('/auth/me/contact').set(auth(patient.token))
-      .send({ kind: 'mobile', mobile: uniqueMobile(), countryCode: '+91', password: 'WrongPass999' });
-    expect(res.status).toBe(401);
-    expect(res.body.code).toBe('invalid_password');
+      .send({ kind: 'mobile', mobile: uniqueMobile(), countryCode: '+91' });
+    expect(res.status).toBe(200);
+    expect(res.body.code).not.toBe('invalid_password');
   });
 
   it('changes the mobile after a code sent to the NEW number', async () => {
     const patient = await createPatient();
     const newMobile = uniqueMobile();
     const start = await request(app).post('/auth/me/contact').set(auth(patient.token))
-      .send({ kind: 'mobile', mobile: newMobile, countryCode: '+91', password: patient.password });
+      .send({ kind: 'mobile', mobile: newMobile, countryCode: '+91' });
     expect(start.status).toBe(200);
     const code = codeSentTo(`+91${newMobile}`);
     expect(code).toMatch(/^\d{6}$/);
@@ -778,7 +894,7 @@ describe('changing mobile or email', () => {
     const patient = await createPatient();
     const newEmail = uniqueEmail();
     const start = await request(app).post('/auth/me/contact').set(auth(patient.token))
-      .send({ kind: 'email', email: newEmail, password: patient.password });
+      .send({ kind: 'email', email: newEmail });
     expect(start.status).toBe(200);
     const done = await request(app).post('/auth/me/contact/verify-otp').set(auth(patient.token))
       .send({ ticket: start.body.ticket, code: codeSentTo(newEmail) });
@@ -791,17 +907,17 @@ describe('changing mobile or email', () => {
     const a = await createPatient();
     const b = await createPatient();
     const taken = await request(app).post('/auth/me/contact').set(auth(a.token))
-      .send({ kind: 'mobile', mobile: b.mobile.slice(3), countryCode: '+91', password: a.password });
+      .send({ kind: 'mobile', mobile: b.mobile.slice(3), countryCode: '+91' });
     expect(taken.status).toBe(409);
 
     const start = await request(app).post('/auth/me/contact').set(auth(a.token))
-      .send({ kind: 'email', email: uniqueEmail(), password: a.password });
+      .send({ kind: 'email', email: uniqueEmail() });
     const hijack = await request(app).post('/auth/me/contact/verify-otp').set(auth(b.token)).send({ ticket: start.body.ticket, code: '123456' });
     expect(hijack.status).toBe(401);
     expect(hijack.body.code).toBe('ticket_invalid');
   });
 
-  it('asks an account without a password to set one first', async () => {
+  it('lets an account without a password (Google/Apple) change its email the same way', async () => {
     // A session for an account with no password, the way a Google-only account has one.
     const { user } = await createLegacyPatient();
     const { issuePatientTokens } = require('../src/modules/auth/auth.service');
@@ -809,9 +925,12 @@ describe('changing mobile or email', () => {
 
     const me = await request(app).get('/auth/me').set(auth(token));
     expect(me.body.user.hasPassword).toBe(false);
-    const res = await request(app).post('/auth/me/contact').set(auth(token)).send({ kind: 'email', email: uniqueEmail(), password: 'x' });
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe('password_required');
+    const email = uniqueEmail();
+    const start = await request(app).post('/auth/me/contact').set(auth(token)).send({ kind: 'email', email });
+    expect(start.status).toBe(200);
+    const done = await request(app).post('/auth/me/contact/verify-otp').set(auth(token)).send({ ticket: start.body.ticket, code: codeSentTo(email) });
+    expect(done.status).toBe(200);
+    expect(done.body.user.email).toBe(email);
   });
 });
 
@@ -957,7 +1076,7 @@ describe('security event log', () => {
     const session = await request(app).post('/auth/login/verify-otp').send({ ticket: login.body.ticket, code: codeSentTo(patient.email) });
     const newMobile = uniqueMobile();
     const start = await request(app).post('/auth/me/contact').set('Authorization', `Bearer ${session.body.token}`)
-      .send({ kind: 'mobile', mobile: newMobile, countryCode: '+91', password: 'BrandNew456' });
+      .send({ kind: 'mobile', mobile: newMobile, countryCode: '+91' });
     await request(app).post('/auth/me/contact/verify-otp').set('Authorization', `Bearer ${session.body.token}`)
       .send({ ticket: start.body.ticket, code: codeSentTo(`+91${newMobile}`) });
 
@@ -1230,7 +1349,7 @@ describe('changing the mobile keeps mobile, country_code and phone_country toget
   const rand = (n) => String(Math.floor(Math.random() * 10 ** n)).padStart(n, '0');
   const auth = (token) => ({ Authorization: `Bearer ${token}` });
   const stored = (patient) => prisma.user.findUnique({ where: { id: patient.user.id } });
-  const start = (patient, body) => request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'mobile', password: patient.password, ...body });
+  const start = (patient, body) => request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'mobile', ...body });
   const verify = (patient, ticket, e164) => request(app).post('/auth/me/contact/verify-otp').set(auth(patient.token)).send({ ticket, code: codeSentTo(e164) });
   async function changeMobile(patient, body, e164) {
     const step = await start(patient, body);
@@ -1378,7 +1497,7 @@ describe('changing the mobile keeps mobile, country_code and phone_country toget
     const patient = await createPatient();
     const before = await stored(patient);
     const newEmail = uniqueEmail();
-    const step = await request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'email', email: newEmail, password: patient.password });
+    const step = await request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'email', email: newEmail });
     expect(step.status).toBe(200);
     const done = await request(app).post('/auth/me/contact/verify-otp').set(auth(patient.token)).send({ ticket: step.body.ticket, code: codeSentTo(newEmail) });
     expect(done.status).toBe(200);
@@ -1390,7 +1509,7 @@ describe('changing the mobile keeps mobile, country_code and phone_country toget
     const patient = await createPatient();
     const before = await stored(patient);
     const newEmail = uniqueEmail();
-    const step = await request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'email', email: newEmail, password: patient.password });
+    const step = await request(app).post('/auth/me/contact').set(auth(patient.token)).send({ kind: 'email', email: newEmail });
     expect(step.status).toBe(200);
     const payload = require('jsonwebtoken').decode(step.body.ticket);
     expect(payload).toMatchObject({ step: 'change_contact_otp', kind: 'email', dest: newEmail });

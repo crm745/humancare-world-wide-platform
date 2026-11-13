@@ -47,13 +47,20 @@ const CONSENT_VERSION = "2026-11-07";
 // three keys; their sign-ups are recorded under the wording they were actually shown.
 const LEGACY_CONSENT_VERSION = "2026-10-26";
 
-// Only the fields the app needs — never the hash, lockout counters or token version.
+// What a patient's own account looks like in an API response: an ALLOW-LIST, so a column added to `users` later is
+// private until it is added here. It never carries the password hash, the lockout counters, the token version, the
+// Google/Apple ids or the device's push token (those stay in the database for the backend's own use).
 // `hasPassword` is included when the row was loaded with its hash, so Edit Profile knows
 // whether a Google-only account must set a password before changing mobile/email.
+const PUBLIC_USER_FIELDS = [
+  "id", "name", "firstName", "lastName", "email", "mobile", "countryCode", "phoneCountry", "gender", "nationality",
+  "isVerified", "emailVerifiedAt", "createdAt",
+];
 
 function publicUser(user) {
-  const { passwordHash, failedLoginCount: _count, lockedUntil: _lock, tokenVersion: _tv, ...safe } = user;
-  return "passwordHash" in user ? { ...safe, hasPassword: !!passwordHash } : safe;
+  const safe = {};
+  for (const key of PUBLIC_USER_FIELDS) if (key in user) safe[key] = user[key];
+  return "passwordHash" in user ? { ...safe, hasPassword: !!user.passwordHash } : safe;
 }
 //the function for getting the session for the user after the login and registration and social login and also for the corporate login and refreshing the access token and also for the getMe
 // Tokens + profile for a freshly signed-in patient.
@@ -521,6 +528,25 @@ function socialEmailInUse(res) {
   });
 }
 
+// A new Google user whose email Google has verified is signed up on the spot, with nothing else asked: the account
+// holds the name and email Google vouched for (the email is already verified, so the account is too). Mobile, gender
+// and nationality are added later from Personal Details (the mobile through the usual code to the new number). No
+// consent rows are written here, by product decision. A half-finished sign-up for the same email or Google id is
+// replaced, as the form sign-up does. Returns the new user, or null when another request created the account first.
+async function createGoogleUser(payload) {
+  const email = normalizeEmail(payload.email);
+  const name = String(payload.name || "").trim().slice(0, 100) || email.split("@")[0];
+  await prisma.user.deleteMany({ where: { OR: [{ email }, { googleId: payload.providerId }], isVerified: false } });
+  try {
+    return await prisma.user.create({
+      data: { name, email, googleId: payload.providerId, emailVerifiedAt: new Date(), isVerified: true },
+    });
+  } catch (err) {
+    if (err.code === "P2002") return null;
+    throw err;
+  }
+}
+
 async function socialSignIn(req, res, provider, payload) {
   let user;
   try {
@@ -528,13 +554,30 @@ async function socialSignIn(req, res, provider, payload) {
   } catch (err) {
     if (!(err instanceof SocialEmailInUseError || err instanceof SocialNoAccountError)) throw err;
     const noAccount = err instanceof SocialNoAccountError;
+    // Only an email the provider has verified can become the account's (already verified) email.
+    const canSignUp = noAccount && payload.email && payload.emailVerified;
+    if (canSignUp && provider === "google") {
+      let created = await createGoogleUser(payload);
+      if (!created) {
+        // Created in the meantime by another request (a double tap): sign in to that account, or refuse if it is not theirs.
+        try {
+          created = await findSocialUser({ provider, ...payload });
+        } catch (again) {
+          if (!(again instanceof SocialEmailInUseError || again instanceof SocialNoAccountError)) throw again;
+          return socialEmailInUse(res);
+        }
+      } else {
+        await recordSecurityEvent(req, EVENTS.REGISTER_COMPLETED, { userId: created.id, detail: { provider, direct: true } });
+      }
+      await recordSecurityEvent(req, EVENTS.SOCIAL_LOGIN_SUCCEEDED, { userId: created.id, detail: { provider } });
+      return res.json(await sessionFor(created.id));
+    }
     await recordSecurityEvent(req, EVENTS.SOCIAL_LOGIN_REFUSED, {
       identifier: payload.email,
       detail: { provider, reason: noAccount ? "no_account" : "email_not_verified" },
     });
     if (!noAccount) return socialEmailInUse(res);
-    // Only an email the provider has verified can become the account's (already verified) email.
-    if (!payload.email || !payload.emailVerified) return socialNoAccount(res);
+    if (!canSignUp) return socialNoAccount(res);
     return res.status(404).json({
       error: "Finish creating your account.",
       code: "no_account",
@@ -785,49 +828,60 @@ async function getMe(req, res) {
   if (!user) return res.status(404).json({ error: "Account not found" });
   res.json({ user: publicUser(user) });
 }
-// Name only. Mobile and email are where the login code and password resets go, so they
-// change through requestContactChange/verifyContactChange (password + OTP) instead.
+// The patient's own personal details: the name (the full name, or first and last name), gender and nationality.
+// Mobile and email are where the login code and password resets go, so they change through
+// requestContactChange/verifyContactChange (a code to the new value) instead. Only the fields read below can change:
+// nothing else in the body (verification flags, ids, tokens, the push token, ...) is ever looked at, and the
+// account is always the one in the token, never one named in the body. Everything is checked before anything is
+// written, so a refused request changes nothing.
 async function updateMe(req, res) {
-  if (req.body.mobile !== undefined || req.body.email !== undefined || req.body.countryCode !== undefined) {
+  const body = req.body || {};
+  if (body.mobile !== undefined || body.email !== undefined || body.countryCode !== undefined || body.phoneCountry !== undefined) {
     return res.status(400).json({ error: "Mobile number and email are changed with a verification code, not here." });
   }
-  const name = req.body.name === undefined ? undefined : String(req.body.name).trim();
-  if (name !== undefined && name.length < 2) return res.status(400).json({ error: "Enter a valid name." });
 
-  const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { name: true } });
-  const renamed = !!name && name !== current?.name;
+  const data = {};
+
+  // Name: first and last name together, or a single full name (as before).
+  const hasParts = body.firstName !== undefined || body.lastName !== undefined;
+  if (hasParts) {
+    const names = readNameFields(body);
+    if (names.error) return res.status(400).json({ error: names.error });
+    Object.assign(data, { name: names.name, firstName: names.firstName, lastName: names.lastName });
+  } else if (body.name !== undefined) {
+    const name = String(body.name).trim();
+    if (name.length < 2) return res.status(400).json({ error: "Enter a valid name." });
+    const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { name: true } });
+    // A new single name no longer matches a stored first/last pair, so those are cleared (never guessed).
+    if (name !== current?.name) Object.assign(data, { name, firstName: null, lastName: null });
+  }
+
+  // Gender and nationality: the same values the sign-up form accepts, exactly. Only what is sent is changed.
+  const sent = (value) => value !== undefined && value !== null && value !== "";
+  if (sent(body.gender) || sent(body.nationality)) {
+    const profile = readProfileFields({ gender: body.gender, nationality: body.nationality });
+    if (profile.error) return res.status(400).json({ error: profile.error });
+    if (sent(body.gender)) data.gender = profile.gender;
+    if (sent(body.nationality)) data.nationality = profile.nationality;
+  }
+
   const user = await prisma.user.update({
     where: { id: req.user.id },
-    data: renamed ? { name, firstName: null, lastName: null } : {},
+    data,
     omit: { passwordHash: false },
   });
   res.json({ user: publicUser(user) });
 }
 
-// Change mobile/email, step 1: the current password, then a code to the NEW value. A
-// stolen session alone (no password) can't move either login factor to someone else.
+// Change mobile/email, step 1: the new value, then a code sent to the NEW value only. This is the agreed product
+// rule: no current password and no code to the old contact, so it works the same for password, Google and Apple
+// accounts. The account is the signed-in one (from the token, never the body), and nothing changes until step 2.
 async function requestContactChange(req, res) {
-  const { kind, password } = req.body;
+  const { kind } = req.body;
   if (kind !== "mobile" && kind !== "email") return res.status(400).json({ error: 'kind must be "mobile" or "email"' });
-  if (!password) return res.status(400).json({ error: "password is required" });
 
-  const user = await prisma.user.findUnique({ where: { id: req.user.id }, omit: { passwordHash: false } });
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
   if (!user || !user.isVerified) return res.status(404).json({ error: "Account not found" });
-  if (!user.passwordHash) {
-    return res.status(403).json({ error: "Set a password to change your mobile or email.", code: "password_required" });
-  }
-  if (user.lockedUntil && user.lockedUntil > new Date()) return lockedResponse(res, user.lockedUntil);
-  if (!(await comparePassword(password, user.passwordHash))) {
-    await recordSecurityEvent(req, EVENTS.CONTACT_CHANGE_FAILED, { userId: user.id, detail: { kind, reason: "wrong_password" } });
-    if (await recordFailedLogin(user)) {
-      await recordSecurityEvent(req, EVENTS.ACCOUNT_LOCKED, { userId: user.id, detail: { minutes: LOCKOUT_MINUTES } });
-      return lockedResponse(res, new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000));
-    }
-    return res.status(401).json({ error: "Incorrect password.", code: "invalid_password" });
-  }
-  if (user.failedLoginCount) {
-    await prisma.user.update({ where: { id: user.id }, data: { failedLoginCount: 0 } });
-  }
 
   let dest;
   let countryCode;
@@ -853,6 +907,7 @@ async function requestContactChange(req, res) {
   }
   const taken = await prisma.user.findFirst({ where: { [kind]: dest, isVerified: true, NOT: { id: user.id } } });
   if (taken) {
+    await recordSecurityEvent(req, EVENTS.CONTACT_CHANGE_FAILED, { userId: user.id, identifier: dest, detail: { kind, reason: "already_in_use" } });
     return res.status(409).json({
       error: kind === "mobile" ? "That mobile number is already in use by another account." : "That email is already in use by another account.",
     });

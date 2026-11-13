@@ -1,7 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getLocales } from 'expo-localization';
 import I18N from '../data/i18n.json';
+import { DEFAULT_LANGUAGE, isRtlLanguage, isSupportedLanguage, localeOf } from '../data/languages';
+import { setDateLocale } from '../lib/dateFormat';
+import { resolveInitialLanguage, saveLanguage } from '../lib/languagePreference';
+import { translate } from '../lib/translate';
 import { apiGet } from '../lib/api';
-import { getAccessToken } from '../lib/session';
+import { getAccessToken, onSessionChange } from '../lib/session';
+import { createAuthStore } from '../lib/authState';
 import { profileFromUser } from '../lib/profile';
 import { draftForService, needsCareLevel } from '../lib/requestForm';
 import { clearErrorsForPatch } from '../lib/privateCharter';
@@ -65,17 +72,45 @@ export function initialsOf(name) {
 }
 
 export function AppProvider({ children }) {
-  const [lang, setLang] = useState('EN');
+  // The language: restored (saved choice, else the phone's language, else English) before anything is shown, so no
+  // screen ever flashes the wrong language. Starting never writes; only choosing a language does.
+  const [lang, setLangState] = useState(DEFAULT_LANGUAGE);
+  const [langReady, setLangReady] = useState(false);
+  const langRef = useRef(DEFAULT_LANGUAGE);
   const [session, setSession] = useState('patient'); // 'patient' | 'corporate'
   const [profile, setProfile] = useState(INITIAL_PROFILE);
   const [draft, setDraft] = useState(INITIAL_DRAFT);
+  // Whether there is a valid session: 'loading' until the saved one has been checked with the server, then
+  // 'authed', 'anon' (none, or refused) or 'unreachable' (the server could not be asked). AuthGate reads it.
+  const [authStatus, setAuthStatus] = useState('loading');
   const [toastMsg, setToastMsg] = useState(null);
   // The API's field errors from the last refused submission, { apiField: message } or null. Kept
   // apart from the draft so the answers are never touched; changing a field clears its own error.
   const [serverErrors, setServerErrors] = useState(null);
   const toastTimer = useRef(null);
 
-  const t = useCallback((key) => (I18N[lang] && I18N[lang][key]) ?? I18N.EN[key] ?? key, [lang]);
+  const t = useCallback((key, values) => translate(I18N, lang, key, values), [lang]);
+
+  useEffect(() => {
+    let alive = true;
+    resolveInitialLanguage({ storage: AsyncStorage, getLocales }).then((code) => {
+      if (!alive) return;
+      langRef.current = code;
+      setDateLocale(localeOf(code));
+      setLangState(code);
+      setLangReady(true);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  // Chooses a language: an unknown code or the language already showing does nothing (and writes nothing).
+  const setLang = useCallback((code) => {
+    if (!isSupportedLanguage(code) || code === langRef.current) return;
+    langRef.current = code;
+    setDateLocale(localeOf(code));
+    setLangState(code);
+    saveLanguage(AsyncStorage, code);
+  }, []);
 
   const toast = useCallback((msg) => {
     setToastMsg(msg);
@@ -88,34 +123,44 @@ export function AppProvider({ children }) {
     setServerErrors((errors) => clearErrorsForPatch(errors, patch));
   }, []);
 
-  // Runs on every app/provider mount — not just the splash screen's — so a saved
-  // session still gets a real name/email loaded even when the browser is reloaded
-  // (or the app re-launched) directly on an already-authenticated screen like Home,
-  // not just when the user walks through Splash first.
-  useEffect(() => {
-    (async () => {
-      const token = await getAccessToken();
-      if (!token) return;
-      try {
-        const data = await apiGet('/auth/me');
-        const restored = profileFromMe(data);
-        setProfile(restored.profile);
-        setSession(restored.session);
-      } catch {
-        // Invalid/expired session — apiFetch already clears the tokens and redirects
-        // to Welcome on an unrecoverable 401, nothing more to do here.
+  // The authentication state (lib/authState.js). It becomes 'authed' only when the server accepted the saved
+  // session, or has just issued credentials (a login); saving or renewing tokens grants nothing by itself.
+  const authStore = useMemo(() => createAuthStore({
+    getToken: getAccessToken,
+    fetchMe: (signal) => apiGet('/auth/me', { signal, validation: true }),
+    onChange: (status, me) => {
+      setAuthStatus(status);
+      if (status === 'authed' && me) {
+        // Loads the real name/email, also after a reload straight onto a protected screen.
+        try {
+          const restored = profileFromMe(me);
+          setProfile(restored.profile);
+          setSession(restored.session);
+        } catch { /* a profile that cannot be read leaves the session valid; the screens show what they have */ }
       }
-    })();
-  }, []);
+    },
+  }), []);
+
+  useEffect(() => {
+    // Signing in (a login, an account activation) or out (tokens cleared) is announced by lib/session.js.
+    const unsubscribe = onSessionChange((signedIn) => (signedIn ? authStore.signedIn() : authStore.signedOut()));
+    Promise.resolve().then(authStore.validate);
+    return unsubscribe;
+  }, [authStore]);
+
+  const retryAuth = authStore.retry;
 
   const value = useMemo(
     () => ({
       lang,
       setLang,
-      isRTL: lang === 'AR',
+      isRTL: isRtlLanguage(lang),
+      locale: localeOf(lang),
       t,
       session,
       setSession,
+      authStatus,
+      retryAuth,
       isCorporate: session === 'corporate',
       profile,
       setProfile,
@@ -127,9 +172,11 @@ export function AppProvider({ children }) {
       toast,
       toastMsg,
     }),
-    [lang, t, session, profile, draft, updateDraft, serverErrors, toast, toastMsg]
+    [lang, setLang, t, session, authStatus, retryAuth, profile, draft, updateDraft, serverErrors, toast, toastMsg]
   );
 
+  // Nothing is drawn until the language is known (a moment at most); sign-in restoration above keeps running.
+  if (!langReady) return null;
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 

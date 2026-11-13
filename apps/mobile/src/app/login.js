@@ -9,6 +9,7 @@ import { PasswordField, Select } from '../components/widgets';
 import { navReplace } from '../lib/nav';
 import { apiPost } from '../lib/api';
 import { saveTokens } from '../lib/session';
+import { postSignInRoute } from '../lib/tokens';
 import { codeStepFrom, setAuthStep } from '../lib/authFlow';
 import { profileFromUser } from '../lib/profile';
 import { useSocialAuth } from '../lib/useSocialAuth';
@@ -85,11 +86,15 @@ export default function Login() {
     setFormError(null);
   };
 
-  const afterSocialLogin = async ({ token, refreshToken, user }) => {
-    await saveTokens({ token, refreshToken });
-    if (user) setProfile(profileFromUser(user));
+  // Google / Apple: the response must carry usable credentials before anyone is signed in (saveTokens refuses
+  // a missing or empty token and stores and announces nothing), and the profile is read before they are saved.
+  const afterSocialLogin = async ({ token, refreshToken, user }, attempt) => {
+    const destination = postSignInRoute('patient');
+    const profile = user ? profileFromUser(user) : null;
+    await saveTokens({ token, refreshToken }, { signIn: true, attempt });
+    if (profile) setProfile(profile);
     setSession('patient');
-    navReplace('/home');
+    navReplace(destination);
   };
 
   const socialButtons = useSocialAuth({ toast, afterSocialLogin });

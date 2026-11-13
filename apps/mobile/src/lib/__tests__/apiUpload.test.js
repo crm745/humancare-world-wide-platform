@@ -14,7 +14,9 @@ jest.mock('../session', () => ({
   getAccessToken: jest.fn(),
   getRefreshToken: jest.fn(),
   saveTokens: jest.fn(),
+  compareAndSaveTokens: jest.fn(),
   clearTokens: jest.fn(),
+  compareAndClearTokens: jest.fn(),
 }));
 jest.mock('../nav', () => ({ navReplace: jest.fn() }));
 
@@ -22,6 +24,7 @@ const { Platform } = require('react-native');
 const FileSystem = require('expo-file-system/legacy');
 const session = require('../session');
 const { navReplace } = require('../nav');
+const { setApiAuthStatus } = require('../authGuard');
 const { apiUpload } = require('../api');
 
 const PATH = '/requests/me/5/documents';
@@ -72,11 +75,13 @@ FakeXHR.answers = [];
 const realFetch = global.fetch;
 const realXHR = global.XMLHttpRequest;
 
-function fakeFetch(refresh = { ok: true, json: { token: 'new-token', refreshToken: 'new-refresh' } }) {
+function fakeFetch(refresh = { ok: true, json: { token: 'new-token', refreshToken: 'new-refresh' } }, me = { status: 200 }) {
   const calls = [];
   global.fetch = jest.fn(async (url) => {
     calls.push(url);
-    if (String(url).endsWith('/auth/refresh')) return { ok: refresh.ok, json: async () => refresh.json };
+    if (String(url).endsWith('/auth/refresh') && refresh.throws) throw new TypeError('Network request failed');
+    if (String(url).endsWith('/auth/me')) return { ok: me.status < 400, status: me.status, json: async () => ({}) };
+    if (String(url).endsWith('/auth/refresh')) return { ok: refresh.ok, status: refresh.ok ? 200 : (refresh.status || 401), json: async () => refresh.json };
     return { blob: async () => new Blob(['%PDF-1.4'], { type: 'application/pdf' }) }; // the picked file's blob: URL
   });
   return calls;
@@ -90,8 +95,10 @@ beforeEach(() => {
   session.getAccessToken.mockResolvedValue('tok');
   session.getRefreshToken.mockResolvedValue('rt');
   // Like the real session store: after a refresh, the next read returns the new token.
-  session.saveTokens.mockImplementation(async ({ token }) => { session.getAccessToken.mockResolvedValue(token); });
+  session.compareAndSaveTokens.mockImplementation(async ({ token }) => { session.getAccessToken.mockResolvedValue(token); return true; });
+  setApiAuthStatus('authed'); // a signed-in person: protected calls are sent
   session.clearTokens.mockResolvedValue(undefined);
+  session.compareAndClearTokens.mockResolvedValue('cleared');
   FakeXHR.instances = [];
   FakeXHR.answers = [];
   global.XMLHttpRequest = FakeXHR;
@@ -165,7 +172,7 @@ describe('apiUpload on native', () => {
     expect(tasks[0].options.headers).toEqual({ Authorization: 'Bearer tok' });
     expect(tasks[1].options.headers).toEqual({ Authorization: 'Bearer new-token' });
     expect(tasks[1].options.parameters).toEqual({ replacesDocumentId: '12' });
-    expect(session.saveTokens).toHaveBeenCalledWith({ token: 'new-token', refreshToken: 'new-refresh' });
+    expect(session.compareAndSaveTokens).toHaveBeenCalledWith({ expectedRefreshToken: 'rt', token: 'new-token', refreshToken: 'new-refresh' });
   });
 
   test('a 401 retry without fields still sends none', async () => {
@@ -179,7 +186,7 @@ describe('apiUpload on native', () => {
     fakeFetch({ ok: false, json: { error: 'Session expired' } });
     fakeNativeServer({ status: 401, body: '{}' });
     await expect(apiUpload(PATH, FILE, false, undefined, { replacesDocumentId: 12 })).rejects.toThrow('Your session expired. Please log in again.');
-    expect(session.clearTokens).toHaveBeenCalled();
+    expect(session.compareAndClearTokens).toHaveBeenCalled();
     expect(navReplace).toHaveBeenCalledWith('/login');
   });
 
@@ -188,6 +195,55 @@ describe('apiUpload on native', () => {
     await expect(apiUpload(PATH, FILE, false, undefined, { replacesDocumentId: 99 })).rejects.toThrow('The document to replace was not found.');
     fakeNativeServer({ status: 500, body: 'not json' });
     await expect(apiUpload(PATH, FILE)).rejects.toThrow('Upload failed. Please try again.');
+  });
+});
+
+describe('apiUpload on native: refresh failures (revision 3)', () => {
+  const kept = () => {
+    expect(session.compareAndClearTokens).not.toHaveBeenCalled();
+    expect(navReplace).not.toHaveBeenCalled();
+  };
+  test('a network failure while refreshing keeps the credentials and says the server could not be reached', async () => {
+    fakeFetch({ throws: true });
+    fakeNativeServer({ status: 401, body: '{}' });
+    await expect(apiUpload(PATH, FILE)).rejects.toMatchObject({ code: 'network' });
+    kept();
+  });
+  test.each([[500], [503]])('a refresh answering HTTP %i keeps the credentials', async (status) => {
+    fakeFetch({ ok: false, status, json: { error: 'down' } });
+    fakeNativeServer({ status: 401, body: '{}' });
+    await expect(apiUpload(PATH, FILE)).rejects.toMatchObject({ code: 'network' });
+    kept();
+  });
+  test('an invalid refresh token (401) signs out and goes to Login', async () => {
+    fakeFetch({ ok: false, status: 401, json: { error: 'Invalid or expired refresh token' } });
+    fakeNativeServer({ status: 401, body: '{}' });
+    await expect(apiUpload(PATH, FILE)).rejects.toMatchObject({ code: 'session_expired' });
+    expect(session.compareAndClearTokens).toHaveBeenCalledTimes(1);
+    expect(navReplace).toHaveBeenCalledWith('/login');
+  });
+  test('a retry that also answers 401: signed out only if the server says the session is invalid', async () => {
+    fakeFetch(undefined, { status: 401 });
+    fakeNativeServer({ status: 401, body: '{}' }, { status: 401, body: '{}' });
+    await expect(apiUpload(PATH, FILE)).rejects.toMatchObject({ code: 'session_expired' });
+    expect(session.compareAndClearTokens).toHaveBeenCalledTimes(1);
+    jest.clearAllMocks();
+    session.getAccessToken.mockResolvedValue('tok');
+    session.getRefreshToken.mockResolvedValue('rt');
+    session.compareAndSaveTokens.mockImplementation(async ({ token }) => { session.getAccessToken.mockResolvedValue(token); return true; });
+    session.clearTokens.mockResolvedValue(undefined);
+  session.compareAndClearTokens.mockResolvedValue('cleared');
+    fakeFetch(undefined, { status: 200 }); // the session is fine: the 401 was the endpoint's own
+    fakeNativeServer({ status: 401, body: '{}' }, { status: 401, body: JSON.stringify({ error: 'Not allowed' }) });
+    await expect(apiUpload(PATH, FILE)).rejects.toThrow('Not allowed');
+    kept();
+  });
+  test('while the session is unresolved nothing is uploaded', async () => {
+    const { setApiAuthStatus } = require('../authGuard');
+    setApiAuthStatus('unreachable');
+    const tasks = fakeNativeServer();
+    await expect(apiUpload(PATH, FILE)).rejects.toMatchObject({ code: 'session_unverified' });
+    expect(tasks).toHaveLength(0);
   });
 });
 
@@ -249,13 +305,57 @@ describe('apiUpload on web', () => {
     fakeFetch({ ok: false, json: { error: 'Session expired' } });
     FakeXHR.answers = [{ status: 401, body: '{}' }];
     await expect(apiUpload(PATH, FILE, false, undefined, { replacesDocumentId: 12 })).rejects.toThrow('Your session expired. Please log in again.');
-    expect(session.clearTokens).toHaveBeenCalled();
+    expect(session.compareAndClearTokens).toHaveBeenCalled();
     expect(navReplace).toHaveBeenCalledWith('/login');
   });
 
   test('a server error carries the server message', async () => {
     FakeXHR.answers = [{ status: 400, body: JSON.stringify({ error: 'The document to replace was not found.' }) }];
     await expect(apiUpload(PATH, FILE, false, undefined, { replacesDocumentId: 99 })).rejects.toThrow('The document to replace was not found.');
+  });
+});
+
+describe('apiUpload on web: refresh failures (revision 3)', () => {
+  beforeEach(() => { Platform.OS = 'web'; });
+  const kept = () => {
+    expect(session.compareAndClearTokens).not.toHaveBeenCalled();
+    expect(navReplace).not.toHaveBeenCalled();
+  };
+  test('a network failure while refreshing keeps the credentials', async () => {
+    fakeFetch({ throws: true });
+    FakeXHR.answers = [{ status: 401, body: '{}' }];
+    await expect(apiUpload(PATH, FILE)).rejects.toMatchObject({ code: 'network' });
+    kept();
+  });
+  test.each([[500], [503]])('a refresh answering HTTP %i keeps the credentials', async (status) => {
+    fakeFetch({ ok: false, status, json: { error: 'down' } });
+    FakeXHR.answers = [{ status: 401, body: '{}' }];
+    await expect(apiUpload(PATH, FILE)).rejects.toMatchObject({ code: 'network' });
+    kept();
+  });
+  test('an invalid refresh token (401) signs out and goes to Login', async () => {
+    fakeFetch({ ok: false, status: 401, json: { error: 'Invalid or expired refresh token' } });
+    FakeXHR.answers = [{ status: 401, body: '{}' }];
+    await expect(apiUpload(PATH, FILE)).rejects.toMatchObject({ code: 'session_expired' });
+    expect(session.compareAndClearTokens).toHaveBeenCalledTimes(1);
+    expect(navReplace).toHaveBeenCalledWith('/login');
+  });
+  test('a retry that also answers 401, with the server confirming the session is invalid, signs out', async () => {
+    fakeFetch(undefined, { status: 401 });
+    FakeXHR.answers = [{ status: 401, body: '{}' }, { status: 401, body: '{}' }];
+    await expect(apiUpload(PATH, FILE)).rejects.toMatchObject({ code: 'session_expired' });
+    expect(session.compareAndClearTokens).toHaveBeenCalledTimes(1);
+  });
+  test('a retry that fails with an ordinary error after a good refresh does not sign out', async () => {
+    FakeXHR.answers = [{ status: 401, body: '{}' }, { status: 400, body: JSON.stringify({ error: 'Bad file' }) }];
+    await expect(apiUpload(PATH, FILE)).rejects.toThrow('Bad file');
+    kept();
+  });
+  test('while the session is unresolved nothing is uploaded', async () => {
+    const { setApiAuthStatus } = require('../authGuard');
+    setApiAuthStatus('error');
+    await expect(apiUpload(PATH, FILE)).rejects.toMatchObject({ code: 'session_unverified' });
+    expect(FakeXHR.instances).toHaveLength(0);
   });
 });
 

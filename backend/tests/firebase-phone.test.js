@@ -148,7 +148,7 @@ describe('changing the mobile with Firebase', () => {
     const newMobile = `+91${newNational}`;
     const auth = { Authorization: `Bearer ${token}` };
     const step = await request(app).post('/auth/me/contact').set(auth)
-      .send({ kind: 'mobile', mobile: newNational, countryCode: '+91', password: PASSWORD });
+      .send({ kind: 'mobile', mobile: newNational, countryCode: '+91' });
     expect(step.body.phoneVerification).toBe('firebase');
     expect(step.body.phoneNumber).toBe(newMobile);
 
@@ -165,13 +165,13 @@ describe('changing the mobile with Firebase', () => {
     const uae = `50${String(Math.floor(Math.random() * 1e7)).padStart(7, '0')}`;
 
     const wrong = await request(app).post('/auth/me/contact').set(auth)
-      .send({ kind: 'mobile', mobile: uae, countryCode: '+971', phoneCountry: 'IN', password: PASSWORD });
+      .send({ kind: 'mobile', mobile: uae, countryCode: '+971', phoneCountry: 'IN' });
     expect(wrong.status).toBe(400);
     expect(wrong.body.code).toBe('phone_country_mismatch');
     expect(wrong.body.ticket).toBeUndefined();
 
     const step = await request(app).post('/auth/me/contact').set(auth)
-      .send({ kind: 'mobile', mobile: uae, countryCode: '+971', phoneCountry: 'AE', password: PASSWORD });
+      .send({ kind: 'mobile', mobile: uae, countryCode: '+971', phoneCountry: 'AE' });
     expect(step.status).toBe(200);
     expect(step.body.phoneVerification).toBe('firebase');
     expect(step.body.phoneNumber).toBe(`+971${uae}`);
