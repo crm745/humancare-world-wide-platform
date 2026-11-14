@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { TextInput, View } from 'react-native';
+import { useFormInput } from '../../components/keyboard';
 import { router } from 'expo-router';
 import { Accessibility, Activity, BedDouble, PersonStanding } from 'lucide-react-native';
 import { needsCareLevel, useApp } from '../../state/AppContext';
@@ -8,6 +9,13 @@ import { firstAnchorOnStep, isPrivateCharter, needsDocument } from '../../lib/pr
 import { Anchor, RequestFrame } from '../../components/request/RequestFrame';
 import { ChoiceChips, FieldError, FieldHeader, ReportTiles, SwitchRow } from '../../components/request/fields';
 import { CARE_LEVELS } from '../../components/ui';
+
+// The description is multiline: Return adds a line, and the cursor line stays above the keyboard while it grows. It is its own component
+// because it has to sit below the form (the hook reads the form it is in).
+function DescriptionInput(props) {
+  const form = useFormInput({ multiline: true });
+  return <TextInput {...form} {...props} />;
+}
 
 const MOBILITY_ICONS = { bedridden: BedDouble, wheelchair: Accessibility, walking: PersonStanding };
 
@@ -42,7 +50,7 @@ export default function RequestStep2() {
         <FieldHeader title={t(mortal ? 'req_details' : 'req_condition')} />
         <View className="min-h-[88px] flex-row gap-2.5 rounded-2xl border-[1.5px] border-field bg-white p-3.5">
           <View className="pt-0.5"><Activity size={18} color="#97A4B8" strokeWidth={2} /></View>
-          <TextInput
+          <DescriptionInput
             multiline textAlignVertical="top" value={draft.desc} onChangeText={(desc) => updateDraft({ desc })}
             accessibilityLabel={t(mortal ? 'req_details' : 'req_condition')}
             placeholder={t(mortal ? 'req_details_placeholder' : 'req_condition_placeholder')} placeholderTextColor="#97A4B8"

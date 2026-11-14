@@ -164,7 +164,9 @@ describe('screen states', () => {
     expect(screen).toContain('if (isCorporate)');
   });
   test('loading, failure with a retry, and an empty state', () => {
-    expect(screen).toContain('<LoadingState />');
+    expect(screen).toContain("{loading && gate.visible ? <FormSkeleton label={t('sk_loading_profile')} fields={6} /> : null}");
+    expect(screen).not.toContain('LoadingState');
+    expect(screen).not.toContain('RefreshControl'); // a form is never pulled to refresh
     expect(screen).toContain("t('pd_try_again')");
     expect(screen).toContain("t('pd_nothing_yet')");
   });

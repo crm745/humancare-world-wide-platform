@@ -166,13 +166,13 @@ describe('wiring (source checks)', () => {
     expect(screen).toMatch(/if \(s\.kind === 'review'\) return <ReviewBanner request=\{request\} \/>;/);
     expect(screen).toMatch(/<DocumentHistory request=\{request\} styled \/>/);
     expect(screen).toMatch(/<AdditionalDocuments request=\{request\} onUploaded=\{reload\} \/>/);
-    expect(screen).toMatch(/const reload = \(\) => apiGet\(`\/requests\/me\/\$\{id\}`\)\s*\.then\(\(\{ request: r \}\) => setRequest\(r\)\)/);
+    expect(screen).toContain("fetcher: () => apiGet(`/requests/me/${id}`).then(({ request: r }) => r),");
   });
 
   test('the Documents section lists every file of the request (documentRows), and only a Case document opens', () => {
     expect(screen).toMatch(/const view = detailsView\(request, t\)/);
     expect(screen).toMatch(/const docs = view\.documents;/);
-    expect(screen).toMatch(/downloadAndShare\(`\/documents\/\$\{doc\.id\}\/file`, doc\.name\)/);
+    expect(screen).toContain('openDocumentPreview(router.push, doc)');
     expect(screen).not.toMatch(/request\.case\?\.documents/);
   });
 

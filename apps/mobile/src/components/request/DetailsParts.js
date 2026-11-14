@@ -3,6 +3,7 @@ import { Platform, Pressable, Text, View } from 'react-native';
 import { ChevronLeft } from 'lucide-react-native';
 import Svg, { Line } from 'react-native-svg';
 import { COLORS } from '../../theme/colors';
+import { useApp } from '../../state/AppContext';
 
 // The building blocks of the Request Details screen, drawn to the design: a section label above a white card, and a
 // label-over-value field whose value always wraps (nothing runs off the screen, however long).
@@ -11,6 +12,13 @@ export const C = { navy: '#0D2340', ink: '#17233D', muted: '#5B6B84', line: '#E4
 
 // A long word or an address with no spaces breaks instead of widening the card (on the web the browser needs telling).
 export const WRAP = Platform.OS === 'web' ? { overflowWrap: 'anywhere', wordBreak: 'break-word' } : null;
+
+// A text that is aligned to the START of the app's direction (right in Arabic), whatever script its content is in. Without this, an English
+// value (a name, an address) in an Arabic screen sits at the left while its Arabic label sits at the right.
+export function AlignedText({ style, ...props }) {
+  const { isRTL } = useApp();
+  return <Text {...props} style={[style, { textAlign: isRTL ? 'right' : 'left' }]} />;
+}
 
 // 12/16/800 uppercase, #5B6B84, 4 from the left, 8 above its card. A heading for screen readers.
 export function Section({ title, children }) {
@@ -40,8 +48,8 @@ export function Card({ children, big, padding, style }) {
 export function Field({ label, value, style }) {
   return (
     <View style={[{ minWidth: 0, gap: 2 }, style]}>
-      <Text style={{ fontFamily: FONT[600], fontSize: 12.5, lineHeight: 16, color: C.muted }}>{label}</Text>
-      <Text style={[{ fontFamily: FONT[700], fontSize: 15, lineHeight: 21, color: C.ink, flexShrink: 1 }, WRAP]}>{value}</Text>
+      <AlignedText style={{ fontFamily: FONT[600], fontSize: 12.5, lineHeight: 16, color: C.muted }}>{label}</AlignedText>
+      <AlignedText style={[{ fontFamily: FONT[700], fontSize: 15, lineHeight: 21, color: C.ink, flexShrink: 1 }, WRAP]}>{value}</AlignedText>
     </View>
   );
 }

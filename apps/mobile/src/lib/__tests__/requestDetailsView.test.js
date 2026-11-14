@@ -254,9 +254,9 @@ describe('the whole screen model', () => {
     const mortal = { ...base, serviceKey: 'mortal_international', serviceType: 'Mortal Remains — International', deceasedRelation: 'Son', placeOfDeath: 'Dubai Hospital, Dubai', dateOfDeath: '2026-11-10T00:00:00.000Z' };
     const view = V.detailsView(mortal, t);
     expect(view.patient.titleKey).toBe('rd_deceased');
-    expect(view.patient.fields.find((f) => f.key === 'name').label).toBe('Deceased Name');
+    expect(view.patient.fields.find((f) => f.key === 'name').label).toBe('Deceased name');
     expect(view.patient.fields.filter((f) => ['relation', 'deathPlace', 'deathDate'].includes(f.key)).map((f) => [f.value, f.full])).toEqual([['Son', true], ['Dubai Hospital, Dubai', true], ['10 Nov 2026', true]]);
-    expect(view.trip.rows.map((r) => r.label)).toEqual(['Preferred transfer date', 'Transfer Type']);
+    expect(view.trip.rows.map((r) => r.label)).toEqual(['Preferred transfer date', 'Transfer type']);
     expect(view.medical.conditionLabel).toBe('Details');
   });
   test('Commercial Airlines adds the travel type to the trip', () => {
@@ -285,9 +285,9 @@ describe('documents', () => {
   test('every case document is a row that opens, with type, extension, size and date', () => {
     const rows = V.documentRows(caseDocs, t);
     expect(rows).toHaveLength(3);
-    expect(rows[0]).toMatchObject({ id: 1, openable: true, isImage: false, ext: 'PDF', meta: 'Medical Report · PDF · 1.2 MB · 13 Nov' });
-    expect(rows[1]).toMatchObject({ openable: true, isImage: true, ext: 'PNG', meta: 'Medical Report · PNG · 640 KB · 13 Nov' });
-    expect(rows[2].meta).toBe('Death Certificate');
+    expect(rows[0]).toMatchObject({ id: 1, openable: true, isImage: false, ext: 'PDF', meta: 'Medical report · PDF · 1.2 MB · 13 Nov' });
+    expect(rows[1]).toMatchObject({ openable: true, isImage: true, ext: 'PNG', meta: 'Medical report · PNG · 640 KB · 13 Nov' });
+    expect(rows[2].meta).toBe('Death certificate');
   });
   test('a review-workflow request lists only its current documents, display-only, with status and reason', () => {
     const request = { ...charter, reviewStatus: 'changes_requested', requestDocuments: [

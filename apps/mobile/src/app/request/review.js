@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { Text } from 'react-native';
 import { router } from 'expo-router';
 import { needsCareLevel, useApp } from '../../state/AppContext';
 import SERVICES from '../../data/services.json';
-import { EQUIPMENT_OPTIONS, isMortal, requestService } from '../../data/mock';
+import { isMortal, requestService } from '../../data/mock';
 import { navReplace } from '../../lib/nav';
 import { apiPost, apiUpload } from '../../lib/api';
 import { runSubmission } from '../../lib/requestUploads';
@@ -11,25 +11,10 @@ import {
   buildPrivateCharterPayload, fieldErrorsFromError, firstErrorLocation, isPrivateCharter, needsDocument, unplacedMessages,
 } from '../../lib/privateCharter';
 import { goToStep, RequestFrame } from '../../components/request/RequestFrame';
-import { InfoRow, SectionLabel, Text } from '../../components/ui';
-
-// One block of the summary, with a link that goes back to where its answers were given.
-function Section({ title, rows, onEdit, editLabel }) {
-  const shown = rows.filter(([, value]) => value !== undefined);
-  return (
-    <View className="rounded-2xl border border-line bg-white px-3.5 pb-1.5 pt-3">
-      <View className="flex-row items-center justify-between">
-        <SectionLabel>{title}</SectionLabel>
-        <Pressable onPress={onEdit} accessibilityRole="button" accessibilityLabel={`${editLabel}: ${title}`} className="-mr-2 -mt-3 min-h-[44px] justify-center px-2 active:opacity-70">
-          <Text className="font-inter-bold text-[13px] text-primary">{editLabel}</Text>
-        </Pressable>
-      </View>
-      <View className="-mt-2">
-        {shown.map(([label, value], i) => <InfoRow key={label} label={label} value={value || '—'} last={i === shown.length - 1} />)}
-      </View>
-    </View>
-  );
-}
+import { Card, FONT } from '../../components/request/DetailsParts';
+import { DocumentRow, MedicalCard, PatientGrid, Trip } from '../../components/request/DetailsBlocks';
+import { ReviewSection, ServiceCard } from '../../components/request/ReviewParts';
+import { reviewView } from '../../lib/reviewView';
 
 // Step 3 of 3: check everything, then submit.
 export default function RequestReview() {
@@ -38,9 +23,8 @@ export default function RequestReview() {
   // null while the files are not uploading; otherwise which file, out of how many, and how far.
   const [uploading, setUploading] = useState(null);
   const { title: serviceTitle, key: serviceKey } = requestService(d, SERVICES);
-  const mortal = isMortal(d.service);
   const transport = needsCareLevel(d.service);
-  const onBoard = EQUIPMENT_OPTIONS.filter(([field]) => d[field]).map(([, , labelKey]) => t(labelKey)).join(', ');
+  const mortal = isMortal(d.service);
 
   const changeService = () => {
     updateDraft({ changingService: true });
@@ -135,50 +119,44 @@ export default function RequestReview() {
     }
   };
 
-  const edit = t('req_edit');
   // While files upload the button itself says how far it is: nothing sits under the button.
   const label = uploading
     ? t('req_uploading').replace('{i}', uploading.index).replace('{n}', uploading.total).replace('{p}', Math.round(uploading.progress * 100))
     : undefined;
 
+  // What is shown: worked out in lib/reviewView.js (empty fields and empty sections are left out). Each Edit goes to the step that holds that
+  // section, as before; Change picks another service from the form.
+  const view = reviewView(d, { key: serviceKey, title: serviceTitle }, t);
+
   return (
-    <RequestFrame step={3} showService={false} onNext={submit} busy={busy} nextKey="req_submit" label={label}>
-      <Text className="text-center text-[13.5px] text-muted">{t('review_sub')}</Text>
-      <Section title={t('lbl_service')} onEdit={changeService} editLabel={t('req_change')} rows={[[t('lbl_service'), serviceTitle]]} />
-      <Section
-        title={t(mortal ? 'step1_heading_mortal' : 'step1_heading')} onEdit={() => goToStep(1)} editLabel={edit}
-        rows={[
-          [t(mortal ? 'lbl_deceased_name' : 'lbl_patient_name'), d.name],
-          [t(mortal ? 'lbl_age_gender_plain' : 'lbl_age_gender'), `${d.age || '—'} Y / ${d.gender}`],
-          ...(mortal ? [[t('lbl_relation'), d.relation], [t('field_place_of_death'), d.deathPlace], [t('field_date_of_death'), d.deathDate]] : []),
-          [t('field_contact_number'), d.phone && `${d.cc} ${d.phone}`],
-        ]}
+    <RequestFrame step={3} showService={false} onNext={submit} busy={busy} nextKey="req_submit" label={label} buttonClassName="min-h-[52px] rounded-2xl">
+      <Text style={{ fontFamily: FONT[400], fontSize: 13.5, lineHeight: 19, color: '#5B6B84' }}>{t('rv_intro')}</Text>
+      <ServiceCard
+        serviceKey={view.service.key} name={view.service.name} label={t('rv_selected_service')}
+        changeLabel={t('req_change')} changeAccessibilityLabel={t('rv_change_service')} onChange={changeService}
       />
-      <Section
-        title={t('req_trip')} onEdit={() => goToStep(1)} editLabel={edit}
-        rows={[
-          [t('field_country'), d.country],
-          [t('lbl_location'), d.location],
-          [t('field_destination'), d.dest],
-          [t(mortal ? 'field_transfer_date' : 'field_preferred_date'), d.date],
-        ]}
-      />
-      <Section
-        title={t('req_medical')} onEdit={() => goToStep(2)} editLabel={edit}
-        rows={[
-          [t(mortal ? 'req_details' : 'req_condition'), d.desc],
-          ...(transport ? [
-            [t('field_care_level'), d.care.map(t).join(', ')],
-            [t('req_mobility'), d.mobility ? t(`mobility_${d.mobility}`) : ''],
-            [t('req_on_board'), onBoard || t('req_none')],
-          ] : []),
-          [t('req_urgency'), d.urgency ? t(`urgency_${d.urgency}`) : ''],
-        ]}
-      />
-      <Section
-        title={t(mortal ? 'req_documents' : 'req_reports')} onEdit={() => goToStep(2)} editLabel={edit}
-        rows={[[t(mortal ? 'lbl_death_certificate' : 'lbl_medical_report'), d.files.length ? d.files.map((f) => f.name).join(', ') : t('req_not_attached')]]}
-      />
+      {view.show.patient ? (
+        <ReviewSection title={t(view.patient.titleKey)} editLabel={t('req_edit')} editAccessibilityLabel={t('rv_edit_patient')} onEdit={() => goToStep(1)}>
+          <Card><PatientGrid fields={view.patient.fields} /></Card>
+        </ReviewSection>
+      ) : null}
+      {view.show.trip ? (
+        <ReviewSection title={t('rd_trip')} editLabel={t('req_edit')} editAccessibilityLabel={t('rv_edit_trip')} onEdit={() => goToStep(1)}>
+          <Trip trip={view.trip} t={t} />
+        </ReviewSection>
+      ) : null}
+      {view.show.medical ? (
+        <ReviewSection title={t('rd_medical')} editLabel={t('req_edit')} editAccessibilityLabel={t('rv_edit_medical')} onEdit={() => goToStep(2)}>
+          <MedicalCard medical={view.medical} t={t} pair />
+        </ReviewSection>
+      ) : null}
+      {view.show.documents ? (
+        <ReviewSection title={t('rd_documents_n', { n: view.documents.length })} editLabel={t('req_edit')} editAccessibilityLabel={t('rv_edit_documents')} onEdit={() => goToStep(2)}>
+          <Card padding={0} style={{ overflow: 'hidden' }}>
+            {view.documents.map((doc, i) => <DocumentRow key={doc.id} doc={doc} first={i === 0} t={t} />)}
+          </Card>
+        </ReviewSection>
+      ) : null}
     </RequestFrame>
   );
 }

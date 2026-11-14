@@ -21,11 +21,12 @@ const AUTH_ONBOARDING = [
   '/', '/welcome', '/login', '/login-otp', '/choose-login', '/register', '/register-otp', '/complete-profile',
   '/forgot-password', '/forgot-password-otp', '/reset-password', '/set-password',
 ];
+const PREVIEW = ['/document-preview']; // a full-screen preview: no button over the document
 const CORPORATE = ['/corporate-dashboard', '/corporate-new-case', '/corporate-login', '/corporate-otp'];
 
 describe('where the floating SOS button shows', () => {
   test.each([...TAB_SCREENS, ...OTHER_SIGNED_IN])('%s: shown', (route) => expect(shows(route)).toBe(true));
-  test.each(['/home', ...REQUEST_FLOW, ...AUTH_ONBOARDING, ...CORPORATE])('%s: hidden', (route) => expect(shows(route)).toBe(false));
+  test.each(['/home', ...REQUEST_FLOW, ...AUTH_ONBOARDING, ...CORPORATE, ...PREVIEW])('%s: hidden', (route) => expect(shows(route)).toBe(false));
 
   test('every route of the app is covered by one of the groups', () => {
     const files = [];
@@ -36,7 +37,7 @@ describe('where the floating SOS button shows', () => {
         else if (name.endsWith('.js') && name !== '_layout.js') files.push(name === 'index.js' ? (base || '/') : `${base}/${name.replace(/\.js$/, '')}`);
       }
     })(path.join(__dirname, '../../app'), '');
-    const known = new Set(['/home', ...TAB_SCREENS, ...OTHER_SIGNED_IN, ...REQUEST_FLOW, ...AUTH_ONBOARDING, ...CORPORATE]);
+    const known = new Set(['/home', ...TAB_SCREENS, ...OTHER_SIGNED_IN, ...REQUEST_FLOW, ...AUTH_ONBOARDING, ...CORPORATE, ...PREVIEW]);
     const dynamic = (route) => route.replace(/\/\[[^\]]+\]$/, '/air');
     const missing = files.map(dynamic).filter((route) => !known.has(route));
     expect(missing).toEqual([]);

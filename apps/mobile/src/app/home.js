@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Plus } from 'lucide-react-native';
@@ -14,7 +14,12 @@ import { BottomNav, Screen, useScrollToTopOnTabTap } from '../components/layout'
 import { Text } from '../components/ui';
 import { openService } from '../components/ServiceGrid';
 import { ActiveRequestCard } from '../components/home/ActiveRequestCard';
-import { ActiveRequestSkeleton } from '../components/home/HomeSkeleton';
+import { AppRefreshControl } from '../components/AppRefreshControl';
+import { LoadFailure } from '../components/LoadFailure';
+import { Reveal } from '../components/skeleton/Reveal';
+import { useSkeletonGate } from '../components/skeleton/hooks';
+import { ActiveRequestSkeleton } from '../components/skeleton/screens';
+import { useResource } from '../lib/useResource';
 import { BannerCarousel } from '../components/home/BannerCarousel';
 import { Greeting } from '../components/home/Greeting';
 import { HomeHeader } from '../components/home/HomeHeader';
@@ -30,59 +35,38 @@ const STEP_BY_STATUS = { submitted: 1, in_progress: 2 };
 const TOTAL_STEPS = 3;
 
 export default function Home() {
-  const { t, isCorporate, profile } = useApp();
+  const { t, toast, isCorporate, profile } = useApp();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const tablet = width >= 600;
   const contentW = Math.min(width, MAX_WIDTH);
 
-  const [hasUnread, setHasUnread] = useState(false);
-  const [requests, setRequests] = useState([]);
-  const [loaded, setLoaded] = useState(isCorporate);
-  const [failed, setFailed] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [slow, setSlow] = useState(false);
   const [sosH, setSosH] = useState(72);
   const scrollRef = useRef(null);
   useScrollToTopOnTabTap(scrollRef);
 
   const firstName = (profile.name || '').split(' ')[0] || profile.name;
 
-  // The same two calls as before (notifications for the bell dot, the request list that
-  // My Requests uses). Whatever was loaded last stays on screen if a refresh fails.
-  const fetchHome = useCallback(
-    () => Promise.allSettled([apiGet('/notifications?unreadOnly=true'), apiGet('/requests/me')]),
-    [],
-  );
-  const applyHome = useCallback(([unread, mine]) => {
-    if (unread.status === 'fulfilled') setHasUnread(unread.value.notifications.length > 0);
-    if (mine.status === 'fulfilled') {
-      setRequests(mine.value.requests);
-      setFailed(false);
-    } else {
-      setFailed(true);
-    }
-    setLoaded(true);
-  }, []);
-  const load = useCallback(() => fetchHome().then(applyHome), [fetchHome, applyHome]);
+  // The same two calls as before (notifications for the bell dot, the request list that My Requests uses), loaded the way every data
+  // screen loads (lib/useResource.js). The request list is what the screen needs: if it fails there is nothing new to show (the error is
+  // thrown, so a first load offers "Try again" and a refresh keeps what is on screen); the bell dot is a bonus and may fail alone.
+  const { data: home, loading, error, reload, onRefresh, refreshing } = useResource({
+    key: 'home',
+    enabled: !isCorporate,
+    fetcher: async () => {
+      const [unread, mine] = await Promise.allSettled([apiGet('/notifications?unreadOnly=true'), apiGet('/requests/me')]);
+      if (mine.status === 'rejected') throw mine.reason;
+      return { hasUnread: unread.status === 'fulfilled' && unread.value.notifications.length > 0, requests: mine.value.requests };
+    },
+    onRefreshError: () => toast(t('sk_refresh_failed')),
+  });
+  const gate = useSkeletonGate(loading && !isCorporate);
+  const hasUnread = home ? home.hasUnread : false;
+  const requests = home ? home.requests : [];
 
   useEffect(() => {
-    if (isCorporate) return;
-    fetchHome().then(applyHome);
-    registerForPushNotifications();
-  }, [isCorporate, fetchHome, applyHome]);
-
-  // The skeleton only appears if loading takes a moment, so a fast load never flashes it.
-  useEffect(() => {
-    const timer = setTimeout(() => setSlow(true), 300);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  };
+    if (!isCorporate) registerForPushNotifications();
+  }, [isCorporate]);
 
   // The newest request that is still being worked on (the list comes newest first).
   const current = requests.find((r) => r.status === 'submitted' || r.status === 'in_progress');
@@ -112,7 +96,7 @@ export default function Home() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: TAB_BAR + insets.bottom + sosH + 16 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={isCorporate ? undefined : <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={isCorporate ? undefined : <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: 18, paddingTop: 18 }}>
           <Greeting name={isCorporate ? profile.name : firstName} />
@@ -132,17 +116,12 @@ export default function Home() {
           ) : (
             <>
               <BannerCarousel width={contentW - 36} tablet={tablet} onRequest={() => navReplace('/all-services')} />
-              {/* Only warn when a refresh failed while older requests are on screen; with nothing
-                  to show, a failed first load looks the same as having no active request. */}
-              {failed && requests.length > 0 && (
-                <Pressable accessibilityRole="button" onPress={load} style={{ minHeight: 44, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                  <Text style={{ fontSize: 12.5, color: '#5B6B84' }}>{t('home_refresh_failed')}</Text>
-                  <Text className="font-inter-black" style={{ fontSize: 12.5, color: COLORS.primary }}>{t('home_try_again')}</Text>
-                </Pressable>
-              )}
-              {!loaded && slow && <ActiveRequestSkeleton />}
+              {loading && gate.visible && <ActiveRequestSkeleton label={t('sk_loading_active')} />}
+              {error && !home && <LoadFailure onRetry={reload} />}
               {activeRequest && (
-                <ActiveRequestCard request={activeRequest} onTrack={() => router.push({ pathname: '/request-tracking', params: { id: current.id } })} />
+                <Reveal animate={gate.wasShown}>
+                  <ActiveRequestCard request={activeRequest} onTrack={() => router.push({ pathname: '/request-tracking', params: { id: current.id } })} />
+                </Reveal>
               )}
             </>
           )}

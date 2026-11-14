@@ -177,8 +177,23 @@ async function apiFetch(path, options = {}, isRetry = false) {
 }
 
 // `options` is for the session check (`{ signal, validation: true }`), which is allowed through while loading.
+// A read that never answers must end, so a screen never waits on a skeleton for ever: after GET_TIMEOUT_MS it fails with code
+// 'timeout' and the screen shows its error state. A caller that passes its own `signal` (the session check) keeps full control of it.
+// Only plain data reads use apiGet. File downloads (download.js, apiDownload) and uploads (apiUpload) do not go through it, so they are never
+// cut off at 15 s; a caller that does read something large through apiGet can pass `timeoutMs` (0 = no limit).
+export const GET_TIMEOUT_MS = 15000;
 export function apiGet(path, options) {
-  return apiFetch(path, options);
+  if (options && options.signal) return apiFetch(path, options);
+  const { timeoutMs = GET_TIMEOUT_MS, ...rest } = options || {};
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = timeoutMs > 0 ? setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs) : null;
+  return apiFetch(path, { ...rest, signal: controller.signal })
+    .catch((err) => {
+      if (timedOut) throw Object.assign(new Error('The server took too long to answer. Please try again.'), { code: 'timeout' });
+      throw err;
+    })
+    .finally(() => { if (timer) clearTimeout(timer); });
 }
 
 export function apiPost(path, body) {

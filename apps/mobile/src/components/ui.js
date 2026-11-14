@@ -4,6 +4,7 @@ import { useApp } from '../state/AppContext';
 import { Spinner } from './Spinner';
 import { COLORS } from '../theme/colors';
 import { PressBox } from './PressBox';
+import { useFormInput } from './keyboard/formFocus';
 
 const HAS_COLOR = /(^|\s)text-(navy|ink|slate|muted|faint|white|primary|success|danger|warning|cancel|scheduled)/;
 const HAS_FONT = /(^|\s)font-inter/;
@@ -149,9 +150,13 @@ export function FieldLabel({ children, large, required, className = '' }) {
 // bare drops the border/background/radius so the input can sit inside a custom
 // grouped container (e.g. login's stacked country+number card) instead of looking
 // like its own separate field.
-export function Input({ large, multiline, bare, className = '', ...props }) {
+// Every input takes part in the form's "next / done" (components/keyboard/formFocus.js): its return key says Next (Done on the last field,
+// nothing special on a multiline one), and moves on to the next field. A caller's own returnKeyType, onSubmitEditing, onLayout, onFocus and onContentSizeChange still run.
+export function Input({ large, multiline, bare, className = '', returnKeyType, onSubmitEditing, onLayout, onFocus, onContentSizeChange, ...props }) {
+  const form = useFormInput({ multiline, returnKeyType, onSubmitEditing, onLayout, onFocus, onContentSizeChange });
   return (
     <TextInput
+      {...form}
       placeholderTextColor="#97A4B8"
       multiline={multiline}
       textAlignVertical={multiline ? 'top' : 'center'}

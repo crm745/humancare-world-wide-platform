@@ -1,3 +1,5 @@
+// FIRST: if this window is the Google sign-in popup coming back from Google, hand the answer over before anything else loads (the web only).
+import { googleCallback } from '../lib/googleCallback';
 import '../../global.css';
 import { View } from 'react-native';
 import { Stack } from 'expo-router';
@@ -15,6 +17,9 @@ import { Toast } from '../components/widgets';
 import { AuthGate } from '../components/AuthGate';
 import { SosFab } from '../components/sos/SosFab';
 import { RecaptchaBadgeGate } from '../components/RecaptchaBadgeGate';
+import { KeyboardRoot } from '../components/keyboard';
+import { SystemBack } from '../components/SystemBack';
+import { GoogleCallbackScreen } from '../components/GoogleCallbackScreen';
 
 function Shell() {
   const { isRTL } = useApp();
@@ -27,18 +32,23 @@ function Shell() {
       <RecaptchaBadgeGate />
       <AuthGate />
       <Toast />
+      <SystemBack />
     </View>
   );
 }
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, Inter_800ExtraBold });
+  // The Google popup, back from Google: it has handed its answer over (lib/googleCallback.web.js) and must NOT start the app (no splash, no Getting Started).
+  if (googleCallback) return <GoogleCallbackScreen />;
   if (!fontsLoaded) return null;
   return (
     <SafeAreaProvider>
-      <AppProvider>
-        <Shell />
-      </AppProvider>
+      <KeyboardRoot>
+        <AppProvider>
+          <Shell />
+        </AppProvider>
+      </KeyboardRoot>
     </SafeAreaProvider>
   );
 }

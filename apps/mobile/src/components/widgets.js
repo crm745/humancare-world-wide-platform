@@ -8,16 +8,19 @@ import { IMAGES } from '../data/images';
 import { IconButton } from './layout';
 import { FieldLabel, Input, Text } from './ui';
 import { COLORS, primaryAlpha } from '../theme/colors';
+import { FormFocusProvider, KEYBOARD_DISMISS_MODE, KeyboardModalView, MODAL_EDGE_PROPS, useKeyboard, useListMaxHeight } from './keyboard';
 
 // Bottom sheet with a dimmed backdrop (filter, language and select sheets).
 // `fit`: a form that should not scroll (the filters): the content gets all the room the screen has left under the sheet's own header
 // and padding, so it only scrolls on a screen too short to show it at all. Without it, long lists keep the old 70% limit.
+// With the keyboard open the sheet rises above it (KeyboardModalView) and its scroll area gets only the room left above the keyboard.
 export function Sheet({ visible, onClose, title, children, fit }) {
   const insets = useSafeAreaInsets();
   const { isRTL } = useApp();
+  const { height: keyboardHeight } = useKeyboard(visible);
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <View className="flex-1 justify-end" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} {...MODAL_EDGE_PROPS}>
+      <KeyboardModalView className="justify-end" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
         <Pressable onPress={onClose} className="absolute inset-0 bg-navy/45" />
         <View className="rounded-t-[20px] bg-white px-5 pt-5" style={{ paddingBottom: 24 + insets.bottom }}>
           <View className="mb-[18px] flex-row items-center justify-between">
@@ -30,13 +33,15 @@ export function Sheet({ visible, onClose, title, children, fit }) {
               to its content, bottom-anchored), and a percentage has no sized ancestor to
               resolve against, which collapses to 0 on web instead of falling back sanely. */}
           <ScrollView
-            style={{ maxHeight: fit ? Math.max(200, Dimensions.get('window').height - insets.top - insets.bottom - 20 - 48 - 24 - 16) : Dimensions.get('window').height * 0.7 }}
+            style={{ maxHeight: Math.max(120, (fit ? Math.max(200, Dimensions.get('window').height - insets.top - insets.bottom - 20 - 48 - 24 - 16) : Dimensions.get('window').height * 0.7) - keyboardHeight) }}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={KEYBOARD_DISMISS_MODE}
           >
-            {children}
+            <FormFocusProvider rtl={isRTL}>{children}</FormFocusProvider>
           </ScrollView>
         </View>
-      </View>
+      </KeyboardModalView>
     </Modal>
   );
 }
@@ -47,8 +52,11 @@ export function Sheet({ visible, onClose, title, children, fit }) {
 // does, however many options there are.
 function Dropdown({ visible, onClose, title, header, children }) {
   const { isRTL } = useApp();
+  // The list gets what is left above the keyboard (the search box is in `header`), at most half the screen.
+  const listMax = useListMaxHeight({ reserved: 190, min: 100, max: Dimensions.get('window').height * 0.5 });
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} {...MODAL_EDGE_PROPS}>
+      <KeyboardModalView>
       <Pressable onPress={onClose} className="flex-1 items-center justify-center bg-navy/45 p-6" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
         <Pressable className="w-full max-w-[320px] rounded-2xl bg-white p-4" onPress={(e) => e.stopPropagation()}>
           <View className="mb-2.5 flex-row items-center justify-between">
@@ -56,11 +64,12 @@ function Dropdown({ visible, onClose, title, header, children }) {
             <IconButton onPress={onClose} className="h-[28px] w-[28px]"><X size={14} color="#45526B" /></IconButton>
           </View>
           {header}
-          <ScrollView style={{ maxHeight: Dimensions.get('window').height * 0.5 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <ScrollView style={{ maxHeight: listMax }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {children}
           </ScrollView>
         </Pressable>
       </Pressable>
+      </KeyboardModalView>
     </Modal>
   );
 }

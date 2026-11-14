@@ -1,129 +1,186 @@
 import { useEffect, useRef, useState } from 'react';
-import { Linking, Modal, Pressable, ScrollView, View } from 'react-native';
-import { ChevronDown, X } from 'lucide-react-native';
-import { useApp } from '../../state/AppContext';
+import { Linking, Pressable, ScrollView, View } from 'react-native';
 import { apiGet } from '../../lib/api';
 import {
-  GEONAMES_ATTRIBUTION_FALLBACK, SEARCH_DEBOUNCE_MS, describeCityError, searchCities, searchableQuery,
+  GEONAMES_ATTRIBUTION_FALLBACK, SEARCH_DEBOUNCE_MS, describeCityError, normaliseCityText, searchCitiesCached, searchableQuery,
 } from '../../lib/citySearch';
 import { toCityChoice } from '../../lib/privateCharter';
-import { IconButton } from '../layout';
+import { suggestionsFor } from '../../lib/locationRules';
 import { FieldLabel, Input, Text } from '../ui';
+import { Spinner } from '../Spinner';
+import { useListMaxHeight, useReveal } from '../keyboard';
+import { WRAP } from './DetailsParts';
+import { COLORS } from '../../theme/colors';
 
-// A city picked from the server's verified list (Private Charter). The field looks like the other
-// pickers; tapping it opens a search. Nothing typed is ever kept as the answer: only a result the
-// person taps becomes the value, and that is sent as { geonameId } alone.
+// A city (or place) typed into the field, with suggestions in a compact dropdown right under it. No modal, no separate screen.
 //
-// `city` is the chosen { geonameId, name, label, countryCode } or null; `onChange(city)` receives
-// the chosen city.
-export default function CityField({ label, required, city, onChange, error, testID }) {
-  const { isRTL } = useApp();
+//   - The person types; whatever they type is kept exactly as typed (`value`, reported by onChangeText). Nothing is ever replaced for them.
+//   - From two letters on, matching cities from the server's verified list (GeoNames, via GET /geo/cities, the same search as before) are
+//     listed under the field. Tapping one fills the field with it and closes the list (onSelect receives { geonameId, name, label, countryCode }).
+//   - The list closes when the field loses focus (a tap anywhere else, or another field) and opens again when the field is focused.
+//   - `countryIso` / `countryName` / `restrictToCountry`: when the field is held to the form's country, only the suggestions of that country are listed
+//     (a city of another country cannot be picked), and the empty message says which country was searched. Typed text is never filtered.
+//   - `structured` (Private Charter): the backend accepts a city only as a verified { geonameId }, so `city` holds the picked city; typing again
+//     clears it (the form clears it in onChangeText) until another is picked. Without `structured` (every other service) the text is the answer.
+export default function CityField({ label, required, value = '', city = null, onChangeText, onSelect, error, testID, structured = false, countryIso = '', countryName = '', restrictToCountry = false }) {
+  const reveal = useReveal();
+  // The list gets what is left above the keyboard, at most 220 px (the top bars, the label, the field and the Continue bar take the rest).
+  const listMax = useListMaxHeight({ reserved: 300, min: 110, max: 220 });
   const [open, setOpen] = useState(false);
-  const [text, setText] = useState('');
   // idle: too short to search; loading; done: results (maybe none); error: see `problem`.
   const [state, setState] = useState('idle');
   const [cities, setCities] = useState([]);
   const [problem, setProblem] = useState(null);
   const [attribution, setAttribution] = useState(GEONAMES_ATTRIBUTION_FALLBACK);
-  const latest = useRef(0);
+  const latest = useRef(0); // which search the screen is waiting for; an older answer is dropped
   const timer = useRef(null);
+  const blurTimer = useRef(null);
+  const pressing = useRef(false); // a suggestion is being pressed: the field's blur must not close the list under the finger
+  const shown = useRef(''); // the text the list on screen is for, so the same text is never searched twice
+  const box = useRef(null);
 
-  const run = (value) => {
+  const run = (text) => {
     clearTimeout(timer.current);
-    const query = searchableQuery(value);
+    const query = searchableQuery(text);
     latest.current += 1;
     const mine = latest.current;
-    if (!query) { setState('idle'); setCities([]); setProblem(null); return; }
+    if (!query) { shown.current = ''; setState('idle'); setCities([]); setProblem(null); return; }
+    const key = normaliseCityText(query);
+    if (shown.current === key) return; // this list is already on screen
     setState('loading');
     setProblem(null);
-    searchCities(apiGet, query)
+    searchCitiesCached(apiGet, query)
       .then((result) => {
         if (mine !== latest.current) return; // a newer search has started: this answer is stale
+        shown.current = key;
         setCities(result.cities);
         setAttribution(result.attribution);
         setState('done');
       })
       .catch((err) => {
         if (mine !== latest.current) return;
+        shown.current = '';
         setCities([]);
         setProblem(describeCityError(err));
         setState('error');
       });
   };
 
-  const onType = (value) => {
-    setText(value);
+  const onType = (text) => {
+    onChangeText(text);
+    setOpen(true);
     clearTimeout(timer.current);
     latest.current += 1; // anything still on its way is for older text
-    if (!searchableQuery(value)) { setState('idle'); setCities([]); setProblem(null); return; }
-    setState('loading');
-    timer.current = setTimeout(() => run(value), SEARCH_DEBOUNCE_MS);
+    if (!searchableQuery(text)) { shown.current = ''; setState('idle'); setCities([]); setProblem(null); return; }
+    if (normaliseCityText(text) !== shown.current) setState('loading');
+    timer.current = setTimeout(() => run(text), SEARCH_DEBOUNCE_MS);
   };
 
-  useEffect(() => () => clearTimeout(timer.current), []);
+  const onFocus = () => {
+    clearTimeout(blurTimer.current);
+    setOpen(true);
+    if (searchableQuery(value)) run(value); // reopens with the list for what is already typed
+  };
 
-  const close = () => { clearTimeout(timer.current); latest.current += 1; setOpen(false); };
-  const openPicker = () => { setText(''); setState('idle'); setCities([]); setProblem(null); setOpen(true); };
-  const pick = (result) => { onChange(toCityChoice(result)); close(); };
+  const onBlur = () => {
+    clearTimeout(blurTimer.current);
+    blurTimer.current = setTimeout(() => {
+      if (pressing.current) return;
+      clearTimeout(timer.current);
+      latest.current += 1;
+      setOpen(false);
+    }, 150);
+  };
 
+  const pick = (result) => {
+    pressing.current = false;
+    clearTimeout(timer.current);
+    latest.current += 1;
+    const choice = toCityChoice(result);
+    shown.current = normaliseCityText(choice.label);
+    onSelect(choice);
+    setOpen(false);
+  };
+
+  useEffect(() => () => { clearTimeout(timer.current); clearTimeout(blurTimer.current); }, []);
+
+  // What is listed: the verified results, of the selected country when this field is held to it.
+  const listed = suggestionsFor(cities, { countryIso, restrict: restrictToCountry, max: 10 });
+  const inCountry = restrictToCountry && countryIso ? ` in ${countryName || 'the selected country'}` : '';
+  const visible = open && state !== 'idle';
+  // The open list is brought into view above the keyboard (the form scrolls just enough).
+  useEffect(() => {
+    if (!visible) return undefined;
+    const t = setTimeout(() => reveal(box), 60);
+    return () => clearTimeout(t);
+  }, [visible, state, listed.length, reveal]);
+
+  const chosen = structured && city ? city.geonameId : null;
   return (
-    <View>
+    <View testID={testID}>
       <FieldLabel required={required}>{label}</FieldLabel>
-      <Pressable
-        onPress={openPicker} accessibilityRole="button" testID={testID}
-        accessibilityLabel={`${label}, ${city ? city.label : 'Select a city'}`}
-        className="min-h-[48px] flex-row items-center justify-between gap-2 rounded-[10px] border-[1.5px] border-field bg-input px-3 py-3 active:opacity-80"
-      >
-        <Text className={`flex-1 text-[15px] ${city ? '' : 'text-faint'}`} numberOfLines={2}>{city ? city.label : 'Search and select a city'}</Text>
-        <ChevronDown size={16} color="#97A4B8" />
-      </Pressable>
+      <Input
+        value={value} onChangeText={onType} onFocus={onFocus} onBlur={onBlur}
+        placeholder="City, Country" autoCorrect={false} autoCapitalize="words" maxLength={80}
+        accessibilityLabel={label} autoComplete="off"
+      />
       {error ? <Text className="mt-1 text-[12px] text-danger">{error}</Text> : null}
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={close} statusBarTranslucent>
-        <Pressable onPress={close} className="flex-1 items-center justify-start bg-navy/45 px-5 pt-16" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
-          <Pressable className="w-full max-w-[420px] rounded-2xl bg-white p-4" onPress={(e) => e.stopPropagation()}>
-            <View className="mb-2.5 flex-row items-center justify-between">
-              <Text className="font-inter-black text-[15px] text-navy">{label}</Text>
-              <IconButton onPress={close} className="h-[28px] w-[28px]"><X size={14} color="#45526B" /></IconButton>
+      {visible ? (
+        <View
+          ref={box} collapsable={false}
+          className="mt-1.5 overflow-hidden rounded-xl border border-line bg-white"
+          style={{ shadowColor: '#0D2340', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 }}
+        >
+          {state === 'loading' ? (
+            <View className="flex-row items-center gap-2.5 px-3.5 py-3" accessibilityRole="progressbar" accessibilityLabel="Searching cities">
+              <Spinner size={16} color={COLORS.primary} trackColor={COLORS.primarySoft} />
+              <Text className="text-[13px] text-muted">Searching…</Text>
             </View>
-            <Input
-              autoFocus value={text} onChangeText={onType} placeholder="Type the first letters of a city" autoCorrect={false}
-              autoCapitalize="words" returnKeyType="search" maxLength={80} accessibilityLabel={`${label}: search`}
-            />
-            <ScrollView style={{ maxHeight: 280 }} className="mt-2" showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {state === 'idle' && <Text className="px-1 py-3 text-[13px] text-muted">Type at least 2 letters to search the list of cities.</Text>}
-              {state === 'loading' && <Text className="px-1 py-3 text-[13px] text-muted">Searching…</Text>}
-              {state === 'done' && cities.length === 0 && (
-                <Text className="px-1 py-3 text-[13px] text-muted">No matching city. Check the spelling, or try the nearest larger city.</Text>
-              )}
-              {state === 'error' && problem && (
-                <View className="py-2">
-                  <Text className="px-1 text-[13px] text-danger">{problem.message}</Text>
-                  {problem.retry && (
-                    <Pressable
-                      onPress={() => run(text)} accessibilityRole="button" accessibilityLabel="Retry city search"
-                      className="mt-2 min-h-[44px] items-center justify-center rounded-xl border-[1.5px] border-primary active:opacity-80"
-                    >
-                      <Text className="font-inter-bold text-[14px] text-primary">Retry</Text>
-                    </Pressable>
-                  )}
-                </View>
-              )}
-              {state === 'done' && cities.map((result) => (
+          ) : null}
+          {state === 'done' && listed.length === 0 ? (
+            <Text className="px-3.5 py-3 text-[13px] leading-[19px] text-muted">
+              {structured ? `No matching city${inCountry}. Check the spelling, or try the nearest larger city.` : `No matching city${inCountry}. You can keep what you typed.`}
+            </Text>
+          ) : null}
+          {state === 'error' && problem ? (
+            <View className="px-3.5 py-3">
+              <Text className="text-[13px] leading-[19px] text-danger">{problem.message}</Text>
+              {problem.retry ? (
                 <Pressable
-                  key={result.geonameId} onPress={() => pick(result)} accessibilityRole="button" accessibilityLabel={result.label}
-                  className={`min-h-[44px] justify-center border-b border-line px-1 py-2.5 active:opacity-70 ${city && city.geonameId === result.geonameId ? 'bg-primary-soft' : ''}`}
+                  onPress={() => { shown.current = ''; run(value); }} accessibilityRole="button" accessibilityLabel="Retry city search"
+                  className="mt-2 min-h-[44px] items-center justify-center rounded-xl border-[1.5px] border-primary active:opacity-80"
                 >
-                  <Text className="text-[14.5px] text-ink">{result.label}</Text>
+                  <Text className="font-inter-bold text-[14px] text-primary">Retry</Text>
                 </Pressable>
-              ))}
-            </ScrollView>
-            <Pressable onPress={() => Linking.openURL(attribution.url).catch(() => {})} accessibilityRole="link" accessibilityLabel={attribution.text} className="mt-3">
-              <Text className="text-[11px] leading-4 text-faint">{attribution.text}</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
+              ) : null}
+            </View>
+          ) : null}
+          {state === 'done' && listed.length > 0 ? (
+            <>
+              <ScrollView style={{ maxHeight: listMax }} nestedScrollEnabled showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
+                {listed.map((result, i) => (
+                  <Pressable
+                    key={result.geonameId}
+                    onPressIn={() => { pressing.current = true; }} onPressOut={() => { pressing.current = false; }}
+                    onPress={() => pick(result)} accessibilityRole="button" accessibilityLabel={result.label}
+                    className={`min-h-[44px] justify-center px-3.5 py-2.5 active:bg-soft ${i > 0 ? 'border-t border-divider' : ''} ${chosen === result.geonameId ? 'bg-primary-soft' : ''}`}
+                  >
+                    <Text className="text-[14.5px] leading-5 text-ink" style={WRAP}>{result.label}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              {/* GeoNames data is CC BY 4.0: it is credited wherever its results are shown. */}
+              <Pressable
+                onPress={() => Linking.openURL(attribution.url).catch(() => {})} accessibilityRole="link" accessibilityLabel={attribution.text}
+                className="border-t border-divider px-3.5 py-2"
+              >
+                <Text className="text-[11px] leading-4 text-faint">{attribution.text}</Text>
+              </Pressable>
+            </>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }

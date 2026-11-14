@@ -7,6 +7,7 @@ import { dialOf, nameOf, searchCountries } from '../lib/phoneCountry';
 import { isValidMobileNumber } from '../lib/validators';
 import { FieldLabel, Input, Text } from './ui';
 import { COLORS } from '../theme/colors';
+import { KeyboardModalView, MODAL_EDGE_PROPS } from './keyboard';
 
 // A full-height list of every country with a search box. Typing a name ("emir") or a dial code
 // ("971", "+1") narrows it. `selected` is an ISO code, and the row for it is ticked; countries
@@ -20,7 +21,8 @@ export function CountryPicker({ visible, title, selected, onPick, onClose }) {
   const pick = (code) => { setQuery(''); onPick(code); };
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={close} statusBarTranslucent>
+    <Modal visible={visible} animationType="slide" onRequestClose={close} {...MODAL_EDGE_PROPS}>
+      <KeyboardModalView>
       <View className="flex-1 bg-white" style={{ paddingTop: insets.top, paddingBottom: insets.bottom, direction: isRTL ? 'rtl' : 'ltr' }}>
         <View className="flex-row items-center justify-between border-b border-line px-[18px] pb-3 pt-4">
           <Text className="font-inter-black text-[17px] text-navy" accessibilityRole="header">{title}</Text>
@@ -56,6 +58,7 @@ export function CountryPicker({ visible, title, selected, onPick, onClose }) {
           }}
         />
       </View>
+      </KeyboardModalView>
     </Modal>
   );
 }

@@ -14,6 +14,7 @@ import { SectionLabel, Text } from '../components/ui';
 import { Sheet } from '../components/widgets';
 import { COLORS } from '../theme/colors';
 import { PressBox } from '../components/PressBox';
+import { AppRefreshControl } from '../components/AppRefreshControl';
 
 const TAB_BAR = 64;
 const MAX_WIDTH = 720;
@@ -78,7 +79,8 @@ function Section({ label, rows }) {
 }
 
 export default function Profile() {
-  const { t, isCorporate, profile, toast } = useApp();
+  const { t, isCorporate, profile, toast, refreshProfile } = useApp();
+  const [refreshing, setRefreshing] = useState(false);
   const insets = useSafeAreaInsets();
   // The scroll area ends above the tab bar; its bottom padding is its own (24) or the room the floating SOS button needs, whichever is more.
   const { paddingBottom, scrollProps } = useFabScrollPad({ ownPad: 24, edge: TAB_BAR + insets.bottom });
@@ -89,8 +91,16 @@ export default function Profile() {
   // Signed-out people already have an account, so they land on their login screen.
   // The destination is shown first, then the tokens are cleared: clearing them while this screen is still open
   // would let the auth gate send the person to Login before Getting Started opens.
-  const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/welcome'); await clearTokens(); };
+  const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/login'); await clearTokens(); };
   const soon = () => toast(t('prof_soon'));
+
+  // Pull-to-refresh: the account details come from the server (GET /auth/me). The profile stays on screen while it loads (no skeleton: it
+  // is already here); a failed pull keeps it and says so. A corporate account has no such call, so it is not pulled.
+  const onRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try { await refreshProfile(); } catch { toast(t('sk_refresh_failed')); } finally { setRefreshing(false); }
+  };
 
   const account = [
     // Personal details opens the patient's own account; a corporate account has no such screen yet.
@@ -115,12 +125,15 @@ export default function Profile() {
   return (
     <Screen>
       <TopBar title={t('prof_title')} />
+      {/* The scroll area ends above the tab bar. The margin is on this wrapper, not the ScrollView: with a refresh control the web build applies a ScrollView's own margin twice (an empty band above the tab bar). */}
+      <View style={{ flex: 1, marginBottom: TAB_BAR + insets.bottom }}>
       <ScrollView
         ref={scrollRef}
-        style={{ flex: 1, marginBottom: TAB_BAR + insets.bottom }}
+        style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom }}
         {...scrollProps}
         showsVerticalScrollIndicator={false}
+        refreshControl={isCorporate ? undefined : <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: 18, paddingTop: 16, gap: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
@@ -153,6 +166,7 @@ export default function Profile() {
           <Text style={{ fontSize: 12, lineHeight: 16, color: '#5B6B84', textAlign: 'center' }}>{t('prof_footer').replace('{v}', version)}</Text>
         </View>
       </ScrollView>
+      </View>
       <BottomNav />
       <LanguageSheet visible={langSheet} onClose={() => setLangSheet(false)} />
     </Screen>

@@ -12,7 +12,8 @@ import { Body, Screen, TopBar } from '../components/layout';
 import { Button, Card, Field, FieldLabel, InfoRow, Text } from '../components/ui';
 import { Select } from '../components/widgets';
 import { CountryPicker } from '../components/NationalityPhone';
-import { LoadingState } from '../components/LoadingState';
+import { useSkeletonGate } from '../components/skeleton/hooks';
+import { FormSkeleton } from '../components/skeleton/screens';
 import { COLORS } from '../theme/colors';
 
 // Personal details (Profile → Personal details): the patient's own account, from GET /auth/me, in four sections:
@@ -61,6 +62,8 @@ export default function PersonalDetails() {
   const { t, toast, isCorporate, setProfile } = useApp();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // The form is not pulled to refresh (an edit in progress must never be lost); it loads with a skeleton and offers Try again.
+  const gate = useSkeletonGate(loading);
   const [failed, setFailed] = useState(false);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
@@ -148,7 +151,7 @@ export default function PersonalDetails() {
     <Screen>
       <TopBar title={t('prof_personal')} />
       <Body contentClassName="px-[18px] py-4">
-        {loading ? <LoadingState /> : null}
+        {loading && gate.visible ? <FormSkeleton label={t('sk_loading_profile')} fields={6} /> : null}
 
         {!loading && failed ? (
           <View className="items-center px-5 py-[50px]">

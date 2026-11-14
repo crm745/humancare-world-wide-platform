@@ -387,20 +387,26 @@ describe('the list and its states', () => {
     expect(screen).toContain("router.push({ pathname: '/request-details', params: { id: r.rawId } })");
     expect(screen).not.toMatch(/apiPost|apiPatch|apiUpload|fetch\(/);
   });
-  test('pull to refresh: the system spinner, the same request, a failed refresh keeps the list', () => {
-    expect(screen).toContain('refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}');
-    expect(screen).toContain('const onRefresh = async () => {');
-    expect(screen).toContain('.catch((err) => toast(err.message))');
-    expect(screen).toContain("load().finally(() => setLoading(false));");
+  test('pull to refresh: the system spinner, the same request, a failed refresh keeps the list and says so', () => {
+    expect(screen).toContain('refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}');
+    expect(screen).toContain("fetcher: () => apiGet('/requests/me').then(({ requests: list }) => list.map(toListItem)),");
+    expect(screen).toContain("onRefreshError: () => toast(t('sk_refresh_failed')),");
   });
-  test('the first load shows the loading state', () => {
-    expect(screen).toContain('{loading && <LoadingState />}');
-    expect(screen).toContain('useState(true)');
+  test('the first load shows the shimmer skeleton (never a spinner), a failed first load shows Try again, and what arrives fades in', () => {
+    expect(screen).toContain("{loading && gate.visible && <RequestsSkeleton label={t('sk_loading_requests')} />}");
+    expect(screen).toContain('{error && !rows && <LoadFailure onRetry={reload} />}');
+    expect(screen).toContain('<Reveal animate={gate.wasShown}');
+    expect(screen).not.toContain('LoadingState');
+  });
+  test('a request that is new after a pull is highlighted', () => {
+    expect(screen).toContain('isNew={highlight.includes(r.rawId)}');
+    expect(screen).toContain('idsOf: (list) => list.map((r) => r.rawId),');
+    expect(card).toContain('{isNew ? <HighlightFill radius={L.radius} /> : null}');
   });
   test('a search or filter with no match says "No requests match"; no requests at all keeps the old empty state', () => {
-    expect(screen).toContain('{!loading && requests.length > 0 && items.length === 0 && (');
+    expect(screen).toContain('{requests.length > 0 && items.length === 0 && (');
     expect(screen).toContain("{t('mr_no_match')}");
-    expect(screen).toContain('{!loading && requests.length === 0 && (');
+    expect(screen).toContain('{requests.length === 0 && (');
     expect(screen).toContain("{t('mr_empty_title')}");
     expect(screen).toContain("{t('mr_empty_sub')}");
     expect(screen).toContain("fontFamily: 'Inter_400Regular', fontSize: L.noMatch, color: '#5B6B84', textAlign: 'center'");

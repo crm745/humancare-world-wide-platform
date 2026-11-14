@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { Bell, Clock, FileText, FileWarning, Hospital, Loader, MessageSquare, Plane, CircleCheck } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
@@ -8,7 +8,13 @@ import { ALERTS_PREVIEW_ITEMS, groupAlerts, markAlertRead } from '../lib/alertsP
 import { TRACKING_PALETTE as P } from '../lib/tracking/palette';
 import { Body, Screen, TopBar } from '../components/layout';
 import { Button, Card, Spacer, Text } from '../components/ui';
-import { LoadingState } from '../components/LoadingState';
+import { AppRefreshControl } from '../components/AppRefreshControl';
+import { LoadFailure } from '../components/LoadFailure';
+import { HighlightFill } from '../components/skeleton/HighlightFill';
+import { Reveal } from '../components/skeleton/Reveal';
+import { useSkeletonGate } from '../components/skeleton/hooks';
+import { RowsSkeleton } from '../components/skeleton/screens';
+import { useResource } from '../lib/useResource';
 import { COLORS } from '../theme/colors';
 
 // Development-only preview of this screen with six fictional alerts (lib/alertsPreview.js). It is false in a
@@ -71,34 +77,37 @@ function AlertGroups({ items, onRead, t }) {
 
 export default function Notifications() {
   const { t, toast } = useApp();
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(!ALERTS_PREVIEW);
   const [preview, setPreview] = useState(ALERTS_PREVIEW ? ALERTS_PREVIEW_ITEMS : []);
 
-  const load = () => {
-    apiGet('/notifications')
-      .then(({ notifications }) => setItems(notifications))
-      .catch((err) => toast(err.message))
-      .finally(() => setLoading(false));
-  };
-
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once on mount (never in preview mode)
-  useEffect(() => { if (!ALERTS_PREVIEW) load(); }, []);
+  // Loaded the way every data screen loads (lib/useResource.js; never in preview mode): a shimmer skeleton on the first load only, quiet
+  // refresh of what an earlier visit loaded, "Try again" if the first load fails, and pull-to-refresh with the list staying on screen.
+  const { data, loading, error, reload, onRefresh, refreshing, highlight } = useResource({
+    key: 'notifications',
+    enabled: !ALERTS_PREVIEW,
+    fetcher: () => apiGet('/notifications').then(({ notifications }) => notifications),
+    idsOf: (list) => list.map((n) => n.id),
+    onRefreshError: () => toast(t('sk_refresh_failed')),
+  });
+  const items = data || [];
+  const gate = useSkeletonGate(loading && !ALERTS_PREVIEW);
 
   return (
     <Screen>
       <TopBar title={t('notifications_title')} />
-      <Body contentClassName="gap-2.5 px-[18px] py-4">
+      <Body contentClassName="gap-2.5 px-[18px] py-4" refreshControl={ALERTS_PREVIEW ? undefined : <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {ALERTS_PREVIEW ? (
           <AlertGroups items={preview} onRead={(id) => setPreview((rows) => markAlertRead(rows, id))} t={t} />
         ) : (
           <>
-            {loading && <LoadingState />}
+            {loading && gate.visible && <RowsSkeleton label={t('sk_loading_notifications')} count={5} lines={2} />}
+            {error && !data && <LoadFailure onRetry={reload} />}
+            {data ? <Reveal animate={gate.wasShown} style={{ gap: 10 }}>
             {items.map((n) => {
               const { bg, color, Icon } = KIND[n.kind] || KIND.system;
               const read = !!n.readAt;
               return (
                 <Card key={n.id} className={`flex-row items-start gap-2.5 ${read ? 'opacity-55' : ''}`}>
+                  {highlight.includes(n.id) ? <HighlightFill radius={16} /> : null}
                   <View className={`h-8 w-8 items-center justify-center rounded-[10px] ${bg}`}><Icon size={16} color={color} /></View>
                   <View className="flex-1">
                     <View className="flex-row justify-between">
@@ -110,9 +119,10 @@ export default function Notifications() {
                 </Card>
               );
             })}
-            {!loading && items.length === 0 && (
+            {items.length === 0 && (
               <View className="items-center px-5 py-[50px]"><Text className="text-[12.5px] text-faint">No notifications yet.</Text></View>
             )}
+            </Reveal> : null}
           </>
         )}
         <Spacer min={16} />

@@ -1,24 +1,31 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Linking, Pressable, Share, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  ArrowRight, Ban, Check, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Download, FileText, Image as ImageIcon, Phone, Share2,
+  ArrowRight, Ban, Check, ChevronLeft, CircleCheck, Download, Phone, Share2,
 } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { apiGet } from '../lib/api';
 import { downloadAndShare } from '../lib/download';
+import { openDocumentPreview } from '../lib/documentPreview';
 import { goBack } from '../lib/nav';
 import { toUiStatus } from '../lib/requestShape';
 import { reviewPill } from '../lib/requestDocuments';
-import { detailsView, needsClamp } from '../lib/requestDetailsView';
+import { detailsView } from '../lib/requestDetailsView';
 import { Screen, Body } from '../components/layout';
-import { LoadError, LoadingState } from '../components/LoadingState';
+import { AppRefreshControl } from '../components/AppRefreshControl';
+import { LoadFailure } from '../components/LoadFailure';
+import { Reveal } from '../components/skeleton/Reveal';
+import { useSkeletonGate } from '../components/skeleton/hooks';
+import { RequestDetailsSkeleton } from '../components/skeleton/screens';
+import { useResource } from '../lib/useResource';
 import { ServiceIcon } from '../components/home/ServiceIcon';
 import AdditionalDocuments from '../components/request/AdditionalDocuments';
+import { DocumentRow, Medical, PatientGrid, Trip } from '../components/request/DetailsBlocks';
 import DocumentHistory from '../components/request/DocumentHistory';
 import ReviewBanner from '../components/request/ReviewBanner';
-import { C, Card, DashedLine, FONT, Field, Section, StatusLayout, WRAP } from '../components/request/DetailsParts';
+import { C, Card, FONT, Section, StatusLayout, WRAP } from '../components/request/DetailsParts';
 import { COLORS } from '../theme/colors';
 import { PressBox } from '../components/PressBox';
 
@@ -48,15 +55,6 @@ function Action({ Icon, label, onPress }) {
       <Icon size={20} color={C.blueText} />
       <Text style={{ fontFamily: FONT[700], fontSize: 12.5, lineHeight: 16, color: C.ink, textAlign: 'center' }}>{label}</Text>
     </PressBox>
-  );
-}
-
-function Chip({ children, bg, fg, Icon, padV = 5, padH = 10, size = 13, line = 18 }) {
-  return (
-    <View style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: padV, paddingHorizontal: padH, borderRadius: 999, backgroundColor: bg }}>
-      {Icon ? <Icon size={15} color={fg} strokeWidth={2.4} /> : null}
-      <Text style={[{ flexShrink: 1, fontFamily: FONT[700], fontSize: size, lineHeight: line, color: fg }, WRAP]}>{children}</Text>
-    </View>
   );
 }
 
@@ -122,180 +120,23 @@ function StatusCard({ view, request, t }) {
   return null; // the case has not started: no card
 }
 
-// Two columns, 14 between the rows and 12 between the columns; a full-width field takes its own row.
-function PatientGrid({ fields }) {
-  const rows = [];
-  let pair = [];
-  const flush = () => { if (pair.length) { rows.push(pair); pair = []; } };
-  fields.forEach((f) => {
-    if (f.full) { flush(); rows.push([f]); } else { pair.push(f); if (pair.length === 2) flush(); }
-  });
-  flush();
-  return (
-    <View style={{ gap: 14 }}>
-      {rows.map((row) => (
-        <View key={row[0].key} style={{ flexDirection: 'row', gap: 12 }}>
-          {row.length === 1 && row[0].full ? <Field label={row[0].label} value={row[0].value} style={{ flex: 1 }} /> : (
-            <>
-              <Field label={row[0].label} value={row[0].value} style={{ flex: 1 }} />
-              {row[1] ? <Field label={row[1].label} value={row[1].value} style={{ flex: 1 }} /> : <View style={{ flex: 1 }} />}
-            </>
-          )}
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function Trip({ trip, t }) {
-  const hasRoute = trip.from || trip.to;
-  return (
-    <Card>
-      {hasRoute ? (
-        <View>
-          {trip.from ? (
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <View style={{ width: 14, alignItems: 'center' }}>
-                <View style={{ marginTop: 1, width: 14, height: 14, borderRadius: 7, borderWidth: 3, borderColor: C.blue, backgroundColor: '#FFFFFF' }} />
-                {trip.to ? <View style={{ flex: 1, paddingTop: 4, paddingBottom: 2 }}><DashedLine /></View> : null}
-              </View>
-              <Field label={t('lbl_from')} value={trip.from} style={{ flex: 1, paddingBottom: trip.to ? 14 : 0 }} />
-            </View>
-          ) : null}
-          {trip.to ? (
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <View style={{ width: 14, alignItems: 'center' }}>
-                <View style={{ marginTop: 1, width: 14, height: 14, borderRadius: 7, backgroundColor: C.blue }} />
-              </View>
-              <Field label={t('lbl_to')} value={trip.to} style={{ flex: 1 }} />
-            </View>
-          ) : null}
-        </View>
-      ) : null}
-      {trip.rows.length ? (
-        <View style={hasRoute ? { marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: C.divider, gap: 14 } : { gap: 14 }}>
-          {trip.rows.map((r) => <Field key={r.key} label={r.label} value={r.value} />)}
-        </View>
-      ) : null}
-    </Card>
-  );
-}
-
-// A row of the Medical card: 12 above and below, a 1px line between rows.
-function MedicalRow({ first, label, children }) {
-  return (
-    <View style={{ paddingVertical: 12, borderTopWidth: first ? 0 : 1, borderTopColor: C.divider }}>
-      <Text style={{ fontFamily: FONT[600], fontSize: 12.5, lineHeight: 16, color: C.muted, marginBottom: 2 }}>{label}</Text>
-      {children}
-    </View>
-  );
-}
-
-// The condition: line breaks kept, four lines when closed. A copy of the full text, invisible, is measured; the button
-// shows only when the full text is taller than four lines.
-function Condition({ text, t }) {
-  const [open, setOpen] = useState(false);
-  const [fullHeight, setFullHeight] = useState(0);
-  const textStyle = [{ fontFamily: FONT[500], fontSize: 14.5, lineHeight: 21, color: C.ink }, WRAP];
-  const long = needsClamp(fullHeight, 21);
-  return (
-    <View>
-      <View style={{ position: 'absolute', left: 0, right: 0, opacity: 0 }} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" onLayout={(e) => setFullHeight(e.nativeEvent.layout.height)}>
-        <Text style={textStyle}>{text}</Text>
-      </View>
-      <Text style={textStyle} numberOfLines={open ? undefined : 4}>{text}</Text>
-      {long ? (
-        <Pressable
-          accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen((v) => !v)}
-          style={{ minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' }}
-        >
-          <Text style={{ fontFamily: FONT[700], fontSize: 14, color: C.blueText }}>{t(open ? 'rd_show_less' : 'rd_show_more')}</Text>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
-
-function Medical({ medical, t }) {
-  const rows = [];
-  if (medical.urgency) {
-    rows.push(['urgency', t('rd_urgent'), <Chip key="u" bg={medical.urgency.bg} fg={medical.urgency.fg} Icon={medical.urgency.alert ? CircleAlert : null}>{medical.urgency.label}</Chip>]);
-  }
-  if (medical.condition) rows.push(['condition', medical.conditionLabel, <Condition key="c" text={medical.condition} t={t} />]);
-  if (medical.care.length) {
-    rows.push(['care', t('field_care_level'), (
-      <View key="care" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-        {medical.care.map((c) => <Chip key={c} bg={C.soft} fg={C.navy} padV={6} padH={12} size={13.5}>{c}</Chip>)}
-      </View>
-    )]);
-  }
-  if (medical.mobility) {
-    rows.push(['mobility', t('req_mobility'), <Text key="m" style={[{ fontFamily: FONT[700], fontSize: 15, lineHeight: 21, color: C.ink }, WRAP]}>{medical.mobility}</Text>]);
-  }
-  if (medical.equipment) {
-    rows.push(['equipment', t('req_on_board'), medical.equipment.none ? (
-      <Text key="n" style={{ fontFamily: FONT[700], fontSize: 15, lineHeight: 21, color: C.ink }}>{t('req_none')}</Text>
-    ) : (
-      <View key="e" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-        {medical.equipment.items.map((label) => <Chip key={label} bg={C.soft} fg={C.navy} Icon={Check} padV={6} padH={12} size={13.5}>{label}</Chip>)}
-      </View>
-    )]);
-  }
-  if (!rows.length) return null;
-  return (
-    <Section title={t('rd_medical')}>
-      <Card padding={0} style={{ paddingVertical: 4, paddingHorizontal: 16 }}>
-        {rows.map(([key, label, node], i) => <MedicalRow key={key} first={i === 0} label={label}>{node}</MedicalRow>)}
-      </Card>
-    </Section>
-  );
-}
-
-function DocumentRow({ doc, first, t, onOpen }) {
-  const Icon = doc.isImage ? ImageIcon : FileText;
-  const body = (
-    <>
-      <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: doc.isImage ? '#E0F5F4' : C.soft, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <Icon size={20} color={doc.isImage ? '#0B6564' : C.blueText} />
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text numberOfLines={1} ellipsizeMode="tail" style={{ fontFamily: FONT[600], fontSize: 14.5, lineHeight: 20, color: C.ink }}>{doc.name}</Text>
-        {doc.meta ? <Text style={[{ fontFamily: FONT[400], fontSize: 12.5, lineHeight: 17, color: C.muted }, WRAP]}>{doc.meta}</Text> : null}
-        {doc.statusLabel ? <Text style={{ marginTop: 2, fontFamily: FONT[700], fontSize: 12.5, lineHeight: 17, color: doc.status === 'approved' ? '#0B6564' : ['rejected', 'unsafe', 'scan_failed'].includes(doc.status) ? '#C53030' : C.blueText }}>{doc.statusLabel}</Text> : null}
-        {doc.reason ? <Text style={[{ marginTop: 2, fontFamily: FONT[400], fontSize: 12.5, lineHeight: 18, color: '#C53030' }, WRAP]}>{doc.reason}</Text> : null}
-      </View>
-      {doc.openable ? <ChevronRight size={20} color="#8A97AB" /> : null}
-    </>
-  );
-  const box = { minHeight: 66, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 16, borderTopWidth: first ? 0 : 1, borderTopColor: C.divider };
-  if (!doc.openable) return <View style={box}>{body}</View>;
-  return (
-    <PressBox accessibilityRole="button" accessibilityLabel={t('rd_open_document', { name: doc.name })} onPress={onOpen} style={({ pressed }) => [box, { opacity: pressed ? 0.8 : 1 }]}>{body}</PressBox>
-  );
-}
-
 export default function RequestDetails() {
   const { t, toast, isRTL } = useApp();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
-  const [request, setRequest] = useState(null);
-  const [failed, setFailed] = useState(false);
+  // Loaded the way every data screen loads (lib/useResource.js): a shimmer skeleton on the first load only, what an earlier visit loaded
+  // shows at once and refreshes quietly, "Try again" if the first load fails, and pull-to-refresh with the page staying on screen.
+  // `reload` (after documents were sent) is the same quiet refetch: the screen keeps showing the current request meanwhile.
+  const { data, loading, error, reload, onRefresh, refreshing } = useResource({
+    key: `request:${id}`,
+    enabled: Boolean(id),
+    fetcher: () => apiGet(`/requests/me/${id}`).then(({ request: r }) => r),
+    onRefreshError: () => toast(t('sk_refresh_failed')),
+  });
+  const request = data ?? null;
+  const gate = useSkeletonGate(loading && Boolean(id));
   // The height of the "Open live tracking" bar under the scroll area (0 when it is not drawn): the room the floating SOS button needs is measured from above it.
   const [barHeight, setBarHeight] = useState(0);
-
-  useEffect(() => {
-    if (!id) return;
-    apiGet(`/requests/me/${id}`)
-      .then(({ request: r }) => setRequest(r))
-      .catch((err) => { setFailed(true); toast(err.message); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per id
-  }, [id]);
-
-  // Reloads the request after documents were sent. The screen keeps showing the current request while
-  // this runs (and if it fails), so an upload's results on screen are never lost to a failed reload.
-  const reload = () => apiGet(`/requests/me/${id}`)
-    .then(({ request: r }) => setRequest(r))
-    .catch((err) => toast(err.message));
 
   const page = { backgroundColor: '#F2F6FC' };
 
@@ -303,7 +144,8 @@ export default function RequestDetails() {
     return (
       <Screen style={page}>
         <Header title={t('request_details_title')} backLabel={t('home_back')} isRTL={isRTL} />
-        {failed || !id ? <LoadError message={t('rd_load_failed')} /> : <LoadingState />}
+        {!id || (error && !request) ? <LoadFailure message={t('rd_load_failed')} onRetry={id ? reload : undefined} /> : null}
+        {loading && id && gate.visible ? <RequestDetailsSkeleton label={t('sk_loading_request')} /> : null}
       </Screen>
     );
   }
@@ -343,8 +185,8 @@ export default function RequestDetails() {
   return (
     <Screen style={page}>
       <Header title={t('request_details_title')} backLabel={t('home_back')} isRTL={isRTL} />
-      <Body contentClassName="" bottomEdge={view.showTrackingBar ? barHeight : 0}>
-        <View style={{ paddingTop: 16, paddingHorizontal: 16, paddingBottom: 0, gap: 14 }}>
+      <Body contentClassName="" bottomEdge={view.showTrackingBar ? barHeight : 0} refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+        <Reveal animate={gate.wasShown} style={{ paddingTop: 16, paddingHorizontal: 16, paddingBottom: 0, gap: 14 }}>
           <Summary view={view} t={t} onDownload={downloadSummary} onShare={shareRequest} onContact={() => Linking.openURL('tel:+919699999065')} />
           <StatusCard view={view} request={request} t={t} />
 
@@ -367,7 +209,7 @@ export default function RequestDetails() {
               ) : docs.map((doc, i) => (
                 <DocumentRow
                   key={doc.id} doc={doc} first={i === 0} t={t}
-                  onOpen={() => downloadAndShare(`/documents/${doc.id}/file`, doc.name).catch((err) => toast(err.message))}
+                  onOpen={() => openDocumentPreview(router.push, doc)}
                 />
               ))}
             </Card>
@@ -375,7 +217,7 @@ export default function RequestDetails() {
 
           <DocumentHistory request={request} styled />
           <AdditionalDocuments request={request} onUploaded={reload} />
-        </View>
+        </Reveal>
       </Body>
       {view.showTrackingBar ? (
         <View onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: C.line, paddingTop: 12, paddingHorizontal: 16, paddingBottom: 20 + insets.bottom }}>

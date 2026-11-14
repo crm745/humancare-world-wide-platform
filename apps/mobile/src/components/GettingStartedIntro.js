@@ -8,7 +8,7 @@ import { GETTING_STARTED_SCENE, LOGO } from '../data/images';
 import { Button, Card, Heading, Text } from './ui';
 import { COLORS } from '../theme/colors';
 
-// Page 1 of Getting Started. Only the logo and the scene are pictures; the heading, tagline,
+// The Getting Started page. Only the logo and the scene are pictures; the heading, tagline,
 // trust card, button and footer line are real text. Type, colours and the button are the app's
 // own (Heading, Card, Button, text-muted, text-primary), so this page sizes like every other screen.
 const LOGO_RATIO = 2440 / 1405;

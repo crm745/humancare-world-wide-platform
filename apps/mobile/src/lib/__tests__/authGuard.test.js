@@ -217,6 +217,6 @@ describe('wiring', () => {
   });
   test('sign out shows the destination before clearing tokens, so the gate cannot override it', () => {
     const profile = read('../../app/profile.js');
-    expect(profile).toMatch(/navReplace\(isCorporate \? '\/corporate-login' : '\/welcome'\); await clearTokens\(\);/);
+    expect(profile).toMatch(/navReplace\(isCorporate \? '\/corporate-login' : '\/login'\); await clearTokens\(\);/);
   });
 });

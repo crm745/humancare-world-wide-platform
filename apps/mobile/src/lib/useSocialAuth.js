@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import { useGoogleSignIn, isGoogleConfigured } from './googleAuth';
@@ -5,6 +6,7 @@ import { signInWithApple } from './appleAuth';
 import { apiPost } from './api';
 import { beginSignIn } from './session';
 import { setAuthStep } from './authFlow';
+import { runGoogleLogin } from './googleLogin';
 import { GoogleMark, AppleMark } from '../components/SocialMarks';
 
 // Used by login.js: Google works on both platforms, Apple is
@@ -31,13 +33,18 @@ export function useSocialAuth({ toast, afterSocialLogin }) {
   // googleAuth.web.js (popup) on web, googleAuth.native.js (native picker) on phones.
   const google = useGoogleSignIn();
 
+  const googleGuard = useRef({ busy: false }); // a second tap while one attempt is running does nothing
   const onGoogle = async () => {
     if (!isGoogleConfigured) { toast('Google sign-in isn’t set up yet.'); return; }
     try {
-      const attempt = beginSignIn();
-      const idToken = await google.signIn();
-      if (!idToken) return; // closed the picker
-      await afterSocialLogin(await apiPost('/auth/google', { idToken }), attempt);
+      // Closing the picker or the popup ends quietly (no sign-in, no message); the screen after sign-in opens only once the backend has said yes.
+      await runGoogleLogin({
+        begin: beginSignIn,
+        getIdToken: google.signIn,
+        postToken: (idToken) => apiPost('/auth/google', { idToken }),
+        afterLogin: afterSocialLogin,
+        reopenPicker: google.reopen, // web: a second tap brings the popup back
+      }, googleGuard.current);
     } catch (err) {
       onFailed(err);
     }

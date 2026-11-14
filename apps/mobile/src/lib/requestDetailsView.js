@@ -17,16 +17,15 @@ import { documentHistory, reviewBanner, reviewState } from './requestDocuments';
 import { formatSize } from './documentHistoryView';
 import { serviceKeyOf, serviceTitleKey } from './myRequestsView';
 import { COLORS } from '../theme/colors';
+import { isEmptyValue } from './emptyValue';
 
 export const STEP_COUNT = TRACKING_STEPS.length;
 
 // ---- small helpers -------------------------------------------------------------------------------------------------
 
-// The text of a value, or '' when there is nothing worth showing (never "null" or "undefined").
+// The text of a value, or '' when there is nothing worth showing (lib/emptyValue.js: never "null", "undefined" or a lone dash).
 export function textOf(value) {
-  if (value === null || value === undefined) return '';
-  const text = String(value).trim();
-  return text === '' || text === 'null' || text === 'undefined' ? '' : text;
+  return isEmptyValue(value) ? '' : String(value).trim();
 }
 
 const baseKeyOf = (request) => String((request && request.serviceKey) || '').split('_')[0];

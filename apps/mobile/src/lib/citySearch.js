@@ -3,7 +3,8 @@
 
 export const CITY_QUERY_MIN = 2;
 export const CITY_QUERY_MAX = 80;
-export const CITY_RESULT_LIMIT = 8;
+// Asked for the most the backend gives (its limit is 10): the backend cannot filter by country, so a field held to a country filters what comes back.
+export const CITY_RESULT_LIMIT = 10;
 export const SEARCH_DEBOUNCE_MS = 300;
 
 // Shown until the first answer arrives, and if an answer ever leaves it out. Same words as the
@@ -59,5 +60,58 @@ export async function searchCities(fetcher, text, { retries = 1, delayMs = 400, 
       attempt += 1;
       await sleep(delayMs);
     }
+  }
+}
+
+// ---- inline suggestions ---------------------------------------------------------------------------------------------------------
+// The same search as above, shared by every city field on the form: one request for the same text, whichever field asks (and while
+// it is still on its way), and a short memory of recent answers so typing, deleting and typing again never asks twice.
+export const CITY_CACHE_TTL_MS = 5 * 60 * 1000;
+export const CITY_CACHE_MAX = 40;
+const answers = new Map(); // normalised query -> { at, value }
+const inFlight = new Map(); // normalised query -> Promise
+
+export const normaliseCityText = (text) => String(text || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\s+/g, ' ').trim();
+export const clearCitySearchCache = () => { answers.clear(); inFlight.clear(); };
+
+// -> { cities, attribution } like searchCities. `now` is injectable for tests.
+export function searchCitiesCached(fetcher, text, options = {}, now = Date.now()) {
+  const query = searchableQuery(text);
+  if (!query) return Promise.resolve({ cities: [], attribution: GEONAMES_ATTRIBUTION_FALLBACK });
+  const key = normaliseCityText(query);
+  const hit = answers.get(key);
+  if (hit && now - hit.at < CITY_CACHE_TTL_MS) return Promise.resolve(hit.value);
+  if (inFlight.has(key)) return inFlight.get(key);
+  const request = searchCities(fetcher, query, options)
+    .then((value) => {
+      answers.set(key, { at: now, value });
+      if (answers.size > CITY_CACHE_MAX) answers.delete(answers.keys().next().value); // the oldest goes
+      return value;
+    })
+    .finally(() => { inFlight.delete(key); });
+  inFlight.set(key, request);
+  return request;
+}
+
+// What the person typed, if it names exactly ONE of the suggestions (its city name, the first part of its label, or the whole label equals the text,
+// ignoring case, accents and spaces). "Pune" with one Pune in the list is that city; "Springfield" with several is not guessed.
+// With `countryIso`, only the cities of that country count (an exact ISO code match): "Springfield" with the US selected is the US one.
+export function matchTypedCity(text, cities, countryIso) {
+  const wanted = normaliseCityText(text);
+  if (!wanted || !Array.isArray(cities)) return null;
+  const code = String(countryIso == null ? '' : countryIso).trim().toUpperCase();
+  const pool = code ? cities.filter((c) => String(c.countryCode || '').toUpperCase() === code) : cities;
+  const same = pool.filter((c) => normaliseCityText(c.name) === wanted || normaliseCityText(String(c.label || '').split(',')[0]) === wanted || normaliseCityText(c.label) === wanted);
+  return same.length === 1 ? same[0] : null;
+}
+
+// For the Continue button: a city typed by hand and never picked. Resolves the one verified city it names, or null (nothing found, several
+// found, or the search failed: the person is then asked to pick a suggestion).
+export async function resolveTypedCity(fetcher, text, options, countryIso) {
+  try {
+    const { cities } = await searchCitiesCached(fetcher, text, options);
+    return matchTypedCity(text, cities, countryIso);
+  } catch {
+    return null;
   }
 }

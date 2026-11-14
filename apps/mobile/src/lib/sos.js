@@ -19,6 +19,7 @@ const normalise = (pathname) => {
 // by its folder.
 const HIDDEN_ROUTES = new Set([
   '/home',
+  '/document-preview', // a full-screen preview: the button would sit on the document
   '/', '/welcome',
   '/login', '/login-otp', '/choose-login',
   '/register', '/register-otp', '/complete-profile',

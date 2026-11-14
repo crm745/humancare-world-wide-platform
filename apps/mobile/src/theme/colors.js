@@ -15,4 +15,7 @@ const COLORS = { primary, primaryPressed, primarySoft, primaryMuted, onPrimaryMu
 // The brand blue with an alpha, for shadows and overlays: primaryAlpha(0.72) is rgba(48,58,143,0.72).
 const primaryAlpha = (alpha) => `rgba(48,58,143,${alpha})`;
 
-module.exports = { COLORS, primaryAlpha };
+// Loading skeletons (components/skeleton): a block, the highlight that sweeps across it, and the colour a new item flashes from.
+const SKELETON = { block: '#E3E9F2', highlight: '#F5F8FC', newItem: '#E2E3EF' };
+
+module.exports = { COLORS, SKELETON, primaryAlpha };

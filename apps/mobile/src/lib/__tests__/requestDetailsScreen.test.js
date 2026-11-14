@@ -3,7 +3,8 @@ const fs = require('fs');
 const path = require('path');
 
 const read = (rel) => fs.readFileSync(path.join(__dirname, rel), 'utf8');
-const screen = read('../../app/request-details.js');
+// the page, plus the blocks it shares with the New Request review step (components/request/DetailsBlocks.js)
+const screen = read('../../app/request-details.js') + read('../../components/request/DetailsBlocks.js');
 const parts = read('../../components/request/DetailsParts.js');
 
 describe('Request Details is drawn to the design (source checks)', () => {
@@ -89,7 +90,7 @@ describe('Request Details is drawn to the design (source checks)', () => {
   });
   test('a document row is at least 66 tall, with a 40 tile, a one-line name with an ellipsis, a meta line and a chevron', () => {
     expect(screen).toContain('minHeight: 66, flexDirection: \'row\'');
-    expect(screen).toContain('width: 40, height: 40, borderRadius: 12, backgroundColor: doc.isImage ? \'#E0F5F4\' : C.soft');
+    expect(screen).toContain('width: 40, height: 40, borderRadius: 12, backgroundColor: doc.isImage ? \'#E0F5F4\' : COLORS.primarySoft');
     expect(screen).toContain('numberOfLines={1} ellipsizeMode="tail"');
     expect(screen).toContain('fontFamily: FONT[600], fontSize: 14.5, lineHeight: 20');
     expect(screen).toContain('<ChevronRight size={20}');
@@ -103,7 +104,7 @@ describe('Request Details is drawn to the design (source checks)', () => {
     expect(screen).not.toContain('Track Details');
   });
   test('what was there is kept: the load error, the reload after an upload, Document history and Additional documents', () => {
-    expect(screen).toContain('<LoadError');
+    expect(screen).toContain("<LoadFailure message={t('rd_load_failed')} onRetry={id ? reload : undefined} />");
     expect(screen).toContain('<DocumentHistory request={request} styled />');
     expect(screen).toContain('<AdditionalDocuments request={request} onUploaded={reload} />');
     expect(screen).toContain("apiGet(`/requests/me/${id}`)");

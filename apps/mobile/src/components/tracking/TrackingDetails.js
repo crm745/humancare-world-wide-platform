@@ -8,6 +8,7 @@ import { TRACKING_PALETTE as P } from '../../lib/tracking/palette';
 import { C, Card, FONT, Section, WRAP } from '../request/DetailsParts';
 import { COLORS } from '../../theme/colors';
 import { PressBox } from '../PressBox';
+import { HighlightFill } from '../skeleton/HighlightFill';
 
 // The Tracking Details screen, drawn to the design from lib/trackingDetailsView.js. It decides nothing about the journey: it
 // draws the steps it is given, however many there are, with the names and texts the model supplies.
@@ -104,7 +105,7 @@ function Marker({ state }) {
 
 const TITLE = { done: { weight: 700, color: C.ink }, current: { weight: 700, color: C.navy }, pending: { weight: 600, color: C.muted } };
 
-function StepRow({ step, last, t }) {
+function StepRow({ step, last, t, isNew }) {
   const current = step.state === 'current';
   const stateText = step.stopped ? t('status_cancelled') : current ? t('tcp_state_active') : step.state === 'done' ? t('status_completed') : t('timeline_pending');
   // A step not reached reads "Pending"; a cancelled request's stop step shows the time it was cancelled.
@@ -116,6 +117,7 @@ function StepRow({ step, last, t }) {
       aria-current={current ? 'step' : undefined} role="listitem"
       style={{ flexDirection: 'row', gap: 14 }}
     >
+      {isNew ? <HighlightFill radius={10} /> : null}
       <View style={{ width: MARKER, alignItems: 'center' }}>
         <Marker state={step.state} />
         {!last ? <View style={{ position: 'absolute', top: MARKER + 2, bottom: -2, width: 2, backgroundColor: step.state === 'done' ? BLUE : C.line }} /> : null}
@@ -144,7 +146,8 @@ function Message({ text, t }) {
 }
 
 // `d` is what buildTrackingDetails returns. `onOpenRequest` is offered only while the patient has something to do.
-export default function TrackingDetails({ d, onOpenRequest }) {
+// `highlightKeys`: the steps with a stage event that is new since the last pull-to-refresh (shown with a brief highlight).
+export default function TrackingDetails({ d, onOpenRequest, highlightKeys = [] }) {
   const { t, isRTL } = useApp();
   return (
     <View style={{ paddingTop: 16, paddingHorizontal: 16, paddingBottom: 0, gap: 14 }}>
@@ -153,7 +156,7 @@ export default function TrackingDetails({ d, onOpenRequest }) {
       <Section title={t('td_progress')}>
         <Card padding={0} style={{ paddingTop: 18, paddingHorizontal: 16, paddingBottom: 4 }}>
           <View role="list" accessibilityRole="list">
-            {d.steps.map((step, i) => <StepRow key={step.key} step={step} last={i === d.steps.length - 1} t={t} />)}
+            {d.steps.map((step, i) => <StepRow key={step.key} step={step} last={i === d.steps.length - 1} t={t} isNew={highlightKeys.includes(step.key)} />)}
           </View>
         </Card>
       </Section>

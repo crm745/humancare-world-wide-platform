@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useRef } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { Pressable, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../state/AppContext';
@@ -8,6 +8,7 @@ import { goBack } from '../../lib/nav';
 import { Screen, TopBar } from '../layout';
 import { Button, Text } from '../ui';
 import { ServiceIconTile } from '../home/ServiceIcon';
+import { KeyboardBar, KeyboardScroll } from '../keyboard';
 
 // The New Request form: 1 Patient -> 2 Medical -> 3 Review. Every step shares this frame:
 // header with Save draft, the step bar, the chosen service, the scrolling fields and the
@@ -82,9 +83,14 @@ function ServiceCard() {
 // with an error scrolls to that field and runs `onInvalid` so the step starts showing errors.
 // `serverAnchor` is the id of the first field the server refused on this step (or null): when it
 // appears, the page scrolls to that field so the message is not left off screen.
-export function RequestFrame({ step, children, firstError, onInvalid, onNext, nextKey, label, busy, showService = true, serverAnchor = null }) {
+// `prepare()` (optional, async) runs first when Continue is tapped and may return a patch of draft values it has just settled (the step uses it to
+// match a city typed by hand to the verified list); `firstError(patch)` then judges the draft with that patch applied.
+export function RequestFrame({ step, children, firstError, onInvalid, onNext, prepare, nextKey, label, busy, buttonClassName, showService = true, serverAnchor = null }) {
   const { t, toast, updateDraft } = useApp();
   const insets = useSafeAreaInsets();
+  // The Continue bar rides on top of the keyboard; the scroll area keeps a focused field above it.
+  const [barHeight, setBarHeight] = useState(0);
+  const [preparing, setPreparing] = useState(false);
   const scrollRef = useRef(null);
   const anchors = useRef({});
   const listY = useRef(0);
@@ -104,8 +110,14 @@ export function RequestFrame({ step, children, firstError, onInvalid, onNext, ne
     updateDraft({ changingService: false });
   }, [updateDraft]));
 
-  const next = () => {
-    const bad = firstError?.();
+  const next = async () => {
+    if (preparing) return;
+    let patch = null;
+    if (prepare) {
+      setPreparing(true);
+      try { patch = await prepare(); } catch { patch = null; } finally { setPreparing(false); }
+    }
+    const bad = firstError?.(patch);
     if (bad) {
       toast(t('req_fix_fields'));
       onInvalid?.();
@@ -119,22 +131,24 @@ export function RequestFrame({ step, children, firstError, onInvalid, onNext, ne
   return (
     <Screen bg="bg-canvas">
       {/* On a wide screen (tablet, browser) the form stays one centred column, like Home. */}
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, width: '100%', maxWidth: 560, alignSelf: 'center' }}>
+      <View style={{ flex: 1, width: '100%', maxWidth: 560, alignSelf: 'center' }}>
         <TopBar title={t('req_title')} onBack={goBack} />
         <StepBar step={step} />
-        <ScrollView
-          ref={scrollRef} className="flex-1" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}
+        <KeyboardScroll
+          ref={scrollRef} className="flex-1" footerHeight={barHeight} showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 24 }}
         >
           {showService && <View className="mb-5"><ServiceCard /></View>}
           <AnchorContext.Provider value={register}>
             <View onLayout={(e) => { listY.current = e.nativeEvent.layout.y; }} className="gap-5">{children}</View>
           </AnchorContext.Provider>
-        </ScrollView>
-        <View className="border-t border-line bg-white px-[18px] pt-3" style={{ paddingBottom: Math.max(insets.bottom, 12) }}>
-          <Button title={label ?? t(nextKey)} onPress={next} loading={busy} />
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardScroll>
+        <KeyboardBar onLayout={(e) => setBarHeight(Math.round(e.nativeEvent.layout.height))}>
+          <View className="border-t border-line bg-white px-[18px] pt-3" style={{ paddingBottom: Math.max(insets.bottom, 12) }}>
+            <Button title={label ?? t(nextKey)} onPress={next} loading={busy || preparing} className={buttonClassName} />
+          </View>
+        </KeyboardBar>
+      </View>
     </Screen>
   );
 }

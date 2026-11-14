@@ -56,9 +56,9 @@ describe('the screen', () => {
     expect(evaluate(false)).toBe(false);
   });
   test('preview mode makes no notification API call and writes nothing', () => {
-    // the only apiGet is inside load(), which the mount effect skips in preview mode...
+    // the only apiGet is inside the resource fetcher, which useResource does not run in preview mode (enabled: false)...
     expect(screen.match(/apiGet\(/g)).toHaveLength(1);
-    expect(screen).toContain('useEffect(() => { if (!ALERTS_PREVIEW) load(); }, []);');
+    expect(screen).toContain('enabled: !ALERTS_PREVIEW,');
     // ...and there is no write at all: the "Mark read" button is gone, so nothing calls apiPost
     expect(screen).not.toContain('apiPost');
     expect(screen).not.toContain('markAllRead');
@@ -75,14 +75,15 @@ describe('the screen', () => {
   test('the existing API-based behaviour is unchanged when the preview is off', () => {
     expect(screen).toContain("apiGet('/notifications')");
     expect(screen).toContain('No notifications yet.');
-    expect(screen).toContain('{loading && <LoadingState />}');
+    expect(screen).toContain("{loading && gate.visible && <RowsSkeleton label={t('sk_loading_notifications')} count={5} lines={2} />}");
+    expect(screen).toContain('{error && !data && <LoadFailure onRetry={reload} />}');
     expect(screen).toContain('${read ? \'opacity-55\' : \'\'}');
     expect(screen).toContain('timeAgo(n.createdAt)');
     expect(screen).toContain("title={t('notifications_title')}");
     expect(screen).toContain("<Button title={t('btn_return_home')} onPress={goBack} />");
   });
-  test('the loading state starts true only when the API is used', () => {
-    expect(screen).toContain('useState(!ALERTS_PREVIEW)');
+  test('the skeleton shows only when the API is used', () => {
+    expect(screen).toContain('useSkeletonGate(loading && !ALERTS_PREVIEW)');
   });
   test('it is still the one existing screen, with the shared Screen, TopBar, Body and Card', () => {
     expect(screen).toContain("import { Body, Screen, TopBar } from '../components/layout'");

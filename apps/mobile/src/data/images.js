@@ -17,4 +17,3 @@ export const SPLASH_BG = require('../../assets/images/splash-globe.jpg');
 // Getting Started pages; the @2x/@3x files next to each are picked automatically.
 // Page 1 of Getting Started: globe, family, nurse and landmarks.
 export const GETTING_STARTED_SCENE = require('../../assets/images/getting-started-scene.png');
-export const ONBOARDING_CARE = require('../../assets/images/onboarding-care.png');

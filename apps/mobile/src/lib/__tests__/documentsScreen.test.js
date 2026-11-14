@@ -17,12 +17,13 @@ describe('the My Documents screen', () => {
   test('still loads from the same endpoint (the API contract is unchanged)', () => {
     expect(screen.match(/apiGet\(/g)).toHaveLength(1);
     expect(screen).toContain("apiGet('/requests/me/documents')");
-    expect(screen).toContain('`/documents/${doc.id}/file`');
+    // the file itself is fetched by the preview screen (app/document-preview.js), from GET /documents/:id/file, with the person's sign-in
   });
-  test('uses the dedicated card and the new download, not the shared DocRow or downloadAndShare', () => {
+  test('uses the dedicated card and opens the in-app preview, not the shared DocRow, not downloadAndShare, and never the share sheet', () => {
     expect(screen).toContain("from '../components/documents/DocumentCard'");
-    expect(screen).toContain("import { downloadDocument, downloadErrorInfo } from '../lib/download'");
-    expect(screen).not.toMatch(/DocRow|downloadAndShare/);
+    expect(screen).toContain("import { openDocumentPreview } from '../lib/documentPreview'");
+    expect(screen).toContain('openDocumentPreview(router.push, doc)');
+    expect(screen).not.toMatch(/DocRow|downloadAndShare|downloadDocument|Sharing|Share\.share|shareAsync/);
   });
   test('shared TopBar and Body; a count, a search, a retry, an empty state and a no-match state', () => {
     expect(screen).toContain("<TopBar title={t('my_documents')} />");
@@ -33,10 +34,9 @@ describe('the My Documents screen', () => {
     expect(screen).toContain("t('docs_no_match')");
     expect(screen).toContain("t('docs_clear_search')");
   });
-  test('a download in progress cannot be started twice (the guard is in documentsAccessibility.test.js); a failure is shown on the card and as a toast', () => {
-    expect(screen).toContain('guard.current.run(doc.id, async () => {');
-    expect(screen).toContain("{ status: 'error', message }");
-    expect(screen).toContain('toast(message)');
+  test('a double tap opens one preview (the guard is lib/documentPreview.js); the loading and the failure are shown by the preview screen', () => {
+    expect(screen).toContain('const start = (doc) => { openDocumentPreview(router.push, doc); };');
+    expect(read('../../app/document-preview.js')).toContain('downloadErrorInfo(file.error).key');
   });
   test('the date is never presented as an upload date', () => {
     expect(card).toContain('documentDate(doc.uploadedAt)');

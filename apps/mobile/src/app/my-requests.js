@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshControl, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { useRef, useState } from 'react';
+import { ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state/AppContext';
@@ -13,7 +13,12 @@ import { cardSpec, scaleFor } from '../lib/myRequestsLayout';
 import { BottomNav, Screen, useScrollToTopOnTabTap } from '../components/layout';
 import { useFabScrollPad } from '../components/sos/hooks';
 import { FilterSheet } from '../components/FilterSheet';
-import { LoadingState } from '../components/LoadingState';
+import { AppRefreshControl } from '../components/AppRefreshControl';
+import { LoadFailure } from '../components/LoadFailure';
+import { Reveal } from '../components/skeleton/Reveal';
+import { useSkeletonGate } from '../components/skeleton/hooks';
+import { RequestsSkeleton } from '../components/skeleton/screens';
+import { useResource } from '../lib/useResource';
 import { RequestCard } from '../components/requests/RequestCard';
 import { RequestsHeader } from '../components/requests/RequestsHeader';
 
@@ -35,28 +40,20 @@ export default function MyRequests() {
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [sheet, setSheet] = useState(false);
-  const [requests, setRequests] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const scrollRef = useRef(null);
   useScrollToTopOnTabTap(scrollRef);
 
-  // The same request as before. The first load shows the loading state; pulling the list down loads it again with the
-  // system's own spinner, and a failed refresh keeps the list that is on screen.
-  const load = useCallback(() => apiGet('/requests/me')
-    .then(({ requests: rows }) => setRequests(rows.map(toListItem)))
-    .catch((err) => toast(err.message)), [toast]);
-
-  useEffect(() => {
-    load().finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once on mount
-  }, []);
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  };
+  // The same request as before, loaded the way every data screen loads (lib/useResource.js): a shimmer skeleton on the first load only
+  // (what an earlier visit loaded shows at once and refreshes quietly), "Try again" if the first load fails, and pull-to-refresh with the
+  // list staying on screen. A request that was not in the list before the pull is highlighted for a moment.
+  const { data: rows, loading, error, reload, onRefresh, refreshing, highlight } = useResource({
+    key: 'my-requests',
+    fetcher: () => apiGet('/requests/me').then(({ requests: list }) => list.map(toListItem)),
+    idsOf: (list) => list.map((r) => r.rawId),
+    onRefreshError: () => toast(t('sk_refresh_failed')),
+  });
+  const requests = rows || [];
+  const gate = useSkeletonGate(loading);
 
   const today = new Date().toISOString().slice(0, 10);
   const q = query.trim().toLowerCase();
@@ -98,22 +95,27 @@ export default function MyRequests() {
         contentContainerStyle={{ flexGrow: 1, paddingTop: L.listPadTop, paddingHorizontal: L.listPadSide, paddingBottom, gap: L.listGap }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {loading && <LoadingState />}
+        {loading && gate.visible && <RequestsSkeleton label={t('sk_loading_requests')} />}
+        {error && !rows && <LoadFailure onRetry={reload} />}
+        {!loading && rows && (
+        <Reveal animate={gate.wasShown} style={{ gap: L.listGap }}>
         {items.map((r) => (
-          <RequestCard key={r.id} item={r} t={t} isRTL={isRTL} onPress={() => router.push({ pathname: '/request-details', params: { id: r.rawId } })} />
+          <RequestCard key={r.id} item={r} t={t} isRTL={isRTL} isNew={highlight.includes(r.rawId)} onPress={() => router.push({ pathname: '/request-details', params: { id: r.rawId } })} />
         ))}
-        {!loading && requests.length === 0 && (
+        {requests.length === 0 && (
           <View style={{ alignItems: 'center', paddingHorizontal: 20, paddingVertical: 50 }}>
             <Text style={{ marginBottom: 6, fontFamily: 'Inter_700Bold', fontSize: L.emptyTitle, color: '#5B6B84', textAlign: 'center' }}>{t('mr_empty_title')}</Text>
             <Text style={{ fontFamily: 'Inter_400Regular', fontSize: L.emptySub, color: '#97A4B8', textAlign: 'center' }}>{t('mr_empty_sub')}</Text>
           </View>
         )}
-        {!loading && requests.length > 0 && items.length === 0 && (
+        {requests.length > 0 && items.length === 0 && (
           <View style={{ alignItems: 'center', paddingHorizontal: 20, paddingVertical: 50 }}>
             <Text style={{ fontFamily: 'Inter_400Regular', fontSize: L.noMatch, color: '#5B6B84', textAlign: 'center' }}>{t('mr_no_match')}</Text>
           </View>
+        )}
+        </Reveal>
         )}
       </ScrollView>
       </View>

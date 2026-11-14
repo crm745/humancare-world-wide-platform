@@ -1,6 +1,7 @@
 import { Text, View, useWindowDimensions } from 'react-native';
 import { ArrowRight, ChevronRight, MapPin } from 'lucide-react-native';
 import { ServiceIcon } from '../home/ServiceIcon';
+import { HighlightFill } from '../skeleton/HighlightFill';
 import { SEGMENT_TODO, STEP_COUNT, cardView } from '../../lib/myRequestsView';
 import { badgeBelowFor, cardSpec, scaleFor } from '../../lib/myRequestsLayout';
 import { COLORS } from '../../theme/colors';
@@ -15,7 +16,7 @@ const INK = '#17233D';
 const MUTED = '#5B6B84';
 const FONT = { 400: 'Inter_400Regular', 500: 'Inter_500Medium', 600: 'Inter_600SemiBold', 700: 'Inter_700Bold', 800: 'Inter_800ExtraBold' };
 
-export function RequestCard({ item, onPress, t, isRTL }) {
+export function RequestCard({ item, onPress, t, isRTL, isNew }) {
   const v = cardView(item, t);
   const { width, fontScale } = useWindowDimensions();
   const L = cardSpec(scaleFor(width));
@@ -37,6 +38,8 @@ export function RequestCard({ item, onPress, t, isRTL }) {
         shadowColor: '#0D2340', shadowOpacity: 0.04, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 0, opacity: pressed ? 0.92 : 1,
       })}
     >
+      {/* After a pull-to-refresh a request that is new fades from #E2E3EF to the card colour behind its content. */}
+      {isNew ? <HighlightFill radius={L.radius} /> : null}
       {/* The icon, the name and the date, and the badge beside them (under them on a narrow screen or with large text, so a
           name never breaks in the middle). The badge never shrinks, so a long name wraps instead. */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: L.gap }}>

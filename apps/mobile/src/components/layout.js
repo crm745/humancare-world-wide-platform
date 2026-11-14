@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, BackHandler, Keyboard, Platform, Pressable, ScrollView, View } from 'react-native';
+import { AccessibilityInfo, Animated, Pressable, View } from 'react-native';
 import { usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, FileText, House, LayoutGrid, User } from 'lucide-react-native';
@@ -7,6 +7,7 @@ import { useApp } from '../state/AppContext';
 import { emitTabReselect, goBack, navReplace, onTabReselect } from '../lib/nav';
 import { Text, cx } from './ui';
 import { useFabScrollPad } from './sos/hooks';
+import { KeyboardScroll, useKeyboardOpen } from './keyboard';
 import { COLORS } from '../theme/colors';
 
 // Full-height screen with safe-area padding. `bg` is a Tailwind background class.
@@ -27,7 +28,8 @@ const BOTTOM_GAP = 32;
 // forwardRef so a parent (e.g. RequestStep, to scroll back to the top offending
 // field when validation fails) can call scrollTo on the underlying ScrollView.
 // `bottomEdge`: how far the bottom of this scroll area is above the bottom of the screen, when the screen has a fixed bar of its own under it.
-export const Body = forwardRef(function Body({ children, className = '', contentClassName = '', withNav, grow = true, bottomEdge = 0 }, ref) {
+// `footerHeight`: the height of a bar that rides on top of the keyboard under this scroll area (see components/keyboard).
+export const Body = forwardRef(function Body({ children, className = '', contentClassName = '', withNav, grow = true, bottomEdge = 0, refreshControl, footerHeight = 0 }, ref) {
   const insets = useSafeAreaInsets();
   const inner = useRef(null);
   // The bottom padding: the screen's own, or the room the floating SOS button needs where it shows, whichever is more (lib/sos.js).
@@ -35,17 +37,18 @@ export const Body = forwardRef(function Body({ children, className = '', content
   // Tapping the active tab again scrolls this screen back to the top.
   useEffect(() => (withNav ? onTabReselect(() => inner.current?.scrollTo({ y: 0, animated: true })) : undefined), [withNav]);
   return (
-    <ScrollView
+    <KeyboardScroll
       ref={(node) => { inner.current = node; if (typeof ref === 'function') ref(node); else if (ref) ref.current = node; }}
+      footerHeight={footerHeight}
       className={`flex-1 ${className}`}
       contentContainerClassName={`${grow ? 'flex-grow' : ''} ${contentClassName}`}
       contentContainerStyle={{ paddingBottom }}
       {...scrollProps}
       showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
+      refreshControl={refreshControl}
     >
       {children}
-    </ScrollView>
+    </KeyboardScroll>
   );
 });
 
@@ -133,33 +136,20 @@ function Tab({ on, label, Icon, reduceMotion, onPress }) {
 
 // Bottom tab bar: Home, Services, Requests, Profile. Corporates see "Cases" (corporate
 // dashboard) in place of "Requests". The white bar is full width; the tabs sit centred in
-// at most 560. Tapping the tab you are on scrolls it to the top, the Android back button on
-// any other tab goes to Home, and the bar hides while the keyboard is up.
+// at most 560. Tapping the tab you are on scrolls it to the top, and the bar hides while the keyboard is up. (The Android back button is
+// handled once for the whole app: components/SystemBack.js.)
 export function BottomNav() {
   const { t, isCorporate } = useApp();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const [reduceMotion, setReduceMotion] = useState(false);
-  const [keyboard, setKeyboard] = useState(false);
+  const keyboard = useKeyboardOpen();
 
   useEffect(() => {
     AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => {});
     const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
     return () => sub.remove();
   }, []);
-
-  useEffect(() => {
-    if (Platform.OS !== 'android') return undefined;
-    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboard(true));
-    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboard(false));
-    return () => { show.remove(); hide.remove(); };
-  }, []);
-
-  useEffect(() => {
-    if (Platform.OS !== 'android' || pathname === '/home') return undefined;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => { navReplace('/home'); return true; });
-    return () => sub.remove();
-  }, [pathname]);
 
   if (keyboard) return null;
   return (

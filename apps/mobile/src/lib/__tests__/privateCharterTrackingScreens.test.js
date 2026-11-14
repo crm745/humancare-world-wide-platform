@@ -34,11 +34,12 @@ describe('request-tracking.js (patient)', () => {
   });
 
   test('ignores a response that arrives after blur, keeps shown data, and uses the failed state only before the first load', () => {
-    expect(requestTracking).toMatch(/let active = true;/);
-    expect(requestTracking).toMatch(/return \(\) => \{ active = false; \};/);
-    expect(requestTracking.match(/if \(!active\) return;/g)).toHaveLength(2);
-    expect(requestTracking).toMatch(/if \(!loaded\.current\) setFailed\(true\);/);
-    expect(requestTracking).toMatch(/loaded\.current = true;/);
+    // the rules now live in lib/useResource.js: an answer for another key is dropped, a failed refresh keeps what is shown,
+    // and only a first load with nothing to show goes to the error state
+    const hook = read('../useResource.js');
+    expect(hook).toContain('if (keyRef.current !== forKey) return undefined;');
+    expect(hook).toContain('dataRef.current === undefined) setError(err)');
+    expect(requestTracking).toContain('(error && !request)');
   });
 
   test('every hook runs before the early return', () => {
@@ -93,15 +94,17 @@ describe('PrivateCharterTracking component', () => {
 });
 
 describe('request id changes (both screens)', () => {
-  test('request-tracking shows only a request that belongs to the route id', () => {
-    expect(requestTracking).toMatch(/const request = isRequestFor\(loadedRequest, id\) \? loadedRequest : null;/);
-    expect(requestTracking).toMatch(/setLoadedRequest\(data\.request\)/);
+  test('request-tracking keeps one cache entry per request id, so another request is never shown as this one', () => {
+    expect(requestTracking).toContain('key: `tracking:${id}`');
+    expect(requestTracking).toContain('enabled: Boolean(id)');
+    expect(requestTracking).toContain('const request = data ?? null;');
     expect(requestTracking).not.toMatch(/setRequest\(/);
   });
 
-  test('request-tracking starts over for a new id but keeps its data for the same id', () => {
-    expect(requestTracking).toMatch(/if \(loadedForId\.current !== String\(id\)\) \{\s+loadedForId\.current = String\(id\);\s+loaded\.current = false;\s+setFailed\(false\);\s+\}/);
-    expect(requestTracking).toMatch(/\}, \[id\]\),/);
+  test('request-tracking starts over for a new id (useResource resets from the cache of the new key) with one fetch', () => {
+    const hook = read('../useResource.js');
+    expect(hook).toContain('}, [key, enabled, reload]);');
+    expect(hook).toContain('keyRef.current = key;');
     expect(requestTracking.match(/apiGet\(/g)).toHaveLength(1);
   });
 
@@ -115,14 +118,16 @@ describe('request id changes (both screens)', () => {
   test('tracking starts over for a new id but keeps its data for the same id, with one patient fetch', () => {
     expect(tracking).toMatch(/if \(loadedForId\.current !== String\(params\.id\)\) \{\s+loadedForId\.current = String\(params\.id\);\s+loaded\.current = false;\s+setFailed\(false\);\s+\}/);
     expect(tracking).toMatch(/\}, \[params\.id, isCase\]\),/);
-    expect(tracking.match(/apiGet\(/g)).toHaveLength(2); // one corporate, one patient
+    // the first load (corporate), the focus load (patient), and the pull-to-refresh and "Try again" calls (each either kind)
+    expect(tracking.match(/apiGet\(/g)).toHaveLength(4);
+    expect(tracking.match(/apiGet\(`\/requests\/me\/\$\{params\.id\}`\)/g)).toHaveLength(1); // the patient focus load is still the only one of its kind
   });
 
   test('a response that arrives after the id changed is ignored (the old effect is cleaned up first)', () => {
-    [requestTracking, tracking].forEach((source) => {
-      expect(source).toMatch(/return \(\) => \{ active = false; \};/);
-      expect(source.match(/if \(!active\) return;/g)).toHaveLength(2);
-    });
+    expect(tracking).toMatch(/return \(\) => \{ active = false; \};/);
+    expect(tracking.match(/if \(!active\) return;/g)).toHaveLength(2);
+    // request-tracking: the same rule, in lib/useResource.js
+    expect(read('../useResource.js')).toContain('if (keyRef.current !== forKey) return undefined;');
   });
 });
 
