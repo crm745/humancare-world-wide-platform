@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AccessibilityInfo, Animated, Easing, Pressable, View } from 'react-native';
+import { AccessibilityInfo, Animated, Easing, View } from 'react-native';
 import { usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Phone } from 'lucide-react-native';
@@ -7,6 +7,7 @@ import { useApp } from '../../state/AppContext';
 import { FAB_CORE, FAB_RIGHT, FAB_RING, PULSE, fabBottom } from '../../lib/sos';
 import { useKeyboardOpen, useSosFabVisible } from './hooks';
 import { SosModal } from './SosModal';
+import { PressBox } from '../PressBox';
 
 const RED = '#C53030';
 const STATIC_RING = 68;
@@ -75,7 +76,7 @@ export function SosFab() {
           pointerEvents="none"
           style={{ position: 'absolute', width: STATIC_RING, height: STATIC_RING, borderRadius: STATIC_RING / 2, borderWidth: 2, borderColor: 'rgba(197,48,48,0.22)' }}
         />
-        <Pressable
+        <PressBox
           accessibilityRole="button"
           accessibilityLabel={t('sos_fab_a11y')}
           onPress={() => setOpen(true)}
@@ -85,7 +86,7 @@ export function SosFab() {
           })}
         >
           <Phone size={24} color="#FFFFFF" strokeWidth={2.1} />
-        </Pressable>
+        </PressBox>
       </View>
       <SosModal visible={open} onClose={() => setOpen(false)} />
     </>

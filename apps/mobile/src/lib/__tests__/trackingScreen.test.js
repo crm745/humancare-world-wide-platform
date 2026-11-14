@@ -46,45 +46,53 @@ describe('the Tracking Details screen is drawn to the design', () => {
     expect(parts).toContain('fontFamily: FONT[800], fontSize: 18, lineHeight: 24, color: C.navy');
     expect(screen).toContain("backgroundColor: '#F2F6FC'");
   });
-  test('the route card is navy, radius 22, padding 18, 18 between its parts', () => {
-    expect(card).toContain("backgroundColor: NAVY, borderRadius: 22, padding: 18, gap: 18");
-    expect(card).toContain("const NAVY = '#0D2340';");
-    expect(card).toContain("const SOFT_TEXT = '#A9BAD3';");
+  test('the route banner is the application\'s logo blue #303A8F (the palette\'s brand), radius 20, padding 18, 16 between its parts', () => {
+    expect(card).toContain("backgroundColor: BANNER, borderRadius: 20, padding: 18, gap: 16");
+    expect(card).toContain('const BANNER = P.brand;');
+    expect(P.brand).toBe('#303A8F');
+    expect(card).toContain('const SOFT_TEXT = P.brandOnDark;');
+    expect(card).not.toContain('#0D2340'); // the old dark navy is gone from the banner
+    expect(screen).toContain("backgroundColor: '#F2F6FC'"); // the page keeps its light background
   });
   test('the reference, the badge and the service name are drawn from the design\'s sizes', () => {
-    expect(card).toContain("fontFamily: FONT[600], fontSize: 13, lineHeight: 18, letterSpacing: 0.26, color: SOFT_TEXT");
-    expect(card).toContain("paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.14)'");
-    expect(card).toContain("fontFamily: FONT[800], fontSize: 11.5, lineHeight: 14, letterSpacing: 0.575, textTransform: 'uppercase'");
-    expect(card).toContain('fontFamily: FONT[800], fontSize: 18, lineHeight: 24, color: \'#FFFFFF\'');
+    expect(card).toContain("fontFamily: FONT[600], fontSize: 12.5, lineHeight: 17, letterSpacing: 0.25, color: SOFT_TEXT");
+    expect(card).toContain("paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.16)'");
+    expect(card).toContain("fontFamily: FONT[800], fontSize: 11.5, lineHeight: 14, letterSpacing: 0.4, textTransform: 'uppercase'");
+    expect(card).toContain("fontFamily: FONT[800], fontSize: 16, lineHeight: 22, color: '#FFFFFF' }, WRAP]}>{d.serviceName}");
   });
-  test('the route: the cities at 24/30/800 up to 120 wide, a 32 chip with the request\'s own icon at 16, the dashed and solid lines, the dot and the ring', () => {
+  test('the route: the cities at 18/24/800 up to 120 wide, a 32 white chip with the request\'s own icon at 16 in the banner blue, the dashed and solid lines, the dot and the ring', () => {
     expect(card).toContain("maxWidth: 120, flexShrink: 1");
-    expect(card).toContain("fontFamily: FONT[800], fontSize: 24, lineHeight: 30, color: '#FFFFFF'");
+    expect(card).toContain("fontFamily: FONT[800], fontSize: 18, lineHeight: 24, color: '#FFFFFF'");
     expect(card).toContain('const CHIP = 32;');
-    expect(card).toContain('<ServiceIcon serviceKey={serviceKey} size={16} color="#FFFFFF"');
-    expect(card).toContain('stroke="rgba(169,186,211,0.45)" strokeWidth={2} strokeDasharray="4 4"');
-    expect(card).toContain("backgroundColor: 'rgba(26,115,232,0.25)'"); // the 5px halo
+    expect(card).toContain('<ServiceIcon serviceKey={serviceKey} size={16} color={BANNER}');
+    expect(card).toContain('stroke="rgba(255,255,255,0.45)" strokeWidth={2} strokeDasharray="4 4"');
+    expect(card).toContain("backgroundColor: 'rgba(255,255,255,0.28)'"); // the 5px halo
     expect(card).toContain('width: 8, height: 8, borderRadius: 4, backgroundColor: \'#FFFFFF\'');
     expect(card).toContain('width: 10, height: 10, borderRadius: 5, borderWidth: 2, borderColor: \'#FFFFFF\'');
     expect(card).not.toMatch(/rotate/); // the chip is not turned
   });
   test('the footer: a 14 top padding and a faint line, 6-tall segments with a 4 gap, the current title and "Step X of N", "Updated ..."', () => {
-    expect(card).toContain("paddingTop: 14, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)', gap: 8");
+    expect(card).toContain("paddingTop: 14, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.18)', gap: 8");
     expect(card).toContain("flexDirection: 'row', gap: 4");
-    expect(card).toContain("height: 6, borderRadius: 3, backgroundColor: s === 'on' ? '#FFFFFF' : s === 'dim' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.2)'");
+    expect(card).toContain("height: 6, borderRadius: 3, backgroundColor: s === 'on' ? '#FFFFFF' : s === 'dim' ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.22)'");
+    expect(card).toContain("fontFamily: FONT[800], fontSize: 15, lineHeight: 21, color: '#FFFFFF' }, WRAP]}>{d.currentTitle}");
     expect(card).toContain("t('mr_step_of', { n: d.index + 1, total: d.total })");
     expect(card).toContain("t('rd_updated', { when: d.updated })");
     expect(card).toContain('{d.updated ?'); // hidden when there is no event
   });
-  test('the timeline: a "Progress" label over a card, 24px markers (check, ring and dot, grey ring), connectors, and the step text', () => {
+  test('the timeline: a "Progress" label over a card, 26px markers (check, ring and dot, grey ring), connectors, and the step text', () => {
     expect(card).toContain("t('td_progress')");
+    expect(card).toContain('const MARKER = 26;');
+    expect(card).toContain('width: MARKER, height: MARKER, borderRadius: MARKER / 2');
+    expect(card).toContain('top: MARKER + 2, bottom: -2, width: 2');
+    expect(card).toContain("pending: { weight: 600, color: C.muted }"); // a pending step is readable, not faded
     expect(card).toContain('paddingTop: 18, paddingHorizontal: 16, paddingBottom: 4');
-    expect(card).toContain('<Check size={12} color="#FFFFFF" strokeWidth={3.4} />');
+    expect(card).toContain('<Check size={13} color="#FFFFFF" strokeWidth={3.2} />');
     expect(card).toContain("borderWidth: 3, borderColor: BLUE");
     expect(card).toContain("borderWidth: 2, borderColor: '#D5DCE7'");
     expect(card).toContain("width: 2, backgroundColor: step.state === 'done' ? BLUE : C.line");
     expect(card).toContain('paddingTop: 1, paddingBottom: 16, gap: 2');
-    expect(card).toContain('fontSize: 14.5, lineHeight: 21');
+    expect(card).toContain('fontSize: 14.5, lineHeight: 20');
     expect(card).toContain("t('timeline_pending')");
     expect(card).toContain("step.state === 'pending' && !step.stopped"); // a cancelled stop step shows its time, not "Pending"
   });

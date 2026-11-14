@@ -7,7 +7,6 @@ export const FAB_CORE = 56; // the red circle (the only tappable part)
 export const FAB_RIGHT = 16; // the core's distance from the right edge
 export const FAB_GAP = 16; // the core's distance above where the tab bar ends
 export const FAB_RING = 80; // the pulse ring, the biggest of the circles
-export const FAB_CONTENT_PAD = 96; // extra room at the end of a scrolling screen, so the last item clears the button
 export const TAB_BAR_HEIGHT = 64; // the bottom tab bar (BottomNav), before the safe-area inset
 
 const normalise = (pathname) => {
@@ -48,8 +47,30 @@ export function fabBottom({ insetBottom = 0 } = {}) {
   return TAB_BAR_HEIGHT + inset + FAB_GAP;
 }
 
-// The extra bottom padding a scrolling screen gets while the button shows.
-export const fabContentPad = (visible) => (visible ? FAB_CONTENT_PAD : 0);
+// ---- room at the end of a scrolling screen --------------------------------------------------------------------------------
+// The button floats over the bottom of every screen it shows on, so the last item of a long list must be able to scroll above
+// it. ONE rule for every screen, measured from the bottom edge of the scroll area:
+//   clearance  how far the top of the button (plus 16) is above that edge. The button's core spans from fabBottom() to
+//              fabBottom() + 56 above the SCREEN's bottom; a scroll area that ends above the tab bar, or above the screen's
+//              own bottom bar (`edge` tall, safe-area inset included), starts that much higher. On a tab screen
+//              (edge 64 + inset) this is 16 + 56 + 16 = 88.
+//   padding    max(the screen's own bottom padding, the clearance): never the two added together. The inset is not added
+//              again where a bar already covers it: it is in `edge`, and cancels.
+//   fits       when the last item already ends above the button's zone, nothing is added, so a screen whose content fits does
+//              not scroll for the button's sake.
+export function fabClearance({ edge = 0, insetBottom = 0 } = {}) {
+  const e = Number.isFinite(edge) && edge > 0 ? edge : 0;
+  return Math.max(0, fabBottom({ insetBottom }) + FAB_CORE + FAB_GAP - e);
+}
+
+// `itemsHeight`: the height of the scrolling content WITHOUT its bottom padding; `viewHeight`: the height of the scroll area.
+// Both 0 (not measured yet) means "assume it overflows".
+export function scrollPadFor({ ownPad = 0, visible = false, clearance = 0, itemsHeight = 0, viewHeight = 0 } = {}) {
+  const own = Number.isFinite(ownPad) && ownPad > 0 ? ownPad : 0;
+  if (!visible) return own;
+  if (itemsHeight > 0 && viewHeight > 0 && itemsHeight <= viewHeight - clearance) return own;
+  return Math.max(own, clearance);
+}
 
 // The number the confirmation dials: the app's one 24/7 emergency line (data/mock.js EMERGENCY_TEL).
 export const emergencyUrl = (tel) => `tel:${tel}`;

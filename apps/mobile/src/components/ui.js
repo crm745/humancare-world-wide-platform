@@ -2,6 +2,8 @@ import { Pressable, Text as RNText, TextInput, View } from 'react-native';
 import { Check } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { Spinner } from './Spinner';
+import { COLORS } from '../theme/colors';
+import { PressBox } from './PressBox';
 
 const HAS_COLOR = /(^|\s)text-(navy|ink|slate|muted|faint|white|primary|success|danger|warning|cancel|scheduled)/;
 const HAS_FONT = /(^|\s)font-inter/;
@@ -29,7 +31,7 @@ export function Heading({ className = '', ...props }) {
 
 const BUTTON = {
   primary: { box: 'bg-primary', text: 'text-white text-[15px]', spinner: '#fff' },
-  outline: { box: 'bg-white border-[1.5px] border-primary', text: 'text-primary text-[14.5px]', spinner: '#1A73E8' },
+  outline: { box: 'bg-white border-[1.5px] border-primary', text: 'text-primary text-[14.5px]', spinner: COLORS.primary },
   ghost: { box: 'bg-transparent border-[1.5px] border-field', text: 'text-slate text-[14px]', spinner: '#45526B' },
   danger: { box: 'bg-white border-[1.5px] border-danger-line', text: 'text-danger text-[14.5px]', spinner: '#D64545' },
   sos: { box: 'bg-danger', text: 'text-white text-[14px]', spinner: '#fff' },
@@ -45,18 +47,18 @@ export function Button({ title, onPress, variant = 'primary', dimmed, disabled, 
   const v = BUTTON[variant];
   const faded = dimmed || disabled || loading;
   const shadow = variant === 'primary' && !faded
-    ? { shadowColor: '#1A73E8', shadowOpacity: 0.28, shadowRadius: 10, shadowOffset: { width: 0, height: 8 }, elevation: 4 }
+    ? { shadowColor: COLORS.primary, shadowOpacity: 0.28, shadowRadius: 10, shadowOffset: { width: 0, height: 8 }, elevation: 4 }
     : null;
   return (
-    <Pressable
+    <PressBox
       onPress={onPress}
       disabled={loading || disabled}
-      style={shadow}
+      style={({ pressed }) => [shadow, pressed && variant === 'primary' && !faded ? { backgroundColor: COLORS.primaryPressed } : null]}
       className={cx(`flex-row items-center justify-center gap-1.5 rounded-xl ${large ? 'py-4' : 'py-3.5'} ${v.box} ${faded ? 'opacity-45' : 'active:opacity-85'}`, className)}
     >
       {loading ? <Spinner size={large ? 19 : 16} color={v.spinner} /> : icon}
       <Text className={`font-inter-bold ${v.text} ${large ? 'text-[16.5px]' : ''} ${textClassName}`}>{title}</Text>
-    </Pressable>
+    </PressBox>
   );
 }
 

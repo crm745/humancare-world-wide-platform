@@ -13,6 +13,7 @@ import { Button, Card, Field, FieldLabel, InfoRow, Text } from '../components/ui
 import { Select } from '../components/widgets';
 import { CountryPicker } from '../components/NationalityPhone';
 import { LoadingState } from '../components/LoadingState';
+import { COLORS } from '../theme/colors';
 
 // Personal details (Profile → Personal details): the patient's own account, from GET /auth/me, in four sections:
 // Personal Information (editable: name, gender, nationality, through PATCH /auth/me), Contact Information (email and
@@ -31,7 +32,7 @@ function SectionCard({ Icon, title, action, children }) {
   return (
     <Card className="mb-5 p-[18px]">
       <View className="mb-1.5 flex-row items-center gap-2.5">
-        <View className="h-8 w-8 items-center justify-center rounded-[10px] bg-primary-soft"><Icon size={16} color="#1A5FC4" /></View>
+        <View className="h-8 w-8 items-center justify-center rounded-[10px] bg-primary-soft"><Icon size={16} color={COLORS.primary} /></View>
         <Text accessibilityRole="header" className="flex-1 font-inter-black text-[14.5px] text-navy">{title}</Text>
         {action}
       </View>

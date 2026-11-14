@@ -10,6 +10,7 @@ import { apiUpload } from '../../lib/api';
 import { pendingFiles, runSubmission, submissionState } from '../../lib/requestUploads';
 import { Body, Screen, TopBar } from '../../components/layout';
 import { Button, Card, Heading, Pill, Spacer, Text } from '../../components/ui';
+import { COLORS } from '../../theme/colors';
 
 // Handshake pops in and wiggles, a ring pulses out, then the green check pops —
 // the prototype's hs-enter / hs-shake / hs-pulse-ring / hs-pop keyframes.
@@ -36,7 +37,7 @@ function Celebration() {
 
   return (
     <View className="mb-5 h-[130px] w-[130px] items-center justify-center rounded-full bg-primary-soft">
-      <Animated.View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 999, backgroundColor: '#1A73E8' }, pulse]} />
+      <Animated.View style={[{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 999, backgroundColor: COLORS.primary }, pulse]} />
       <Animated.Text style={[{ fontSize: 58, lineHeight: 70 }, emoji]}>🤝</Animated.Text>
       <Animated.View style={[{ position: 'absolute', right: 2, bottom: 4 }, badge]}>
         <View className="h-[30px] w-[30px] items-center justify-center rounded-full border-[3px] border-white bg-success">
@@ -150,7 +151,7 @@ export default function RequestSubmitted() {
         )}
 
         <Pressable onPress={() => Linking.openURL(`tel:${EMERGENCY_TEL}`)} className="mt-4 flex-row items-center gap-1.5">
-          <Phone size={13} color="#1A73E8" />
+          <Phone size={13} color={COLORS.primary} />
           <Text className="text-[13px] text-muted">
             {t('urgent_help_q')} <Text className="font-inter-bold text-primary">{EMERGENCY_DISPLAY}</Text>
           </Text>

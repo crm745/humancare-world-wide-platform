@@ -34,6 +34,7 @@ export default function LoginOtp() {
       session="patient"
       onVerify={onVerify}
       onResend={resend}
+      recaptcha
     />
   );
 }

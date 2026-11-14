@@ -5,6 +5,7 @@ import { useApp } from '../state/AppContext';
 import { EMERGENCY_TEL, FAQS, OPS_EMAIL, REGIONAL_NUMBERS } from '../data/mock';
 import { Body, Screen, TopBar } from '../components/layout';
 import { Card, InfoRow, Text } from '../components/ui';
+import { COLORS } from '../theme/colors';
 
 function ContactTile({ Icon, bg, color, label, onPress }) {
   return (
@@ -40,7 +41,7 @@ export default function HelpSupport() {
       <Body contentClassName="px-[18px] py-4">
         <View className="mb-[26px] flex-row justify-between">
           <ContactTile Icon={Phone} bg="bg-cancel-soft" color="#D64545" label={t('btn_call_alarm_desk')} onPress={() => Linking.openURL(`tel:${EMERGENCY_TEL}`)} />
-          <ContactTile Icon={Mail} bg="bg-primary-soft" color="#1A73E8" label={t('btn_email_ops')} onPress={() => Linking.openURL(`mailto:${OPS_EMAIL}`)} />
+          <ContactTile Icon={Mail} bg="bg-primary-soft" color={COLORS.primary} label={t('btn_email_ops')} onPress={() => Linking.openURL(`mailto:${OPS_EMAIL}`)} />
         </View>
 
         <Heading>{t('lbl_regional_numbers')}</Heading>

@@ -199,6 +199,38 @@
     ],
     "img": "IMG_TELE"
   },
+  "marine": {
+    "title": "Marine Medical Safety",
+    "desc": "Medical support for crews and passengers at sea: 24/7 tele-medical guidance for the ship, coordination of port-side care and hospital admission, and medical evacuation when a patient must be brought ashore.",
+    "stats": [
+      { "value": "24/7", "label": "Tele-Medical Advice" },
+      { "value": "100+", "label": "Ports Covered" },
+      { "value": "21+", "label": "Years Experience" }
+    ],
+    "features": [
+      "24/7 Tele-Medical Advice for the Vessel",
+      "Port-Side Ambulance & Hospital Coordination",
+      "Medical Evacuation & Repatriation",
+      "Crew Illness & Injury Case Management"
+    ],
+    "img": "IMG_AIR"
+  },
+  "medvalue": {
+    "title": "Medical Value Travel",
+    "desc": "Planned treatment abroad, arranged end to end: a second opinion and hospital selection, a clear cost estimate, visa and travel support, a companion's stay, and care through recovery and follow-up at home.",
+    "stats": [
+      { "value": "11,000+", "label": "Medical Facilities" },
+      { "value": "21+", "label": "Years Experience" },
+      { "value": "24/7", "label": "Patient Coordination" }
+    ],
+    "features": [
+      "Hospital & Specialist Selection",
+      "Treatment Plan & Cost Estimate",
+      "Visa, Travel & Stay for the Patient and a Companion",
+      "Airport Pickup, Interpreter & Follow-Up Care"
+    ],
+    "img": "IMG_HOSPITAL"
+  },
   "corporate": {
     "title": "Corporate Medical Solutions",
     "desc": "Tailored workplace healthcare — onsite clinics, medical staffing, and wellness programs — supporting 50,000+ employees under annual health monitoring.",

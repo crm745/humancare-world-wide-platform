@@ -3,7 +3,7 @@ import { Linking, Pressable, Share, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  ArrowRight, Ban, Check, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Clock, Download, FileText, Image as ImageIcon, Phone, Share2,
+  ArrowRight, Ban, Check, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, Download, FileText, Image as ImageIcon, Phone, Share2,
 } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { apiGet } from '../lib/api';
@@ -19,6 +19,8 @@ import AdditionalDocuments from '../components/request/AdditionalDocuments';
 import DocumentHistory from '../components/request/DocumentHistory';
 import ReviewBanner from '../components/request/ReviewBanner';
 import { C, Card, DashedLine, FONT, Field, Section, StatusLayout, WRAP } from '../components/request/DetailsParts';
+import { COLORS } from '../theme/colors';
+import { PressBox } from '../components/PressBox';
 
 // Request Details, drawn to the design. Everything on it is worked out in lib/requestDetailsView.js; this file only
 // draws it. Every value wraps (nothing is cut off) except a file name, which is one line with an ellipsis.
@@ -39,13 +41,13 @@ function Header({ title, backLabel, isRTL }) {
 
 function Action({ Icon, label, onPress }) {
   return (
-    <Pressable
+    <PressBox
       accessibilityRole="button" accessibilityLabel={label} onPress={onPress}
       style={({ pressed }) => ({ flex: 1, minWidth: 0, minHeight: 66, borderRadius: 14, backgroundColor: '#F5F8FC', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 4, paddingVertical: 8, opacity: pressed ? 0.8 : 1 })}
     >
       <Icon size={20} color={C.blueText} />
       <Text style={{ fontFamily: FONT[700], fontSize: 12.5, lineHeight: 16, color: C.ink, textAlign: 'center' }}>{label}</Text>
-    </Pressable>
+    </PressBox>
   );
 }
 
@@ -93,7 +95,7 @@ function StatusCard({ view, request, t }) {
       <Card big>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
           <Text accessibilityRole="header" style={{ flex: 1, minWidth: 0, fontFamily: FONT[800], fontSize: 16, lineHeight: 22, color: C.navy }}>{t('rd_live_tracking')}</Text>
-          <View style={{ flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: '#E7F0FE' }}>
+          <View style={{ flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: COLORS.primarySoft }}>
             <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: C.blue }} />
             <Text style={{ fontFamily: FONT[800], fontSize: 12, lineHeight: 16, color: C.blueText }}>{t('rd_case_active')}</Text>
           </View>
@@ -117,7 +119,7 @@ function StatusCard({ view, request, t }) {
   if (s.kind === 'approved') return <StatusLayout bg="#E0F5F4" fg="#0B6564" Icon={CircleCheck} title={t('rd_approved_title')} text={t('rd_approved_text')} />;
   if (s.kind === 'completed') return <StatusLayout bg="#E0F5F4" fg="#0B6564" Icon={Check} title={t('rd_completed_title')} text={s.date ? t('rd_completed_on', { date: s.date }) : t('rd_completed_text')} />;
   if (s.kind === 'cancelled') return <StatusLayout bg="#EEF1F6" fg="#5B6B84" Icon={Ban} title={t('rd_cancelled_title')} text={t('rd_cancelled_text')} />;
-  return <StatusLayout bg="#FDF0DA" fg="#8F4C08" Icon={Clock} title={t('rd_review_title')} text={t('rd_review_text')} />;
+  return null; // the case has not started: no card
 }
 
 // Two columns, 14 between the rows and 12 between the columns; a full-width field takes its own row.
@@ -268,7 +270,7 @@ function DocumentRow({ doc, first, t, onOpen }) {
   const box = { minHeight: 66, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 16, borderTopWidth: first ? 0 : 1, borderTopColor: C.divider };
   if (!doc.openable) return <View style={box}>{body}</View>;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={t('rd_open_document', { name: doc.name })} onPress={onOpen} style={({ pressed }) => [box, { opacity: pressed ? 0.8 : 1 }]}>{body}</Pressable>
+    <PressBox accessibilityRole="button" accessibilityLabel={t('rd_open_document', { name: doc.name })} onPress={onOpen} style={({ pressed }) => [box, { opacity: pressed ? 0.8 : 1 }]}>{body}</PressBox>
   );
 }
 
@@ -278,6 +280,8 @@ export default function RequestDetails() {
   const { id } = useLocalSearchParams();
   const [request, setRequest] = useState(null);
   const [failed, setFailed] = useState(false);
+  // The height of the "Open live tracking" bar under the scroll area (0 when it is not drawn): the room the floating SOS button needs is measured from above it.
+  const [barHeight, setBarHeight] = useState(0);
 
   useEffect(() => {
     if (!id) return;
@@ -339,8 +343,8 @@ export default function RequestDetails() {
   return (
     <Screen style={page}>
       <Header title={t('request_details_title')} backLabel={t('home_back')} isRTL={isRTL} />
-      <Body contentClassName="">
-        <View style={{ paddingTop: 16, paddingHorizontal: 16, paddingBottom: 24, gap: 14 }}>
+      <Body contentClassName="" bottomEdge={view.showTrackingBar ? barHeight : 0}>
+        <View style={{ paddingTop: 16, paddingHorizontal: 16, paddingBottom: 0, gap: 14 }}>
           <Summary view={view} t={t} onDownload={downloadSummary} onShare={shareRequest} onContact={() => Linking.openURL('tel:+919699999065')} />
           <StatusCard view={view} request={request} t={t} />
 
@@ -374,15 +378,15 @@ export default function RequestDetails() {
         </View>
       </Body>
       {view.showTrackingBar ? (
-        <View style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: C.line, paddingTop: 12, paddingHorizontal: 16, paddingBottom: 20 + insets.bottom }}>
-          <Pressable
+        <View onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: C.line, paddingTop: 12, paddingHorizontal: 16, paddingBottom: 20 + insets.bottom }}>
+          <PressBox
             accessibilityRole="button" accessibilityLabel={t('rd_open_tracking')}
             onPress={() => router.push({ pathname: '/request-tracking', params: { id: request.id } })}
             style={({ pressed }) => ({ minHeight: 52, borderRadius: 16, backgroundColor: C.blue, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, opacity: pressed ? 0.88 : 1 })}
           >
             <Text style={{ fontFamily: FONT[800], fontSize: 16, color: '#FFFFFF' }}>{t('rd_open_tracking')}</Text>
             <View style={isRTL ? { transform: [{ scaleX: -1 }] } : null}><ArrowRight size={18} color="#FFFFFF" strokeWidth={2.4} /></View>
-          </Pressable>
+          </PressBox>
         </View>
       ) : null}
     </Screen>

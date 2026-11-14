@@ -5,6 +5,7 @@ import { useApp } from '../state/AppContext';
 import { guardDecision, loginRouteFor, setCurrentPath } from '../lib/authGuard';
 import { Spinner } from './Spinner';
 import { Text } from './ui';
+import { COLORS } from '../theme/colors';
 
 // The one authentication gate for the whole app (see lib/authGuard.js for the rules). It sits over the
 // navigator: a protected screen is covered, and never visible, until the session has been checked with
@@ -37,16 +38,16 @@ export function AuthGate() {
           <Text style={{ marginTop: 6, fontSize: 13.5, color: '#5B6B84', textAlign: 'center' }}>
             {decision.reason === 'storage' ? 'Try again, or log in again.' : 'Check your connection and try again.'}
           </Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Try again" onPress={retryAuth} style={{ marginTop: 18, minHeight: 44, minWidth: 140, borderRadius: 12, backgroundColor: '#1A73E8', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 }}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Try again" onPress={retryAuth} style={{ marginTop: 18, minHeight: 44, minWidth: 140, borderRadius: 12, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 }}>
             <Text className="font-inter-bold" style={{ fontSize: 14.5, color: '#FFFFFF' }}>Try again</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Log in" onPress={() => router.replace(loginRouteFor(pathname))} style={{ marginTop: 6, minHeight: 44, justifyContent: 'center' }}>
-            <Text className="font-inter-bold" style={{ fontSize: 14, color: '#1A5FC4' }}>Log in</Text>
+            <Text className="font-inter-bold" style={{ fontSize: 14, color: COLORS.primary }}>Log in</Text>
           </Pressable>
         </>
       ) : (
         <View accessible accessibilityLabel="Loading" accessibilityRole="progressbar">
-          <Spinner size={30} color="#1A73E8" trackColor="#E7F0FE" />
+          <Spinner size={30} color={COLORS.primary} trackColor={COLORS.primarySoft} />
         </View>
       )}
     </View>

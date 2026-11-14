@@ -307,7 +307,7 @@ describe('POST /requests: medical page fields', () => {
     }
   });
 
-  it.each([['hospital'], ['homecare'], ['tele'], ['mortal_domestic']])('refuses mobility and equipment for %s', async (serviceKey) => {
+  it.each([['hospital'], ['homecare'], ['tele'], ['marine'], ['medvalue'], ['mortal_domestic']])('refuses mobility and equipment for %s', async (serviceKey) => {
     const { token } = await createPatient();
     const extra = serviceKey === 'mortal_domestic' ? { deceasedRelation: 'Son', placeOfDeath: 'Pune', dateOfDeath: '2026-10-20' } : {};
     const mobility = await post(token, { ...baseRequestBody, ...extra, serviceKey, mobility: 'walking' });
@@ -315,6 +315,26 @@ describe('POST /requests: medical page fields', () => {
     expect(mobility.body.error).toMatch(/only accepted for air and ground/);
     const equipment = await post(token, { ...baseRequestBody, ...extra, serviceKey, equipOxygen: false });
     expect(equipment.status).toBe(400);
+  });
+
+  it.each([['marine', 'Marine Medical Safety'], ['medvalue', 'Medical Value Travel']])('takes a request for %s, the standard patient form, and keeps its own service key', async (serviceKey, serviceType) => {
+    const { token } = await createPatient();
+    const res = await post(token, { ...baseRequestBody, serviceKey, serviceType, origin: 'Kochi Port, India', destination: 'Aster Medcity, Kochi' });
+    expect(res.status).toBe(201);
+    expect(res.body.request).toMatchObject({ serviceKey, serviceType, status: 'submitted' });
+    expect(res.body.request.referenceNumber).toMatch(/^REQ-\d+$/);
+    // no Case is invented for it, and it is the patient's own request like any other
+    const mine = await request(app).get('/requests/me').set('Authorization', `Bearer ${token}`);
+    expect(mine.body.requests.map((r) => r.serviceKey)).toContain(serviceKey);
+  });
+
+  it('still refuses a service key it does not know', async () => {
+    const { token } = await createPatient();
+    for (const serviceKey of ['marine_x', 'medical', 'MARINE', '__proto__']) {
+      const res = await post(token, { ...baseRequestBody, serviceKey });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Unknown serviceKey');
+    }
   });
 
   it('still takes an urgency on a service that has no mobility or equipment', async () => {

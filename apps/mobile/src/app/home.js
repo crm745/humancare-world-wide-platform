@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state/AppContext';
-import { SERVICE_LABELS, SERVICE_TILES } from '../data/mock';
+import { HOME_SERVICES, SERVICE_LABELS } from '../data/mock';
 import { apiGet } from '../lib/api';
 import { registerForPushNotifications } from '../lib/pushNotifications';
 import { serviceKeyFromTitle, toUiStatus } from '../lib/requestShape';
@@ -20,10 +20,11 @@ import { Greeting } from '../components/home/Greeting';
 import { HomeHeader } from '../components/home/HomeHeader';
 import { ServicesGrid } from '../components/home/ServicesGrid';
 import { SosBar } from '../components/home/SosBar';
+import { COLORS } from '../theme/colors';
 
 const TAB_BAR = 64;
 const MAX_WIDTH = 720;
-const HOME_TILES = SERVICE_TILES.slice(0, 8);
+const HOME_TILES = HOME_SERVICES;
 // What the app tracks for a request: submitted -> in progress -> completed.
 const STEP_BY_STATUS = { submitted: 1, in_progress: 2 };
 const TOTAL_STEPS = 3;
@@ -118,7 +119,7 @@ export default function Home() {
 
           {isCorporate ? (
             <Pressable onPress={() => router.push('/corporate-new-case')} style={{ marginBottom: 18, borderRadius: 18, overflow: 'hidden' }}>
-              <LinearGradient colors={['#1A73E8', '#3E8EF7']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ padding: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
+              <LinearGradient colors={[COLORS.primary, COLORS.primaryPressed]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ padding: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
                 <View style={{ flex: 1 }}>
                   <Text className="font-inter-black" style={{ fontSize: 16.5, color: '#FFFFFF' }}>{t('btn_initiate_new_case')}</Text>
                   <Text style={{ marginTop: 7, fontSize: 13.5, color: '#FFFFFF', opacity: 0.9 }}>{t('createReqSub')}</Text>
@@ -136,7 +137,7 @@ export default function Home() {
               {failed && requests.length > 0 && (
                 <Pressable accessibilityRole="button" onPress={load} style={{ minHeight: 44, marginBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
                   <Text style={{ fontSize: 12.5, color: '#5B6B84' }}>{t('home_refresh_failed')}</Text>
-                  <Text className="font-inter-black" style={{ fontSize: 12.5, color: '#1A5FC4' }}>{t('home_try_again')}</Text>
+                  <Text className="font-inter-black" style={{ fontSize: 12.5, color: COLORS.primary }}>{t('home_try_again')}</Text>
                 </Pressable>
               )}
               {!loaded && slow && <ActiveRequestSkeleton />}

@@ -86,9 +86,44 @@ describe('where it sits', () => {
     expect(S.fabBottom({ insetBottom: 10, pathname: '/request-details', barHeight: 118 })).toBe(90);
     expect(S.fabBottom({ insetBottom: 10, pathname: '/notifications' })).toBe(90);
   });
-  test('a scrolling screen gets 96 more at its end while it shows, and nothing otherwise', () => {
-    expect(S.fabContentPad(true)).toBe(96);
-    expect(S.fabContentPad(false)).toBe(0);
+  test('the room at the end of a scrolling screen is ONE rule: max(the screen own padding, the clearance), never the two added', () => {
+    // a tab screen: the scroll area ends above the tab bar (64 + inset), so 16 + 56 + 16 = 88
+    for (const inset of [0, 24, 34]) expect(S.fabClearance({ edge: 64 + inset, insetBottom: inset })).toBe(88);
+    expect(S.scrollPadFor({ ownPad: 16, visible: true, clearance: 88 })).toBe(88);
+    expect(S.scrollPadFor({ ownPad: 24, visible: true, clearance: 88 })).toBe(88);
+    expect(S.scrollPadFor({ ownPad: 120, visible: true, clearance: 88 })).toBe(120);
+    expect(S.scrollPadFor({ ownPad: 24, visible: false, clearance: 88 })).toBe(24);
+  });
+  test('a screen with no bar under it: the button floats 80 + inset above the screen bottom, so the clearance reaches over it (152 + inset)', () => {
+    expect(S.fabClearance({ edge: 0, insetBottom: 0 })).toBe(152);
+    expect(S.fabClearance({ edge: 0, insetBottom: 34 })).toBe(186);
+  });
+  test('a screen with its own bottom bar: measured from above that bar, the inset cancels (it is already in the bar)', () => {
+    expect(S.fabClearance({ edge: 84, insetBottom: 0 })).toBe(68);
+    expect(S.fabClearance({ edge: 84 + 34, insetBottom: 34 })).toBe(68);
+    expect(S.fabClearance({ edge: 400, insetBottom: 0 })).toBe(0);
+  });
+  test('the last item ends 16 above the top of the button, on every kind of screen', () => {
+    // from the bottom of the screen: the top of the button, plus 16, minus how far up the scroll area ends
+    for (const [edge, inset] of [[64, 0], [64 + 34, 34], [0, 0], [0, 34], [84, 0], [84 + 34, 34]]) {
+      const buttonTopFromScreenBottom = S.fabBottom({ insetBottom: inset }) + S.FAB_CORE;
+      const lastItemBottomFromScreenBottom = edge + S.scrollPadFor({ ownPad: 16, visible: true, clearance: S.fabClearance({ edge, insetBottom: inset }) });
+      expect(lastItemBottomFromScreenBottom - buttonTopFromScreenBottom).toBe(16);
+    }
+  });
+  test('content that already ends above the button zone adds nothing, so a screen whose content fits does not scroll for the button', () => {
+    const clearance = 88;
+    expect(S.scrollPadFor({ ownPad: 16, visible: true, clearance, itemsHeight: 400, viewHeight: 640 })).toBe(16);
+    expect(S.scrollPadFor({ ownPad: 16, visible: true, clearance, itemsHeight: 552, viewHeight: 640 })).toBe(16); // exactly fits
+    expect(S.scrollPadFor({ ownPad: 16, visible: true, clearance, itemsHeight: 553, viewHeight: 640 })).toBe(88);
+    expect(S.scrollPadFor({ ownPad: 16, visible: true, clearance, itemsHeight: 2000, viewHeight: 640 })).toBe(88);
+    expect(S.scrollPadFor({ ownPad: 16, visible: true, clearance })).toBe(88); // not measured yet: assume it overflows
+  });
+  test('odd numbers are tolerated', () => {
+    expect(S.fabClearance()).toBe(152);
+    expect(S.fabClearance({ edge: NaN, insetBottom: NaN })).toBe(152);
+    expect(S.scrollPadFor({ ownPad: NaN, visible: true, clearance: 88 })).toBe(88);
+    expect(S.scrollPadFor({})).toBe(0);
   });
   test('the numbers are the design values', () => {
     expect([S.FAB_CORE, S.FAB_RIGHT, S.FAB_GAP, S.FAB_RING, S.TAB_BAR_HEIGHT]).toEqual([56, 16, 16, 80, 64]);
@@ -98,7 +133,7 @@ describe('where it sits', () => {
     expect(lib).not.toMatch(/setFixedBar|getFixedBar|subscribeFixedBar|isTabRoute|TAB_ROUTES|barHeight/);
     const hooks = read('../../components/sos/hooks.js');
     expect(hooks).not.toMatch(/useFixedBarHeight|useReportFixedBar|useFocusEffect/);
-    expect(read('../../app/request-details.js')).not.toMatch(/useReportFixedBar|barHeight|setBarHeight/);
+    expect(read('../../app/request-details.js')).not.toMatch(/useReportFixedBar/);
   });
 });
 
@@ -137,7 +172,7 @@ describe('the button and the pulse (source checks)', () => {
     expect(fab).toContain('useState(() => new Animated.Value(0))');
   });
   test('only the core is a button, with the new label; tapping it opens the shared confirmation', () => {
-    expect(fab.match(/<Pressable/g)).toHaveLength(1);
+    expect(fab.match(/<PressBox/g)).toHaveLength(1);
     expect(fab).toContain('accessibilityRole="button"');
     expect(fab).toContain("accessibilityLabel={t('sos_fab_a11y')}");
     expect(fab).toContain('onPress={() => setOpen(true)}');
@@ -178,11 +213,27 @@ describe('the same flow as the Home banner', () => {
     expect(read('../../app/all-services.js')).not.toContain('SosBar');
     expect(read('../../app/home.js')).toContain('<SosBar bottom={TAB_BAR + insets.bottom}');
   });
-  test('the scrolling screens leave 96 more at the end while the button shows', () => {
-    expect(read('../../components/layout.js')).toContain('+ insets.bottom + fabPad }}');
-    expect(read('../../app/my-requests.js')).toMatch(/TAB_BAR \+ insets\.bottom \+ fabPad, gap: /);
-    expect(read('../../app/profile.js')).toContain('TAB_BAR + insets.bottom + 24 + fabPad');
-    expect(read('../../app/all-services.js')).toContain('TAB_BAR + insets.bottom + 16 + fabPad');
+  test('every scrolling screen uses the one rule (useFabScrollPad), and the scroll area of a tab screen ends above the tab bar', () => {
+    expect(read('../../components/layout.js')).toContain('useFabScrollPad({ ownPad: (withNav ? 64 : 0) + BOTTOM_GAP + insets.bottom, edge: bottomEdge })');
+    expect(read('../../components/layout.js')).toContain('contentContainerStyle={{ paddingBottom }}');
+    for (const [file, own] of [['all-services', '16'], ['profile', '24'], ['my-requests', 'L.listPadBottom']]) {
+      const source = read('../../app/' + file + '.js');
+      expect(source).toMatch(/useFabScrollPad\(\{ ownPad: (16|24|L\.listPadBottom), edge: TAB_BAR \+ insets\.bottom \}\)/);
+      expect(source).toContain(`ownPad: ${own.split('|')[0]},`);
+      expect(source).toContain('marginBottom: TAB_BAR + insets.bottom');
+      expect(source).toContain('{...scrollProps}');
+      expect(source).not.toMatch(/fabPad|useSosFabPad/);
+      expect(source).not.toMatch(/paddingBottom: [^,}]*TAB_BAR/);
+    }
+  });
+  test('Request Details measures its own bar and tells the scroll area to end above it', () => {
+    const screen = read('../../app/request-details.js');
+    expect(screen).toContain('bottomEdge={view.showTrackingBar ? barHeight : 0}');
+    expect(screen).toContain('onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)}');
+  });
+  test('no screen adds a bottom padding of its own on top of the rule: the content blocks end flush with the scroll content', () => {
+    expect(read('../../app/request-details.js')).toContain('paddingTop: 16, paddingHorizontal: 16, paddingBottom: 0, gap: 14');
+    expect(read('../../components/tracking/TrackingDetails.js')).toContain('paddingTop: 16, paddingHorizontal: 16, paddingBottom: 0, gap: 14');
   });
 });
 

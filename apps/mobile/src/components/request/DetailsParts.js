@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import { ChevronLeft } from 'lucide-react-native';
 import Svg, { Line } from 'react-native-svg';
+import { COLORS } from '../../theme/colors';
 
 // The building blocks of the Request Details screen, drawn to the design: a section label above a white card, and a
 // label-over-value field whose value always wraps (nothing runs off the screen, however long).
 export const FONT = { 400: 'Inter_400Regular', 500: 'Inter_500Medium', 600: 'Inter_600SemiBold', 700: 'Inter_700Bold', 800: 'Inter_800ExtraBold' };
-export const C = { navy: '#0D2340', ink: '#17233D', muted: '#5B6B84', line: '#E4E9F2', divider: '#EEF1F6', blue: '#1A73E8', blueText: '#1A5FC4', soft: '#EEF3FB' };
+export const C = { navy: '#0D2340', ink: '#17233D', muted: '#5B6B84', line: '#E4E9F2', divider: '#EEF1F6', blue: COLORS.primary, blueText: COLORS.primary, soft: '#EEF3FB' };
 
 // A long word or an address with no spaces breaks instead of widening the card (on the web the browser needs telling).
 export const WRAP = Platform.OS === 'web' ? { overflowWrap: 'anywhere', wordBreak: 'break-word' } : null;

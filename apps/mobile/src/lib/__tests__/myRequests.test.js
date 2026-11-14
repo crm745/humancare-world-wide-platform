@@ -5,7 +5,9 @@ const fs = require('fs');
 const path = require('path');
 const { toListItem, serviceKeyFromTitle, toUiStatus: toUiStatusOf } = require('../requestShape');
 const { TRACKING_STEPS, trackingPosition, trackingView } = require('../requestTracking');
-const { STEP_COUNT, SEGMENT_DONE, SEGMENT_COMPLETED, SEGMENT_TODO, BADGE_BESIDE_MIN_WIDTH, badgeBelowFor, serviceKeyOf, serviceTitleKey, shortPlace, progressOf, cardView, statusCounts } = require('../myRequestsView');
+const { STEP_COUNT, SEGMENT_DONE, SEGMENT_COMPLETED, SEGMENT_TODO, serviceKeyOf, serviceTitleKey, shortPlace, progressOf, cardView, statusCounts } = require('../myRequestsView');
+const { badgeBelowFor } = require('../myRequestsLayout');
+const { COLORS } = require('../../theme/colors');
 const i18n = JSON.parse(fs.readFileSync(path.join(__dirname, '../../data/i18n.json'), 'utf8'));
 
 const read = (relative) => fs.readFileSync(path.join(__dirname, relative), 'utf8');
@@ -95,14 +97,14 @@ describe('the step agrees with the Tracking screen, for every status', () => {
     expect(progressOf(undefined)).toMatchObject({ kind: 'step', step: 1 });
   });
   test('the colours', () => {
-    expect([SEGMENT_DONE, SEGMENT_COMPLETED, SEGMENT_TODO]).toEqual(['#1A73E8', '#0B6564', '#E4E9F2']);
+    expect([SEGMENT_DONE, SEGMENT_COMPLETED, SEGMENT_TODO]).toEqual([COLORS.primary, '#0B6564', '#E4E9F2']);
     expect(STEP_COUNT).toBe(5);
   });
 });
 
 describe('the badge', () => {
   test.each([
-    ['submitted', '#FDF0DA', '#8F4C08', 'Submitted'], ['in_progress', '#E7F0FE', '#1A5FC4', 'In Progress'], ['completed', '#E0F5F4', '#0B6564', 'Completed'],
+    ['submitted', '#FDF0DA', '#8F4C08', 'Submitted'], ['in_progress', COLORS.primarySoft, COLORS.primary, 'In Progress'], ['completed', '#E0F5F4', '#0B6564', 'Completed'],
     ['cancelled', '#EEF1F6', '#5B6B84', 'Cancelled'],
   ])('%s', (status, bg, fg, label) => {
     const v = cardView(item({ status }), t);
@@ -114,30 +116,38 @@ describe('the badge', () => {
     expect(v.badge).toEqual({ bg: '#EEF1F6', fg: '#5B6B84' });
     expect(v.statusLabel).toBe('on_hold');
   });
-  test('the card draws it uppercase with the design\'s padding, size and letter spacing', () => {
-    expect(card).toContain("paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999");
-    expect(card).toContain("fontSize: 11.5, lineHeight: 14, letterSpacing: 0.575, textTransform: 'uppercase'");
+  test('the card draws it uppercase, from the design\'s badge sizes, and it never shrinks', () => {
+    expect(card).toContain("paddingVertical: L.badgePadY, paddingHorizontal: L.badgePadX, borderRadius: 999");
+    expect(card).toContain("fontSize: L.badgeSize, lineHeight: L.badgeLine, letterSpacing: L.badgeSpacing, textTransform: 'uppercase'");
     expect(card).toContain('flexShrink: 0');
   });
 });
 
 describe('the badge beside the name, or under it when there is no room', () => {
-  test('beside the name from 350 up at normal text size; under it on a narrower screen (320, 330, 345)', () => {
-    for (const w of [350, 360, 375, 390, 412, 470, 600]) expect(badgeBelowFor(w, 1)).toBe(false);
-    for (const w of [280, 320, 330, 345, 349]) expect(badgeBelowFor(w, 1)).toBe(true);
-    expect(BADGE_BESIDE_MIN_WIDTH).toBe(350);
+  test('beside the name at every normal phone width, from 320 up (the sizes shrink with the width)', () => {
+    for (const w of [320, 330, 360, 375, 390, 412, 470, 600]) expect(badgeBelowFor(w, 1)).toBe(false);
+  });
+  test('under the name only on a very narrow screen', () => {
+    for (const w of [200, 240, 270]) expect(badgeBelowFor(w, 1)).toBe(true);
   });
   test('large system text needs more room: the badge goes under the name sooner', () => {
-    expect(badgeBelowFor(390, 1.3)).toBe(true);
+    expect(badgeBelowFor(378, 1)).toBe(false);
+    expect(badgeBelowFor(378, 1.5)).toBe(false);
+    expect(badgeBelowFor(378, 1.8)).toBe(true);
+    expect(badgeBelowFor(320, 1.2)).toBe(false);
+    expect(badgeBelowFor(320, 1.4)).toBe(true);
     expect(badgeBelowFor(470, 1.3)).toBe(false);
-    expect(badgeBelowFor(412, 1.15)).toBe(false);
-    expect(badgeBelowFor(412, 1.2)).toBe(true);
+    expect(badgeBelowFor(470, 2)).toBe(true);
+    for (const w of [300, 360, 412, 470]) {
+      let last = false;
+      for (let f = 1; f <= 2.5; f += 0.1) { const below = badgeBelowFor(w, f); expect(below || !last).toBe(true); last = below; } // never goes back beside the name
+    }
   });
   test('a text size under 1 or a missing one counts as 1', () => {
-    expect(badgeBelowFor(350, 0.8)).toBe(false);
-    expect(badgeBelowFor(320, undefined)).toBe(true);
-    expect(badgeBelowFor(350, 0)).toBe(false);
-    expect(badgeBelowFor(350, NaN)).toBe(false);
+    expect(badgeBelowFor(300, 0.8)).toBe(badgeBelowFor(300, 1));
+    expect(badgeBelowFor(300, undefined)).toBe(badgeBelowFor(300, 1));
+    expect(badgeBelowFor(300, 0)).toBe(badgeBelowFor(300, 1));
+    expect(badgeBelowFor(300, NaN)).toBe(badgeBelowFor(300, 1));
   });
   test('the card draws the one badge in either place, and it never shrinks', () => {
     expect(card).toContain('const badgeBelow = badgeBelowFor(width, fontScale);');
@@ -166,11 +176,11 @@ describe('the route row', () => {
   test('free text without a comma stays whole', () => {
     expect(cardView(item({ origin: 'Kokilaben Hospital', destination: 'Airport' }), t).route).toEqual({ from: 'Kokilaben Hospital', to: 'Airport' });
   });
-  test('the card draws the pin, the cities and the arrow with the design\'s sizes', () => {
-    expect(card).toContain('<MapPin size={16} color={MUTED} />');
-    expect(card).toContain('<ArrowRight size={14} color="#8A97AB" />');
-    expect(card).toContain("fontFamily: FONT[600], fontSize: 14, lineHeight: 20, color: INK");
-    expect(card).toContain("flexWrap: 'wrap', gap: 8");
+  test('the card draws the pin, the cities and the arrow from the design\'s sizes, and lets the row wrap', () => {
+    expect(card).toContain('<MapPin size={L.pin} color={MUTED} />');
+    expect(card).toContain('<ArrowRight size={L.arrow} color="#8A97AB" />');
+    expect(card).toContain('fontFamily: FONT[600], fontSize: L.routeSize, lineHeight: L.routeLine, color: INK');
+    expect(card).toContain("flexWrap: 'wrap', gap: L.routeGap");
   });
 });
 
@@ -206,10 +216,10 @@ describe('the service: its icon and its name, as on Home', () => {
       for (const lang of Object.keys(i18n)) expect(i18n[lang][titleKey]).toBeTruthy();
     }
   });
-  test('the card uses Home\'s own ServiceIcon, unchanged, at 22 in the 46 tile, with Home\'s colours', () => {
+  test('the card uses Home\'s own ServiceIcon, unchanged, in the design\'s 22 icon and 46 tile, with Home\'s colours', () => {
     expect(card).toContain("import { ServiceIcon } from '../home/ServiceIcon';");
-    expect(card).toContain('<ServiceIcon serviceKey={v.key} size={22} color={NAVY} fill={NAVY} fillOpacity={0.12} />');
-    expect(card).toContain("width: 46, height: 46, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E4E9F2'");
+    expect(card).toContain('<ServiceIcon serviceKey={v.key} size={L.icon} color={NAVY} fill={NAVY} fillOpacity={0.12} />');
+    expect(card).toContain("width: L.tile, height: L.tile, borderRadius: L.tileRadius, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E4E9F2'");
     expect(card).not.toMatch(/lucide-react-native'.*(Plane|Truck|Ambulance)/);
   });
 });
@@ -219,23 +229,23 @@ describe('the card text', () => {
     expect(cardView(item(), t).sub).toBe('REQ-1064 · 13 Nov 2026');
     expect(cardView(item({ createdAt: null }), t).sub).toBe('REQ-1064');
   });
-  test('the name, date, step and button use the design\'s sizes and weights', () => {
-    expect(card).toContain('fontFamily: FONT[800], fontSize: 16, lineHeight: 22, color: NAVY');
-    expect(card).toContain('fontFamily: FONT[400], fontSize: 13, lineHeight: 18, color: MUTED');
+  test('the name, date, step and button are drawn from the design\'s sizes and weights', () => {
+    expect(card).toContain('fontFamily: FONT[800], fontSize: L.nameSize, lineHeight: L.nameLine, color: NAVY');
+    expect(card).toContain('fontFamily: FONT[400], fontSize: L.subSize, lineHeight: L.subLine, color: MUTED');
     expect(card).toContain('fontFamily: FONT[700], color: INK');
     expect(card).toContain('fontFamily: FONT[500], color: MUTED');
-    expect(card).toContain("fontFamily: FONT[700], fontSize: 14.5, color: '#1A5FC4'");
-    expect(card).toContain('minHeight: 44');
-    expect(card).toContain('<ChevronRight size={16} color="#1A5FC4" strokeWidth={2.2} />');
+    expect(card).toContain("fontFamily: FONT[700], fontSize: L.detailsSize, color: COLORS.primary");
+    expect(card).toContain('minHeight: L.detailsMinHeight');
+    expect(card).toContain('<ChevronRight size={L.detailsChevron} color={COLORS.primary} strokeWidth={2.2} />');
   });
-  test('the card is white with a 1px #E9EEF6 border, radius 18, padding 16 16 4, a 12 gap and a faint shadow', () => {
-    expect(card).toContain("backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E9EEF6', borderRadius: 18, paddingTop: 16, paddingHorizontal: 16, paddingBottom: 4, gap: 12");
+  test('the card is white with a 1px #E9EEF6 border, the design\'s radius, padding and gap, and a faint shadow', () => {
+    expect(card).toContain("backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E9EEF6', borderRadius: L.radius, paddingTop: L.padTop, paddingHorizontal: L.padSide, paddingBottom: L.padBottom, gap: L.gap");
     expect(card).toContain("shadowColor: '#0D2340', shadowOpacity: 0.04, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }");
   });
-  test('the progress block: a 1px #EEF1F6 top border, 12 padding, 6 gap, five 6-tall segments with a 4 gap and radius 3', () => {
-    expect(card).toContain("borderTopWidth: 1, borderTopColor: '#EEF1F6', paddingTop: 12, gap: 6");
-    expect(card).toContain("flexDirection: 'row', gap: 4");
-    expect(card).toContain('height: 6, borderRadius: 3');
+  test('the progress block: a 1px #EEF1F6 top border, five segments from the design\'s sizes', () => {
+    expect(card).toContain("borderTopWidth: 1, borderTopColor: '#EEF1F6', paddingTop: L.progressPad, gap: L.progressGap");
+    expect(card).toContain("flexDirection: 'row', gap: L.segGap");
+    expect(card).toContain('height: L.segHeight, borderRadius: L.segRadius');
     expect(card).toContain('Array.from({ length: STEP_COUNT }');
   });
   test('Step n of 5, then the Tracking stage name; "Completed" or "Cancelled" alone for those two', () => {
@@ -272,7 +282,7 @@ describe('the accessibility label of a card', () => {
     expect(card).toContain('accessibilityRole="button"');
     expect(card).toContain("accessibilityLabel={`${v.label}. ${t('mr_view_details')}`}");
     expect(card.split('accessibilityRole="button"').length - 1).toBe(1);
-    expect(card.split('<Pressable').length - 1).toBe(1);
+    expect(card.split('<PressBox').length - 1).toBe(1);
   });
 });
 
@@ -287,47 +297,64 @@ describe('the status chips', () => {
     expect(screen).toContain("t(s === 'all' ? 'chip_all' : s === 'progress' ? 'mr_chip_progress' : 'status_' + s)");
     expect([t('chip_all'), t('status_submitted'), t('mr_chip_progress'), t('status_completed'), t('status_cancelled')]).toEqual(['All', 'Submitted', 'In progress', 'Completed', 'Cancelled']);
   });
-  test('the counts do not follow the search or the filter', () => {
-    expect(screen).toContain('const counts = statusCounts(requests);');
+  test('the counts follow the service and date filters (a chip shows what tapping it lists), but not the search', () => {
+    expect(screen).toContain('const filtered = applyFilters(requests, filters, today);');
+    expect(screen).toContain('const counts = statusCounts(filtered);');
+    expect(screen).not.toContain('statusCounts(requests)');
+    const { applyFilters, DEFAULT_FILTERS } = require('../filters');
+    const items = [
+      { id: 'REQ-1', service: 'homecare', status: 'submitted', date: '2026-11-13' },
+      { id: 'REQ-2', service: 'homecare', status: 'submitted', date: '2026-11-13' },
+      { id: 'REQ-3', service: 'tele', status: 'completed', date: '2026-11-13' },
+    ];
+    expect(statusCounts(applyFilters(items, DEFAULT_FILTERS, '2026-11-14'))).toMatchObject({ all: 3, submitted: 2, completed: 1 });
+    expect(statusCounts(applyFilters(items, { ...DEFAULT_FILTERS, service: 'ground' }, '2026-11-14'))).toEqual({ all: 0, submitted: 0, progress: 0, completed: 0, cancelled: 0 });
+    expect(statusCounts(applyFilters(items, { ...DEFAULT_FILTERS, service: 'homecare' }, '2026-11-14'))).toMatchObject({ all: 2, submitted: 2, completed: 0 });
   });
-  test('each chip: height 38, radius 999, padding 0 8 0 14, 14 / 700, 8 gap, with a count bubble', () => {
-    expect(header).toContain('height: 38, borderRadius: 999, paddingLeft: 14, paddingRight: 8');
-    expect(header).toContain("flexDirection: 'row', alignItems: 'center', gap: 8");
-    expect(header).toContain("fontFamily: FONT[700], fontSize: 14");
-    expect(header).toContain('minWidth: 22, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 999');
-    expect(header).toContain("fontFamily: FONT[800], fontSize: 12");
+  test('the filter sheet does not scroll: it is given all the room the screen leaves, the other sheets keep their 70% limit', () => {
+    const widgets = read('../../components/widgets.js');
+    expect(read('../../components/FilterSheet.js')).toContain('<Sheet visible={visible} onClose={onClose} title={title} fit>');
+    expect(widgets).toContain("fit ? Math.max(200, Dimensions.get('window').height - insets.top - insets.bottom - 20 - 48 - 24 - 16) : Dimensions.get('window').height * 0.7");
   });
-  test('selected: #0D2340 with white text and a rgba(255,255,255,0.18) bubble; not selected: white, a 1px #E4E9F2 border, #17233D text, a #EEF1F6 bubble with #5B6B84 text', () => {
-    expect(header).toContain("backgroundColor: on ? NAVY : '#FFFFFF', borderWidth: on ? 0 : 1, borderColor: LINE");
+  test('each chip is drawn from the design\'s chip sizes, with a count bubble', () => {
+    expect(header).toContain('height: L.chipHeight, borderRadius: 999, paddingLeft: L.chipPadLeft, paddingRight: L.chipPadRight');
+    expect(header).toContain("flexDirection: 'row', alignItems: 'center', gap: L.chipGap");
+    expect(header).toContain('fontFamily: FONT[700], fontSize: L.chipFont');
+    expect(header).toContain('minWidth: L.bubbleMin, paddingVertical: L.bubblePadY, paddingHorizontal: L.bubblePadX, borderRadius: 999');
+    expect(header).toContain('fontFamily: FONT[800], fontSize: L.bubbleFont');
+  });
+  test('selected: the brand blue with white text and a rgba(255,255,255,0.18) bubble; not selected: white, a 1px #E4E9F2 border, #17233D text, a #EEF1F6 bubble with #5B6B84 text', () => {
+    expect(header).toContain("backgroundColor: on ? COLORS.primary : '#FFFFFF', borderWidth: on ? 0 : 1, borderColor: LINE");
     expect(header).toContain("color: on ? '#FFFFFF' : INK");
     expect(header).toContain("backgroundColor: on ? 'rgba(255,255,255,0.18)' : '#EEF1F6'");
     expect(header).toContain("color: on ? '#FFFFFF' : MUTED");
   });
-  test('they scroll sideways with an 8 gap; a chip is a button with a selected state and a 44-point touch area', () => {
-    expect(header).toContain('<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>');
+  test('they scroll sideways with the design\'s gap; a chip is a button with a selected state and a 44-point touch area', () => {
+    expect(header).toContain('<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: L.chipsGap }}>');
     expect(header).toContain('accessibilityState={{ selected: on }}');
-    expect(header).toContain('hitSlop={{ top: 3, bottom: 3 }}');
+    expect(header).toContain('hitSlop={{ top: L.chipHitSlop, bottom: L.chipHitSlop }}');
   });
 });
 
 describe('the header', () => {
-  test('white, a 1px #E4E9F2 bottom border, padding 20 top / 23 sides / 14 bottom, a 16 gap between rows', () => {
-    expect(header).toContain("backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: LINE, paddingTop: 20, paddingHorizontal: 23, paddingBottom: 14, gap: 16");
+  test('white, with a 1px #E4E9F2 bottom border and the design\'s padding and row gap', () => {
+    expect(header).toContain("backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: LINE, paddingTop: L.padTop, paddingHorizontal: L.padSide, paddingBottom: L.padBottom, gap: L.gap");
   });
-  test('back button 52x52, radius 14, #EEF3FB, chevron 22 stroke 2.2; title 20 / 26 / 800 #0D2340 after a 14 gap', () => {
-    expect(header).toContain('width: 52, height: 52, borderRadius: 14, backgroundColor: SOFT');
-    expect(header).toContain('<ChevronLeft size={22} strokeWidth={2.2} color={NAVY} />');
-    expect(header).toContain("flexDirection: 'row', alignItems: 'center', gap: 14");
-    expect(header).toContain('fontFamily: FONT[800], fontSize: 20, lineHeight: 26, color: NAVY');
+  test('the back button, the chevron and the title are drawn from the design\'s sizes', () => {
+    expect(header).toContain('width: L.back, height: L.back, borderRadius: L.backRadius, backgroundColor: SOFT');
+    expect(header).toContain('<ChevronLeft size={L.chevron} strokeWidth={2.2} color={NAVY} />');
+    expect(header).toContain("flexDirection: 'row', alignItems: 'center', gap: L.titleGap");
+    expect(header).toContain('fontFamily: FONT[800], fontSize: L.titleSize, lineHeight: L.titleLine, color: NAVY');
   });
-  test('search field: height 50, #F5F8FC, a 1px #E4E9F2 border, radius 14, padding 0 14, 10 gap, a 20 icon, 15 text', () => {
-    expect(header).toContain("height: 50, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, borderRadius: 14, backgroundColor: '#F5F8FC', borderWidth: 1, borderColor: LINE");
-    expect(header).toContain('<Search size={20} color={MUTED} />');
-    expect(header).toContain("fontFamily: 'Inter_400Regular', fontSize: 15");
+  test('the search field is drawn from the design\'s sizes: #F5F8FC, a 1px #E4E9F2 border', () => {
+    expect(header).toContain("height: L.searchHeight, flexDirection: 'row', alignItems: 'center', gap: L.searchGap, paddingHorizontal: L.searchPadX, borderRadius: L.searchRadius, backgroundColor: '#F5F8FC', borderWidth: 1, borderColor: LINE");
+    expect(header).toContain('<Search size={L.searchIcon} color={MUTED} />');
+    expect(header).toContain("fontFamily: 'Inter_400Regular', fontSize: L.searchFont");
   });
-  test('filter button 50x50, radius 14, #EEF3FB, a 20 sliders icon, with a 10 gap before it', () => {
-    expect(header).toContain('width: 50, height: 50, borderRadius: 14, backgroundColor: SOFT');
-    expect(header).toContain('<SlidersHorizontal size={20} color={NAVY} />');
+  test('the filter button is drawn from the design\'s sizes, with the row gap before it', () => {
+    expect(header).toContain('width: L.filter, height: L.filter, borderRadius: L.searchRadius, backgroundColor: SOFT');
+    expect(header).toContain('<SlidersHorizontal size={L.filterIcon} color={NAVY} />');
+    expect(header).toContain("flexDirection: 'row', alignItems: 'center', gap: L.rowGap");
   });
   test('built inside My Requests: the shared TopBar and SearchHeader are not used, and not changed', () => {
     expect(screen).not.toMatch(/TopBar|SearchHeader/);
@@ -347,9 +374,12 @@ describe('the header', () => {
 });
 
 describe('the list and its states', () => {
-  test('the list: padding 16 top, 23 sides, 24 bottom (plus the tab bar), a 12 gap; newest first (the filters sort)', () => {
-    expect(screen).toContain('paddingTop: 16, paddingHorizontal: 23, paddingBottom: 24 + TAB_BAR + insets.bottom + fabPad, gap: 12');
+  test('the list is padded and spaced from the design\'s sizes; newest first (the filters sort)', () => {
+    expect(screen).toContain('paddingTop: L.listPadTop, paddingHorizontal: L.listPadSide, paddingBottom, gap: L.listGap');
+    expect(screen).toContain('useFabScrollPad({ ownPad: L.listPadBottom, edge: TAB_BAR + insets.bottom })');
     expect(screen).toContain('applyFilters(requests, filters, today)');
+    expect(screen).toContain('const L = cardSpec(scaleFor(width));');
+    expect(screen).toContain('width={width}');
   });
   test('the same request, and a card opens the same details screen as before', () => {
     expect(screen).toContain("apiGet('/requests/me')");
@@ -373,7 +403,7 @@ describe('the list and its states', () => {
     expect(screen).toContain('{!loading && requests.length === 0 && (');
     expect(screen).toContain("{t('mr_empty_title')}");
     expect(screen).toContain("{t('mr_empty_sub')}");
-    expect(screen).toContain("fontFamily: 'Inter_400Regular', fontSize: 15, color: '#5B6B84', textAlign: 'center'");
+    expect(screen).toContain("fontFamily: 'Inter_400Regular', fontSize: L.noMatch, color: '#5B6B84', textAlign: 'center'");
   });
   test('search finds a request by number, by the service name shown, or by the service type it was saved with', () => {
     expect(screen).toContain('r.id.toLowerCase().includes(q)');

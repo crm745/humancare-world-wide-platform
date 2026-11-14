@@ -22,8 +22,9 @@ const { toPatientRequest, toPatientRequests } = require('./request-response');
 const REQUIRED_FIELDS = ['serviceType', 'patientName', 'origin', 'destination'];
 const { REQUIRED_SERVICE_BY_KEY } = require('../bitrix/bitrix-lead');
 // Service keys the app may send (see mobile src/data/mock.js SERVICE_TILES). Optional,
-// since older app builds don't send one; "hospital" has no Bitrix service mapped yet.
-const SERVICE_KEYS = new Set([...Object.keys(REQUIRED_SERVICE_BY_KEY), 'hospital', 'air']);
+// since older app builds don't send one; "hospital", "marine" (Marine Medical Safety) and
+// "medvalue" (Medical Value Travel) have no Bitrix service mapped yet.
+const SERVICE_KEYS = new Set([...Object.keys(REQUIRED_SERVICE_BY_KEY), 'hospital', 'marine', 'medvalue', 'air']);
 // Mortal Remains as the app asks it now ("Within India / International"); older builds
 // sent plain "mortal" with the ordinary patient form.
 const MORTAL_KEYS = ['mortal_domestic', 'mortal_international'];

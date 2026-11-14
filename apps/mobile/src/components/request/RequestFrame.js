@@ -37,7 +37,7 @@ function StepBar({ step }) {
         const done = i < step;
         const body = (
           <>
-            <View className={`h-1 rounded-full ${i <= step ? 'bg-navy' : 'bg-line'}`} />
+            <View className={`h-1 rounded-full ${i <= step ? 'bg-primary' : 'bg-line'}`} />
             <Text className={`mt-2 text-[10px] uppercase tracking-[1.5px] ${i === step ? 'font-inter-bold text-navy' : 'text-faint'}`} numberOfLines={1}>
               {i}. {t(STEP_LABELS[i])}
             </Text>

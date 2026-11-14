@@ -9,9 +9,11 @@ import { LANGUAGES } from '../data/mock';
 import { navReplace } from '../lib/nav';
 import { clearTokens } from '../lib/session';
 import { BottomNav, Screen, TopBar, useScrollToTopOnTabTap } from '../components/layout';
-import { useSosFabPad } from '../components/sos/hooks';
+import { useFabScrollPad } from '../components/sos/hooks';
 import { SectionLabel, Text } from '../components/ui';
 import { Sheet } from '../components/widgets';
+import { COLORS } from '../theme/colors';
+import { PressBox } from '../components/PressBox';
 
 const TAB_BAR = 64;
 const MAX_WIDTH = 720;
@@ -31,7 +33,7 @@ function LanguageSheet({ visible, onClose }) {
           return (
             <Pressable key={l.code} onPress={() => choose(l)} className={`flex-row items-center justify-between rounded-xl border-[1.5px] px-3.5 py-[13px] ${on ? 'border-primary bg-primary-soft' : 'border-line bg-white'}`}>
               <Text className="font-inter-bold text-[14px] text-navy">{l.name}</Text>
-              {on && <Check size={18} color="#1A73E8" strokeWidth={2.5} />}
+              {on && <Check size={18} color={COLORS.primary} strokeWidth={2.5} />}
             </Pressable>
           );
         })}
@@ -44,7 +46,7 @@ function LanguageSheet({ visible, onClose }) {
 function Row({ Icon, label, onPress, first }) {
   const { isRTL } = useApp();
   return (
-    <Pressable
+    <PressBox
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
@@ -54,13 +56,13 @@ function Row({ Icon, label, onPress, first }) {
       })}
     >
       <View style={{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EEF3FB' }}>
-        <Icon size={20} strokeWidth={1.8} color="#1A5FC4" />
+        <Icon size={20} strokeWidth={1.8} color={COLORS.primary} />
       </View>
       <Text className="font-inter-semibold" style={{ flex: 1, fontSize: 15.5, lineHeight: 21, color: '#17233D' }}>{label}</Text>
       <View style={isRTL ? { transform: [{ scaleX: -1 }] } : null}>
         <ChevronRight size={18} strokeWidth={2} color="#8A97AB" />
       </View>
-    </Pressable>
+    </PressBox>
   );
 }
 
@@ -78,7 +80,8 @@ function Section({ label, rows }) {
 export default function Profile() {
   const { t, isCorporate, profile, toast } = useApp();
   const insets = useSafeAreaInsets();
-  const fabPad = useSosFabPad();
+  // The scroll area ends above the tab bar; its bottom padding is its own (24) or the room the floating SOS button needs, whichever is more.
+  const { paddingBottom, scrollProps } = useFabScrollPad({ ownPad: 24, edge: TAB_BAR + insets.bottom });
   const [langSheet, setLangSheet] = useState(false);
   const scrollRef = useRef(null);
   useScrollToTopOnTabTap(scrollRef);
@@ -114,14 +117,15 @@ export default function Profile() {
       <TopBar title={t('prof_title')} />
       <ScrollView
         ref={scrollRef}
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: TAB_BAR + insets.bottom + 24 + fabPad }}
+        style={{ flex: 1, marginBottom: TAB_BAR + insets.bottom }}
+        contentContainerStyle={{ paddingBottom }}
+        {...scrollProps}
         showsVerticalScrollIndicator={false}
       >
         <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: 18, paddingTop: 16, gap: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <View style={{ width: 68, height: 68, borderRadius: 20, backgroundColor: '#E7F0FE', alignItems: 'center', justifyContent: 'center' }}>
-              <Text className="font-inter-black" style={{ fontSize: 24, color: '#1A5FC4' }}>{initialsOf(profile.name || '')}</Text>
+            <View style={{ width: 68, height: 68, borderRadius: 20, backgroundColor: COLORS.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
+              <Text className="font-inter-black" style={{ fontSize: 24, color: COLORS.primary }}>{initialsOf(profile.name || '')}</Text>
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text className="font-inter-black" style={{ fontSize: 21, lineHeight: 26, color: '#0D2340' }}>{profile.name}</Text>
@@ -133,7 +137,7 @@ export default function Profile() {
           <Section label={t('prof_preferences')} rows={preferences} />
           <Section label={t('prof_support')} rows={support} />
 
-          <Pressable
+          <PressBox
             accessibilityRole="button"
             accessibilityLabel={t('prof_logout')}
             onPress={signOut}
@@ -144,7 +148,7 @@ export default function Profile() {
           >
             <LogOut size={20} strokeWidth={1.9} color="#C53030" />
             <Text className="font-inter-bold" style={{ fontSize: 15.5, color: '#C53030' }}>{t('prof_logout')}</Text>
-          </Pressable>
+          </PressBox>
 
           <Text style={{ fontSize: 12, lineHeight: 16, color: '#5B6B84', textAlign: 'center' }}>{t('prof_footer').replace('{v}', version)}</Text>
         </View>

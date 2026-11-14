@@ -7,9 +7,12 @@ import { useApp } from '../state/AppContext';
 import { IMAGES } from '../data/images';
 import { IconButton } from './layout';
 import { FieldLabel, Input, Text } from './ui';
+import { COLORS, primaryAlpha } from '../theme/colors';
 
 // Bottom sheet with a dimmed backdrop (filter, language and select sheets).
-export function Sheet({ visible, onClose, title, children }) {
+// `fit`: a form that should not scroll (the filters): the content gets all the room the screen has left under the sheet's own header
+// and padding, so it only scrolls on a screen too short to show it at all. Without it, long lists keep the old 70% limit.
+export function Sheet({ visible, onClose, title, children, fit }) {
   const insets = useSafeAreaInsets();
   const { isRTL } = useApp();
   return (
@@ -26,7 +29,10 @@ export function Sheet({ visible, onClose, title, children }) {
               A fixed pixel maxHeight, not a percentage — this wrapper is auto-height (sized
               to its content, bottom-anchored), and a percentage has no sized ancestor to
               resolve against, which collapses to 0 on web instead of falling back sanely. */}
-          <ScrollView style={{ maxHeight: Dimensions.get('window').height * 0.7 }} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={{ maxHeight: fit ? Math.max(200, Dimensions.get('window').height - insets.top - insets.bottom - 20 - 48 - 24 - 16) : Dimensions.get('window').height * 0.7 }}
+            showsVerticalScrollIndicator={false}
+          >
             {children}
           </ScrollView>
         </View>
@@ -109,7 +115,7 @@ export function Select({ value, options, onChange, title, large, bare, labels, p
               className={`flex-row items-center justify-between rounded-lg border-[1.5px] px-3 py-2.5 ${o === value ? 'border-primary bg-primary-soft' : 'border-line bg-white'}`}
             >
               <Text className="font-inter-bold text-[13.5px] text-navy">{show(o)}</Text>
-              {o === value && <Check size={16} color="#1A73E8" strokeWidth={2.5} />}
+              {o === value && <Check size={16} color={COLORS.primary} strokeWidth={2.5} />}
             </Pressable>
           ))}
         </View>
@@ -211,7 +217,7 @@ export function PhotoCard({ img, height, onPress, children, className = '' }) {
     <Pressable onPress={onPress} className={`overflow-hidden rounded-2xl active:opacity-90 ${className}`} style={{ height }}>
       <ImageBackground source={IMAGES[img]} resizeMode="cover" style={{ flex: 1 }}>
         <LinearGradient
-          colors={['rgba(13,35,64,0.1)', 'rgba(13,35,64,0.3)', 'rgba(13,35,64,0.85)']}
+          colors={[primaryAlpha(0.1), primaryAlpha(0.3), primaryAlpha(0.85)]}
           locations={[0, 0.5, 1]}
           style={{ flex: 1, justifyContent: 'flex-end', padding: 16 }}
         >
@@ -232,7 +238,7 @@ export function DocRow({ label, meta, onPress, className = '' }) {
         <Text className="font-inter-bold text-[13.5px]">{label}</Text>
         <Text className="text-[11.5px] text-faint">{meta}</Text>
       </View>
-      <Download size={15} color="#1A73E8" />
+      <Download size={15} color={COLORS.primary} />
     </Pressable>
   );
 }

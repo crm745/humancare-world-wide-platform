@@ -675,7 +675,7 @@ describe('nothing sensitive or invented reaches the model', () => {
 describe('palette', () => {
   test('uses the approved brand colours', () => {
     expect(palette.NAVY).toBe('#0D2340');
-    expect(palette.BLUE).toBe('#2457A7');
+    expect(palette.BLUE).toBe('#303A8F'); // the brand blue (src/theme/colors.js)
     expect(palette.LIGHT).toBe('#EDF2F9');
     expect(palette.WHITE).toBe('#FFFFFF');
   });

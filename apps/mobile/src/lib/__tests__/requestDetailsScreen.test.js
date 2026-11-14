@@ -13,9 +13,9 @@ describe('Request Details is drawn to the design (source checks)', () => {
     expect(screen).toContain('<ChevronLeft size={22} color={C.navy}');
     expect(screen).toContain('fontFamily: FONT[800], fontSize: 18, lineHeight: 24, color: C.navy');
   });
-  test('the page is #F2F6FC, padded 16 16 24 with 14 between the blocks', () => {
+  test('the page is #F2F6FC, padded 16 16 with 14 between the blocks (the bottom space is the one rule of the SOS button: lib/sos.js)', () => {
     expect(screen).toContain("backgroundColor: '#F2F6FC'");
-    expect(screen).toContain('paddingTop: 16, paddingHorizontal: 16, paddingBottom: 24, gap: 14');
+    expect(screen).toContain('paddingTop: 16, paddingHorizontal: 16, paddingBottom: 0, gap: 14');
   });
   test('a section label is 12/16/800 uppercase, 0.08em, #5B6B84, 4 from the left, and a heading; a card is radius 18 / padding 16 (20 / 18 for the big ones)', () => {
     expect(parts).toContain("paddingLeft: 4, fontFamily: FONT[800], fontSize: 12, lineHeight: 16, letterSpacing: 0.96, textTransform: 'uppercase', color: C.muted");
@@ -47,7 +47,7 @@ describe('Request Details is drawn to the design (source checks)', () => {
   test('live tracking: a 16/22/800 title, the Case active chip, five 6-tall segments with a 4 gap, the step line and the update time', () => {
     expect(screen).toContain('fontFamily: FONT[800], fontSize: 16, lineHeight: 22');
     expect(screen).toContain("width: 7, height: 7, borderRadius: 4, backgroundColor: C.blue");
-    expect(screen).toContain("backgroundColor: '#E7F0FE'");
+    expect(screen).toContain('backgroundColor: COLORS.primarySoft');
     expect(screen).toContain("flexDirection: 'row', gap: 4");
     expect(screen).toContain('height: 6, borderRadius: 3, backgroundColor: i < s.step ? C.blue : C.line');
     expect(screen).toContain("t('mr_step_of', { n: s.step, total: s.total })");
@@ -61,7 +61,7 @@ describe('Request Details is drawn to the design (source checks)', () => {
     expect(screen.match(/<StatusCard /g)).toHaveLength(1);
     expect(screen).toContain("if (s.kind === 'review') return <ReviewBanner request={request} />;");
     expect(screen).toContain('bg="#E0F5F4" fg="#0B6564" Icon={CircleCheck} title={t(\'rd_approved_title\')}');
-    expect(screen).toContain('bg="#FDF0DA" fg="#8F4C08" Icon={Clock} title={t(\'rd_review_title\')}');
+    expect(screen).not.toContain('rd_review_title');
     expect(screen).toContain('bg="#EEF1F6" fg="#5B6B84" Icon={Ban} title={t(\'rd_cancelled_title\')}');
   });
   test('the patient grid is two columns with a 14 row gap and a 12 column gap', () => {

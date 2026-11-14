@@ -1,13 +1,14 @@
 import { View } from 'react-native';
 import { Spinner } from './Spinner';
 import { Text } from './ui';
+import { COLORS } from '../theme/colors';
 
 // Shown while a screen's data is on its way, so a screen never claims "nothing here"
 // (or shows 0s) before it actually knows.
 export function LoadingState({ label = 'Loading…', className = '' }) {
   return (
     <View className={`items-center justify-center gap-3 py-[50px] ${className}`}>
-      <Spinner size={28} color="#1A73E8" trackColor="#E7F0FE" />
+      <Spinner size={28} color={COLORS.primary} trackColor={COLORS.primarySoft} />
       {label ? <Text className="text-[12.5px] text-faint">{label}</Text> : null}
     </View>
   );

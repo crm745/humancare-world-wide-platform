@@ -1,5 +1,6 @@
 import { View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
+import { COLORS } from '../../theme/colors';
 
 // Two-tone service icons from the Home design: a soft filled shape behind a 1.8px outline.
 // `fill` is the shape behind, `d` the outline on top (the design's own path data).
@@ -29,6 +30,15 @@ const PATHS = {
     fill: 'M4 6h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z',
     d: 'M4 6h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2zM16 10l6-3v10l-6-3',
   },
+  // Marine Medical Safety: a ship. Medical Value Travel: a medical bag (care that you travel for).
+  marine: {
+    fill: 'M19.38 19A11.6 11.6 0 0 0 21 13l-8.188-3.639a2 2 0 0 0-1.624 0L3 13.001a11.6 11.6 0 0 0 2.81 7.76Z',
+    d: 'M12 2v2M12 9.189V13M19 12V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6M19.38 19A11.6 11.6 0 0 0 21 13l-8.188-3.639a2 2 0 0 0-1.624 0L3 13.001a11.6 11.6 0 0 0 2.81 7.76M2 20c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1s1.2 1 2.5 1c2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1',
+  },
+  medvalue: {
+    fill: 'M4 6h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z',
+    d: 'M12 11v4M14 13h-4M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2M18 6v14M6 6v14M4 6h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z',
+  },
   corporate: {
     fill: 'M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z',
     d: 'M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18ZM6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2M10 6h4M10 10h4M10 14h4M10 18h4',
@@ -37,7 +47,7 @@ const PATHS = {
 
 // [icon colour, tile tint] for each service.
 export const SERVICE_TONE = {
-  privatecharter: ['#1A5FC4', '#E7F0FE'],
+  privatecharter: [COLORS.primary, COLORS.primarySoft],
   ground: ['#C53030', '#FDECEC'],
   hospital: ['#0E7C7B', '#E0F5F4'],
   homecare: ['#B4610D', '#FDF0DA'],
@@ -45,6 +55,8 @@ export const SERVICE_TONE = {
   mortal: ['#5B6B84', '#EEF1F6'],
   tele: ['#17803D', '#E4F7EA'],
   corporate: ['#0D2340', '#E4E9F2'],
+  marine: ['#0B6E99', '#E1F3FA'],
+  medvalue: ['#8A2BB1', '#F4E9FA'],
 };
 
 // Older request records can carry the generic "air" service; it uses the plane.

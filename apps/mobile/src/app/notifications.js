@@ -9,6 +9,7 @@ import { TRACKING_PALETTE as P } from '../lib/tracking/palette';
 import { Body, Screen, TopBar } from '../components/layout';
 import { Button, Card, Spacer, Text } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
+import { COLORS } from '../theme/colors';
 
 // Development-only preview of this screen with six fictional alerts (lib/alertsPreview.js). It is false in a
 // production build (__DEV__ is false there), and while it is on the screen calls no notification API and writes
@@ -16,7 +17,7 @@ import { LoadingState } from '../components/LoadingState';
 const ALERTS_PREVIEW = __DEV__ && true;
 
 const KIND = {
-  stage_update: { bg: 'bg-primary-soft', color: '#1A5FC4', Icon: Loader },
+  stage_update: { bg: 'bg-primary-soft', color: COLORS.primary, Icon: Loader },
   quotation_ready: { bg: 'bg-warning-soft', color: '#B4740D', Icon: Clock },
   document: { bg: 'bg-success-soft', color: '#1E8E4A', Icon: FileText },
   system: { bg: 'bg-cancel-soft', color: '#C23B3B', Icon: Bell },

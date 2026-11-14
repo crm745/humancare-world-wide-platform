@@ -89,7 +89,7 @@ describe('what was left alone', () => {
     const doc = widgets.slice(widgets.indexOf('export function DocRow'), widgets.indexOf('export function Toast'));
     expect(doc).toContain("export function DocRow({ label, meta, onPress, className = '' }) {");
     expect(doc).toContain('<FileText size={16} color="#D64545" />');
-    expect(doc).toContain('<Download size={15} color="#1A73E8" />');
+    expect(doc).toContain('<Download size={15} color={COLORS.primary} />');
     expect(doc).toContain('className={`mb-2.5 flex-row items-center gap-2.5 rounded-[14px] border border-line bg-white p-3 active:opacity-80 ${className}`}');
   });
   test('the corporate tracking page still uses DocRow and downloadAndShare', () => {

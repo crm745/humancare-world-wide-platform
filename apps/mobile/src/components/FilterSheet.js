@@ -58,7 +58,7 @@ function FilterForm({ services, value, onApply, onClose }) {
 // `services` is [{ value, labelKey }].
 export function FilterSheet({ visible, onClose, title, services, value, onApply }) {
   return (
-    <Sheet visible={visible} onClose={onClose} title={title}>
+    <Sheet visible={visible} onClose={onClose} title={title} fit>
       <FilterForm services={services} value={value} onApply={onApply} onClose={onClose} />
     </Sheet>
   );

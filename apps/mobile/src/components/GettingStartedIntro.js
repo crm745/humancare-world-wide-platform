@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state/AppContext';
 import { GETTING_STARTED_SCENE, LOGO } from '../data/images';
 import { Button, Card, Heading, Text } from './ui';
+import { COLORS } from '../theme/colors';
 
 // Page 1 of Getting Started. Only the logo and the scene are pictures; the heading, tagline,
 // trust card, button and footer line are real text. Type, colours and the button are the app's
@@ -87,7 +88,7 @@ export function GettingStartedIntro({ width, height, onNext }) {
 
         <View onLayout={(e) => setBottomH(e.nativeEvent.layout.height)} style={{ paddingHorizontal: SIDE, paddingBottom: insets.bottom + 16 }}>
           <Card accessible className="flex-row items-center gap-3" style={{ shadowColor: '#0D2340', shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2 }}>
-            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: '#C9D8F2', alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', borderWidth: 2, borderColor: COLORS.primaryMuted, alignItems: 'center', justifyContent: 'center' }}>
               <ShieldCheck size={22} color="#0D2340" strokeWidth={2} />
             </View>
             <Text maxFontSizeMultiplier={1.4} className="flex-1 text-[13.5px]" style={{ lineHeight: 19 }}>{t('gs_trust')}</Text>
@@ -96,7 +97,7 @@ export function GettingStartedIntro({ width, height, onNext }) {
           <Button title={`${t('gs_button')} →`} onPress={onNext} className="mt-4" />
 
           <View className="mt-3 flex-row items-center justify-center gap-1.5">
-            <ShieldCheck size={14} color="#1A73E8" strokeWidth={2} />
+            <ShieldCheck size={14} color={COLORS.primary} strokeWidth={2} />
             <Text maxFontSizeMultiplier={1.4} className="shrink text-center font-inter-medium text-[12px] text-primary">{t('gs_footer')}</Text>
           </View>
         </View>

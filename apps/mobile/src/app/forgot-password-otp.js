@@ -19,5 +19,5 @@ export default function ForgotPasswordOtp() {
     return { next: '/set-password' };
   };
 
-  return <OtpScreen titleKey="reset_pwd_title" contact={contact} session="patient" onVerify={onVerify} onResend={resend} />;
+  return <OtpScreen titleKey="reset_pwd_title" contact={contact} session="patient" onVerify={onVerify} onResend={resend} recaptcha />;
 }

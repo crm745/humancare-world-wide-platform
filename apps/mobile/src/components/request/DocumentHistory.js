@@ -3,9 +3,10 @@ import { reviewState } from '../../lib/requestDocuments';
 import { historyRows } from '../../lib/documentHistoryView';
 import { Card, Text } from '../ui';
 import { C, Card as DetailsCard, FONT, Section, WRAP } from './DetailsParts';
+import { COLORS } from '../../theme/colors';
 
 const STATUS_COLOR = {
-  approved: '#0B6564', rejected: '#C53030', unsafe: '#C53030', scan_failed: '#C53030', awaiting_review: '#1A5FC4', checking: '#5B6B84',
+  approved: '#0B6564', rejected: '#C53030', unsafe: '#C53030', scan_failed: '#C53030', awaiting_review: COLORS.primary, checking: '#5B6B84',
 };
 
 // Every document of a request in the review workflow, earlier versions included: name, size and date, how

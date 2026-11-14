@@ -6,8 +6,9 @@ import { ONBOARDING_CARE } from '../data/images';
 import { useApp } from '../state/AppContext';
 import { GettingStartedIntro } from '../components/GettingStartedIntro';
 import { Text } from '../components/ui';
+import { COLORS } from '../theme/colors';
 
-const BLUE = '#1B6FDB';
+const BLUE = COLORS.primary;
 const MAX_COLUMN = 480;
 
 const PAGES = [

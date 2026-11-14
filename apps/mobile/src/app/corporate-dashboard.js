@@ -23,7 +23,7 @@ const FILTER_SERVICES = [
 function Stat({ value, label, tone }) {
   const blue = tone === 'active';
   return (
-    <Card className={`flex-1 items-center ${blue ? 'border-[#CFE0FB] bg-primary-soft' : ''}`}>
+    <Card className={`flex-1 items-center ${blue ? 'border-primary-muted bg-primary-soft' : ''}`}>
       <Text className={`font-inter-black text-[17.5px] ${blue ? 'text-primary-dark' : tone === 'done' ? 'text-success' : 'text-ink'}`}>{value}</Text>
       <Text className={`mt-0.5 text-[10.5px] ${blue ? 'text-primary-dark' : 'text-faint'}`}>{label}</Text>
     </Card>

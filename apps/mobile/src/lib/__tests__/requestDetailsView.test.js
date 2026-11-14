@@ -194,9 +194,9 @@ describe('the status card: exactly one state', () => {
     const request = { ...base, status: 'in_progress', case: caseOf('scheduled') };
     expect(V.statusCard(request).step).toBe(trackingPosition(request).index + 1);
   });
-  test('no case, or a submitted case: under review', () => {
-    expect(V.statusCard(base).kind).toBe('under_review');
-    expect(V.statusCard({ ...base, case: caseOf('submitted') }).kind).toBe('under_review');
+  test('no case, or a submitted case: no status card at all', () => {
+    expect(V.statusCard(base).kind).toBe('none');
+    expect(V.statusCard({ ...base, case: caseOf('submitted') }).kind).toBe('none');
   });
   test('a Charter request still in review shows its banner instead, never both', () => {
     for (const reviewStatus of ['awaiting_documents', 'changes_requested', 'in_review']) {
@@ -323,6 +323,6 @@ describe('the i18n keys', () => {
   test('the approved state says what the design says', () => {
     expect(i18n.EN.rd_approved_title).toBe('Request approved');
     expect(i18n.EN.rd_approved_text).toBe('Your case is being set up. Live tracking turns on here once our team starts work.');
-    expect(i18n.EN.rd_review_text).toBe('Our team is reviewing your request. Live tracking turns on here once your case is active.');
+    expect(read('../../app/request-details.js')).not.toContain('Under medical review');
   });
 });

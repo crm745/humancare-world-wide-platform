@@ -16,6 +16,7 @@ import { TRACKING_STEPS, trackingPosition } from './requestTracking';
 import { documentHistory, reviewBanner, reviewState } from './requestDocuments';
 import { formatSize } from './documentHistoryView';
 import { serviceKeyOf, serviceTitleKey } from './myRequestsView';
+import { COLORS } from '../theme/colors';
 
 export const STEP_COUNT = TRACKING_STEPS.length;
 
@@ -35,7 +36,7 @@ const suffixOf = (request) => String((request && request.serviceKey) || '').spli
 
 const BADGE = {
   submitted: ['#FDF0DA', '#8F4C08'],
-  in_progress: ['#E7F0FE', '#1A5FC4'],
+  in_progress: [COLORS.primarySoft, COLORS.primary],
   completed: ['#E0F5F4', '#0B6564'],
   cancelled: ['#EEF1F6', '#5B6B84'],
 };
@@ -174,10 +175,11 @@ const dayAndTime = (iso) => {
 };
 
 // Exactly one of:
-//   cancelled | completed | active | review (Charter banner) | approved | under_review
+//   cancelled | completed | active | review (Charter banner) | approved | none
+// 'none' is a request whose case has not started: nothing is shown until there is something to say.
 // `step` and `stageKey` of an active case come from trackingPosition, as the Tracking screen's do.
 export function statusCard(request) {
-  if (!request) return { kind: 'under_review' };
+  if (!request) return { kind: 'none' };
   if (request.status === 'cancelled') return { kind: 'cancelled' };
   if (request.status === 'completed' || (request.case && request.case.status === 'completed')) {
     const done = latest(events(request).filter((e) => e.stage === 'completed'));
@@ -191,7 +193,7 @@ export function statusCard(request) {
   const banner = reviewBanner(request);
   if (banner && banner.key !== 'approved') return { kind: 'review', banner };
   if (request.reviewStatus === 'approved') return { kind: 'approved' };
-  return { kind: 'under_review' };
+  return { kind: 'none' };
 }
 
 // ---- documents ---------------------------------------------------------------------------------------------------------

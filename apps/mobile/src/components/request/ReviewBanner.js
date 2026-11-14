@@ -2,10 +2,11 @@ import { Clock } from 'lucide-react-native';
 import { Text, View } from 'react-native';
 import { reviewBanner } from '../../lib/requestDocuments';
 import { C, FONT, StatusLayout, WRAP } from './DetailsParts';
+import { COLORS } from '../../theme/colors';
 
 const TONE = {
   warning: { bg: '#FDF0DA', fg: '#8F4C08' },
-  info: { bg: '#E7F0FE', fg: '#1A5FC4' },
+  info: { bg: COLORS.primarySoft, fg: COLORS.primary },
 };
 
 // Where a request in the review workflow stands while it waits (for documents, for the patient's answer, or with

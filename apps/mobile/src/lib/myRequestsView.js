@@ -8,6 +8,7 @@ import SERVICES from '../data/services.json';
 import { SERVICE_TILES } from '../data/mock';
 import { serviceKeyFromTitle } from './requestShape';
 import { TRACKING_STEPS, cityName, trackingPosition } from './requestTracking';
+import { COLORS } from '../theme/colors';
 
 export const STEP_COUNT = TRACKING_STEPS.length; // 5
 
@@ -29,11 +30,11 @@ export function serviceTitleKey(key) {
 // Badge colours: [background, text].
 const BADGE = {
   submitted: ['#FDF0DA', '#8F4C08'],
-  progress: ['#E7F0FE', '#1A5FC4'],
+  progress: [COLORS.primarySoft, COLORS.primary],
   completed: ['#E0F5F4', '#0B6564'],
 };
 const BADGE_OTHER = ['#EEF1F6', '#5B6B84'];
-export const SEGMENT_DONE = '#1A73E8';
+export const SEGMENT_DONE = COLORS.primary;
 export const SEGMENT_COMPLETED = '#0B6564';
 export const SEGMENT_TODO = '#E4E9F2';
 
@@ -79,12 +80,6 @@ export function cardView(item, t) {
     progress, label,
   };
 }
-
-// On a narrow screen, or with large system text, the text column beside the badge gets too narrow for a word like
-// "Ambulance" and the name would break in the middle. Then the badge goes under the date instead of beside the name.
-// The design is unchanged from 350 up (at normal text size).
-export const BADGE_BESIDE_MIN_WIDTH = 350;
-export const badgeBelowFor = (screenWidth, fontScale = 1) => screenWidth < BADGE_BESIDE_MIN_WIDTH * Math.max(1, fontScale || 1);
 
 // The counts on the chips, from the whole loaded list (not from the search or the filter).
 export function statusCounts(items) {

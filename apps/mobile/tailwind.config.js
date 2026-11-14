@@ -1,6 +1,8 @@
 // Colours and type are lifted 1:1 from interactive-prototype/app.html so the
 // app matches the approved design.
 /** @type {import('tailwindcss').Config} */
+const { COLORS } = require('./src/theme/colors');
+
 module.exports = {
   content: ['./src/**/*.{js,jsx}'],
   presets: [require('nativewind/preset')],
@@ -21,7 +23,8 @@ module.exports = {
         canvas: '#F2F6FC', // screen background
         input: '#F7F9FC', // input background
         soft: '#EEF3FB', // icon buttons
-        primary: { DEFAULT: '#1A73E8', soft: '#E7F0FE', dark: '#1A5FC4' },
+        // the brand blue and its tints: src/theme/colors.js
+        primary: { DEFAULT: COLORS.primary, soft: COLORS.primarySoft, dark: COLORS.primary, pressed: COLORS.primaryPressed, muted: COLORS.primaryMuted },
         success: { DEFAULT: '#1E8E4A', soft: '#E4F7EA', check: '#2FA84F' },
         danger: { DEFAULT: '#D64545', soft: '#FBEDED', line: '#F3C6C6', dark: '#B02A2A' },
         warning: { DEFAULT: '#B4740D', soft: '#FDF0DA' },

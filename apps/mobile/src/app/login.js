@@ -160,9 +160,11 @@ export default function Login() {
           {t('login_signup_q')}{' '}
           <Text className="font-inter-bold text-primary" onPress={() => router.push('/register')}>{t('cta_signup')}</Text>
         </Text>
-        <Pressable
-          onPress={() => router.push('/corporate-login')} accessibilityRole="button" accessibilityLabel={`${t('login_partner_q')} ${t('login_partner_cta')}`}
-          className="mt-5 flex-row items-center gap-3 rounded-2xl border-[1.5px] border-navy bg-white p-3.5 active:opacity-80"
+        {/* Partner login is switched off for now: shown, but dimmed and it does nothing (like Apple Sign-In above). The corporate login
+            screen itself is untouched; this was its only way in. */}
+        <View
+          accessible accessibilityRole="button" accessibilityState={{ disabled: true }} accessibilityLabel={`${t('login_partner_q')} ${t('login_partner_cta')}`}
+          className="mt-5 flex-row items-center gap-3 rounded-2xl border-[1.5px] border-navy bg-white p-3.5 opacity-40"
         >
           <View className="h-11 w-11 items-center justify-center rounded-full bg-primary-soft"><Building2 size={22} color="#0D2340" /></View>
           <Text className="flex-1 font-inter-bold text-[14.5px] text-navy">{t('login_partner_q')}</Text>
@@ -170,7 +172,7 @@ export default function Login() {
             <Text className="font-inter-bold text-[14px] text-navy">{t('login_partner_cta')}</Text>
             <ArrowRight size={16} color="#0D2340" />
           </View>
-        </Pressable>
+        </View>
       </Body>
     </Screen>
   );

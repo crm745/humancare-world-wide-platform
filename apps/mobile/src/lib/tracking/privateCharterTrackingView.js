@@ -5,14 +5,15 @@
 // Nothing is invented: a time is shown only when the model carries one, and there is no ETA, distance,
 // aircraft or coordinator anywhere.
 import { MILESTONE_STATE } from './privateCharterTracking';
+import { COLORS as BRAND } from '../../theme/colors';
 
 // UI-only colours for these screens. (tracking/palette.js and the Tailwind theme are left as they are.)
 export const COLORS = Object.freeze({
-  PRIMARY: '#303A8F',
+  PRIMARY: BRAND.primary,
   SECONDARY: '#2F2A62',
   CANCEL: '#C23B3B',
   CANCEL_SOFT: '#FBE9E9',
-  PRIMARY_SOFT: '#E9EBF6',
+  PRIMARY_SOFT: BRAND.primarySoft,
   NEUTRAL_SOFT: '#EEF1F6',
   WARNING: '#B4740D',
   WARNING_SOFT: '#FDF0DA',

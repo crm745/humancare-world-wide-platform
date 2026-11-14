@@ -1,6 +1,7 @@
 const PDFDocument = require('pdfkit');
 const { MOBILITY_LABEL, URGENCY_LABEL, EQUIPMENT } = require('../../common/constants/request.constants');
 const { careLevelText } = require('../../common/utils/care-level');
+const { BRAND_PRIMARY } = require('../../common/constants/brand');
 
 // A date-only value (a preferred date, a date of death) is stored as that calendar day at 00:00 UTC.
 // Read it in UTC: toDateString() uses the server's own timezone, so on a server west of UTC it
@@ -26,7 +27,7 @@ function streamRequestSummaryPdf(res, request) {
   res.setHeader('Content-Disposition', `attachment; filename="${request.referenceNumber}-summary.pdf"`);
   doc.pipe(res);
 
-  doc.fontSize(18).fillColor('#1A73E8').text('HumanCare World Wide');
+  doc.fontSize(18).fillColor(BRAND_PRIMARY).text('HumanCare World Wide');
   doc.fontSize(10).fillColor('#5B6B84').text('Global Medical Assistance Company');
   doc.moveDown(1.5);
 

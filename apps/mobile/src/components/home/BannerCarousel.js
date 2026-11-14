@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowRight } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
 import { Text } from '../ui';
+import { COLORS, primaryAlpha } from '../../theme/colors';
 
 // There is no banners/promotions API, so these three fixed slides are used. "Request
 // now" opens the All Services screen, the same as "View all services".
@@ -89,7 +90,7 @@ export function BannerCarousel({ width, tablet, onRequest }) {
 
   return (
     <View style={{ marginBottom: 14, gap: 8, direction: 'ltr' }}>
-      <View style={{ width, borderRadius: 18, overflow: 'hidden', backgroundColor: '#0D2340' }}>
+      <View style={{ width, borderRadius: 18, overflow: 'hidden', backgroundColor: COLORS.primary }}>
         <FlatList
           ref={listRef}
           data={SLIDES}
@@ -107,11 +108,11 @@ export function BannerCarousel({ width, tablet, onRequest }) {
           onTouchCancel={() => setTouching(false)}
           getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
           renderItem={({ item }) => (
-            <View style={{ width, minHeight: tablet ? 240 : 176, backgroundColor: '#0D2340' }}>
+            <View style={{ width, minHeight: tablet ? 240 : 176, backgroundColor: COLORS.primary }}>
               <BannerPhoto source={item.image} size={item.size} focus={item.focus} label={t(item.alt)} />
               <LinearGradient
                 pointerEvents="none"
-                colors={['#0D2340', 'rgba(13,35,64,0.72)', 'rgba(13,35,64,0)']}
+                colors={[COLORS.primary, primaryAlpha(0.72), primaryAlpha(0)]}
                 locations={[0.4, 0.58, 0.84]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
@@ -137,7 +138,7 @@ export function BannerCarousel({ width, tablet, onRequest }) {
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5 }} accessible={false} importantForAccessibility="no-hide-descendants">
         {SLIDES.map((s, i) => (
-          <View key={s.key} style={{ height: 6, borderRadius: 3, width: i === index ? 16 : 6, backgroundColor: i === index ? '#1A73E8' : '#C9D3E1' }} />
+          <View key={s.key} style={{ height: 6, borderRadius: 3, width: i === index ? 16 : 6, backgroundColor: i === index ? COLORS.primary : '#C9D3E1' }} />
         ))}
       </View>
     </View>

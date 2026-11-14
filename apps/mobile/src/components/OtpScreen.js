@@ -8,6 +8,7 @@ import { clearAuthSteps } from '../lib/authFlow';
 import { BackButton, Body, Screen } from './layout';
 import { Button, Input, Heading, Spacer, Text } from './ui';
 import { OtpInput, otpComplete } from './widgets';
+import { RecaptchaNotice } from './RecaptchaNotice';
 
 const RESEND_COOLDOWN_SECONDS = 30; // matches the backend's own cooldown
 
@@ -44,7 +45,8 @@ function otpErrorMessage(err) {
 // screen with, e.g. set-password, optionally updating the profile first). `onResend(identifier)` and `onChangeIdentifier(newIdentifier)` take
 // the CURRENT identifier, since the edit link can change it right here. Any of the three
 // can be left out — screens that can't support one just don't get that affordance.
-export function OtpScreen({ titleKey, identifier, contact, note, session, compact, onVerify, onResend, onChangeIdentifier }) {
+// `recaptcha`: this screen sends its code through Firebase, which runs reCAPTCHA on the web, so it shows Google's notice.
+export function OtpScreen({ titleKey, identifier, contact, note, session, compact, recaptcha, onVerify, onResend, onChangeIdentifier }) {
   const { t, toast, setSession, setProfile } = useApp();
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -177,6 +179,7 @@ export function OtpScreen({ titleKey, identifier, contact, note, session, compac
             <Text className="text-[14.5px] text-faint">{"Didn't get it? Go back and try again."}</Text>
           )}
         </View>
+        {recaptcha ? <RecaptchaNotice /> : null}
         <Spacer />
         <Button large={!compact} title={t('otp_verify_btn')} onPress={verify} loading={busy} />
       </Body>

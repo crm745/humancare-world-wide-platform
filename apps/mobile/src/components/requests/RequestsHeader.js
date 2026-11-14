@@ -1,72 +1,75 @@
 import { Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { ChevronLeft, Search, SlidersHorizontal } from 'lucide-react-native';
+import { headerSpec, scaleFor } from '../../lib/myRequestsLayout';
+import { COLORS } from '../../theme/colors';
+import { PressBox } from '../PressBox';
 
 // The My Requests header (its own, not the shared TopBar / SearchHeader): the back button and title, the search field and
-// the filter button, and the status chips. Values are the design's: white, a 1px bottom border, 20 / 23 / 14 padding and
-// a 16 gap between the three rows.
+// the filter button, and the status chips. The sizes are the design's (lib/myRequestsLayout.js), scaled to the screen.
 const NAVY = '#0D2340';
 const INK = '#17233D';
 const MUTED = '#5B6B84';
 const LINE = '#E4E9F2';
 const SOFT = '#EEF3FB';
-const FONT = { 500: 'Inter_500Medium', 700: 'Inter_700Bold', 800: 'Inter_800ExtraBold' };
+const FONT = { 700: 'Inter_700Bold', 800: 'Inter_800ExtraBold' };
 
-function Chip({ label, count, on, onPress, t }) {
+function Chip({ label, count, on, onPress, L }) {
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected: on }}
       accessibilityLabel={`${label}, ${count}`}
       onPress={onPress}
-      hitSlop={{ top: 3, bottom: 3 }}
+      hitSlop={{ top: L.chipHitSlop, bottom: L.chipHitSlop }}
       style={{
-        height: 38, borderRadius: 999, paddingLeft: 14, paddingRight: 8, flexDirection: 'row', alignItems: 'center', gap: 8,
-        backgroundColor: on ? NAVY : '#FFFFFF', borderWidth: on ? 0 : 1, borderColor: LINE,
+        height: L.chipHeight, borderRadius: 999, paddingLeft: L.chipPadLeft, paddingRight: L.chipPadRight, flexDirection: 'row', alignItems: 'center', gap: L.chipGap,
+        backgroundColor: on ? COLORS.primary : '#FFFFFF', borderWidth: on ? 0 : 1, borderColor: LINE,
       }}
     >
-      <Text style={{ fontFamily: FONT[700], fontSize: 14, color: on ? '#FFFFFF' : INK }}>{label}</Text>
-      <View style={{ minWidth: 22, paddingVertical: 2, paddingHorizontal: 6, borderRadius: 999, alignItems: 'center', backgroundColor: on ? 'rgba(255,255,255,0.18)' : '#EEF1F6' }}>
-        <Text style={{ fontFamily: FONT[800], fontSize: 12, color: on ? '#FFFFFF' : MUTED }}>{count}</Text>
+      <Text style={{ fontFamily: FONT[700], fontSize: L.chipFont, color: on ? '#FFFFFF' : INK }}>{label}</Text>
+      <View style={{ minWidth: L.bubbleMin, paddingVertical: L.bubblePadY, paddingHorizontal: L.bubblePadX, borderRadius: 999, alignItems: 'center', backgroundColor: on ? 'rgba(255,255,255,0.18)' : '#EEF1F6' }}>
+        <Text style={{ fontFamily: FONT[800], fontSize: L.bubbleFont, color: on ? '#FFFFFF' : MUTED }}>{count}</Text>
       </View>
     </Pressable>
   );
 }
 
-// chips: [{ value, label, count }]
-export function RequestsHeader({ title, backLabel, searchPlaceholder, filterLabel, query, onQuery, onBack, onFilters, chips, value, onChange, isRTL }) {
+// chips: [{ value, label, count }]; `width` is the screen's width
+export function RequestsHeader({ width, title, backLabel, searchPlaceholder, filterLabel, query, onQuery, onBack, onFilters, chips, value, onChange, isRTL }) {
+  const L = headerSpec(scaleFor(width));
   return (
-    <View style={{ backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: LINE, paddingTop: 20, paddingHorizontal: 23, paddingBottom: 14, gap: 16 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-        <Pressable
+    <View style={{ backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: LINE, paddingTop: L.padTop, paddingHorizontal: L.padSide, paddingBottom: L.padBottom, gap: L.gap }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: L.titleGap }}>
+        <PressBox
           accessibilityRole="button" accessibilityLabel={backLabel} onPress={onBack}
-          style={({ pressed }) => ({ width: 52, height: 52, borderRadius: 14, backgroundColor: SOFT, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}
+          style={({ pressed }) => ({ width: L.back, height: L.back, borderRadius: L.backRadius, backgroundColor: SOFT, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}
         >
           <View style={isRTL ? { transform: [{ scaleX: -1 }] } : null}>
-            <ChevronLeft size={22} strokeWidth={2.2} color={NAVY} />
+            <ChevronLeft size={L.chevron} strokeWidth={2.2} color={NAVY} />
           </View>
-        </Pressable>
-        <Text accessibilityRole="header" style={{ flex: 1, fontFamily: FONT[800], fontSize: 20, lineHeight: 26, color: NAVY }}>{title}</Text>
+        </PressBox>
+        <Text accessibilityRole="header" style={{ flex: 1, fontFamily: FONT[800], fontSize: L.titleSize, lineHeight: L.titleLine, color: NAVY }}>{title}</Text>
       </View>
 
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <View style={{ flex: 1, height: 50, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, borderRadius: 14, backgroundColor: '#F5F8FC', borderWidth: 1, borderColor: LINE }}>
-          <Search size={20} color={MUTED} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: L.rowGap }}>
+        <View style={{ flex: 1, height: L.searchHeight, flexDirection: 'row', alignItems: 'center', gap: L.searchGap, paddingHorizontal: L.searchPadX, borderRadius: L.searchRadius, backgroundColor: '#F5F8FC', borderWidth: 1, borderColor: LINE }}>
+          <Search size={L.searchIcon} color={MUTED} />
           <TextInput
             value={query} onChangeText={onQuery} placeholder={searchPlaceholder} placeholderTextColor="#8A97AB" accessibilityLabel={searchPlaceholder}
             returnKeyType="search" autoCorrect={false} autoCapitalize="none"
-            style={[{ flex: 1, minWidth: 0, height: 50, padding: 0, fontFamily: 'Inter_400Regular', fontSize: 15, color: INK }, Platform.OS === 'web' ? { outlineStyle: 'none' } : null]}
+            style={[{ flex: 1, minWidth: 0, height: L.searchHeight, padding: 0, fontFamily: 'Inter_400Regular', fontSize: L.searchFont, color: INK }, Platform.OS === 'web' ? { outlineStyle: 'none' } : null]}
           />
         </View>
-        <Pressable
+        <PressBox
           accessibilityRole="button" accessibilityLabel={filterLabel} onPress={onFilters}
-          style={({ pressed }) => ({ width: 50, height: 50, borderRadius: 14, backgroundColor: SOFT, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}
+          style={({ pressed }) => ({ width: L.filter, height: L.filter, borderRadius: L.searchRadius, backgroundColor: SOFT, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}
         >
-          <SlidersHorizontal size={20} color={NAVY} />
-        </Pressable>
+          <SlidersHorizontal size={L.filterIcon} color={NAVY} />
+        </PressBox>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-        {chips.map((c) => <Chip key={c.value} label={c.label} count={c.count} on={value === c.value} onPress={() => onChange(c.value)} />)}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: L.chipsGap }}>
+        {chips.map((c) => <Chip key={c.value} label={c.label} count={c.count} on={value === c.value} onPress={() => onChange(c.value)} L={L} />)}
       </ScrollView>
     </View>
   );

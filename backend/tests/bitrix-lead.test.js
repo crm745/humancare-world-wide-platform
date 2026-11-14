@@ -59,6 +59,12 @@ describe('Bitrix lead from a patient request', () => {
     expect(hospital.COMMENTS).toBe('Requirement: Needs oxygen on board\nCare level: Basic\nService: Hospitalization Assistance');
   });
 
+  it.each([['marine', 'Marine Medical Safety'], ['medvalue', 'Medical Value Travel']])('sends %s with no Required Service and names it in the comment, for Operations to pick', (serviceKey, serviceType) => {
+    const fields = buildLeadFields(leadInputFromRequest({ ...request, serviceKey, serviceType }, user));
+    expect(fields.UF_CRM_1781505417891).toBeUndefined();
+    expect(fields.COMMENTS).toBe(`Requirement: Needs oxygen on board\nCare level: Basic\nService: ${serviceType}`);
+  });
+
   it.each([
     ['privatecharter', 2820], ['commercialair_wheelchair', 2826], ['ground', 2830], ['mortal', 2828],
     ['homecare', 2834], ['tele', 2836], ['corporate', 2930],
