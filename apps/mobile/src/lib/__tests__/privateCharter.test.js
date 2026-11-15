@@ -37,7 +37,7 @@ const DUBAI = { geonameId: 292223, name: 'Dubai', label: 'Dubai, United Arab Emi
 const draft = (over = {}) => ({
   service: 'privatecharter', name: 'Maria Fernandez', age: '61', gender: 'Female', location: MUMBAI.label, originCity: MUMBAI,
   dest: DUBAI.label, destCity: DUBAI, country: 'United Arab Emirates', countryIso: 'AE', cc: '+971', phoneCountry: 'AE', phone: '50 123 4567',
-  date: '2099-01-01', care: ['care_icu', 'care_stable'], desc: 'Post-angioplasty', mobility: 'bedridden',
+  date: '2099-01-01', care: ['care_icu'], desc: 'Post-angioplasty', mobility: 'bedridden',
   equipOxygen: true, equipCardiac: false, equipVentilator: false, urgency: 'urgent_24h', files: [], ...over,
 });
 const wire = (d) => JSON.parse(JSON.stringify(buildPrivateCharterPayload(d))); // what actually goes over the network
@@ -76,11 +76,11 @@ describe('the Private Charter payload', () => {
     expect(body).not.toHaveProperty('deceasedRelation');
   });
 
-  it('sends the formats that are stored: lower-case gender, E.164 number, ISO country, key list, YYYY-MM-DD', () => {
+  it('sends the formats that are stored: lower-case gender, E.164 number, ISO country, one-key list, YYYY-MM-DD', () => {
     expect(wire(draft())).toMatchObject({
       serviceKey: 'privatecharter', serviceType: 'Private Charter Air Ambulance Service', patientName: 'Maria Fernandez', patientAge: 61,
       patientGender: 'female', patientContact: '+971501234567', country: 'AE', preferredDate: '2099-01-01',
-      careLevel: ['care_icu', 'care_stable'], description: 'Post-angioplasty', mobility: 'bedridden',
+      careLevel: ['care_icu'], description: 'Post-angioplasty', mobility: 'bedridden',
       equipOxygen: true, equipCardiacMonitor: false, equipVentilator: false, urgency: 'urgent_24h',
     });
   });
@@ -98,7 +98,7 @@ describe('the Private Charter payload', () => {
     expect(data).toMatchObject({
       serviceKey: 'privatecharter', patientName: 'Maria Fernandez', patientAge: 61, patientGender: 'female', patientContact: '+971501234567',
       country: 'AE', origin: MUMBAI.name, originGeonameId: 1275339, destinationGeonameId: 292223, preferredDate: '2099-01-01',
-      careLevel: 'care_icu,care_stable', description: 'Post-angioplasty', mobility: 'bedridden', urgency: 'urgent_24h',
+      careLevel: 'care_icu', description: 'Post-angioplasty', mobility: 'bedridden', urgency: 'urgent_24h',
       equipOxygen: true, equipCardiacMonitor: false, equipVentilator: false,
     });
   });
@@ -106,7 +106,7 @@ describe('the Private Charter payload', () => {
   it('accepts every care-level choice, mobility, urgency, gender and a missing description', () => {
     const variants = [
       draft({ care: ['care_na'] }), draft({ care: ['care_ambulatory'], mobility: 'walking', urgency: 'planned' }),
-      draft({ care: ['care_icu', 'care_stable', 'care_ambulatory'], mobility: 'wheelchair', urgency: 'critical_6h' }),
+      draft({ care: ['care_stable'], mobility: 'wheelchair', urgency: 'critical_6h' }),
       draft({ gender: 'Male' }), draft({ gender: 'Other' }), draft({ desc: '' }),
       draft({ equipOxygen: true, equipCardiac: true, equipVentilator: true }),
     ];
@@ -182,11 +182,19 @@ describe('missing or invalid data is refused by the backend, not hidden by the a
     expect(validateOne(wire(draft({ destCity: { geonameId: 123456789 } }))).fields.destination).toBe('Select a valid city from the list.');
   });
 
+  it('several care levels are sent as they are and refused by the server (never reduced to the first)', () => {
+    const body = wire(draft({ care: ['care_icu', 'care_stable'] }));
+    expect(body.careLevel).toEqual(['care_icu', 'care_stable']);
+    const { fields, data } = validateOne(body);
+    expect(fields.careLevel).toBe('Select only one care level.');
+    expect(data.careLevel).toBeUndefined();
+  });
+
   it('no care level, no mobility, no urgency, a past date, an age over 120', () => {
     const fields = validate([
       wire(draft({ care: [] })), wire(draft({ mobility: '' })), wire(draft({ urgency: '' })), wire(draft({ date: '2001-01-01' })), wire(draft({ age: '121' })),
     ]).map((r) => r.fields);
-    expect(fields[0].careLevel).toBe('Select at least one care level.');
+    expect(fields[0].careLevel).toBe('Select a care level.');
     expect(fields[1].mobility).toBe('Mobility is required.');
     expect(fields[2].urgency).toBe('Urgency is required.');
     expect(fields[3].preferredDate).toBe('Preferred date cannot be in the past.');
@@ -255,7 +263,7 @@ describe('API validation errors go back onto the form', () => {
     fieldErrorsFromError(apiError({ origin: 'x' }));
     expect(JSON.stringify(wire(d))).toBe(before);
     expect(d.originCity).toEqual(MUMBAI);
-    expect(d.care).toEqual(['care_icu', 'care_stable']);
+    expect(d.care).toEqual(['care_icu']);
   });
 });
 

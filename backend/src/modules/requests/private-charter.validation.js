@@ -16,7 +16,7 @@ const { normalizeMobile } = require('../../common/utils/phone');
 const { isValidTimeZone, todayInTimeZone } = require('../../common/utils/local-date');
 const { readCityRef } = require('../geo/city-ref');
 const {
-  MOBILITY, URGENCY, EQUIPMENT, GENDERS, CARE_LEVEL_KEYS, CARE_LEVEL_EXCLUSIVE, CARE_LEVEL_LEGACY_LABELS,
+  MOBILITY, URGENCY, EQUIPMENT, GENDERS, CARE_LEVEL_KEYS, CARE_LEVEL_LEGACY_LABELS,
   PRIVATE_CHARTER_KEY, PRIVATE_CHARTER_SERVICE_TYPE,
 } = require('../../common/constants/request.constants');
 
@@ -192,9 +192,11 @@ function validatePrivateCharterRequest(body, { now = Date.now(), cities = {} } =
     data.preferredDate = body.preferredDate;
   }
 
-  // --- Care level: keys; recognised translated labels during the compatibility period ----
+  // --- Care level: EXACTLY ONE key (single-select). The wire format is unchanged: a list holding the one key.
+  //     Several values are refused, never reduced to the first one. Recognised translated labels are still
+  //     accepted during the compatibility period (older builds send one label as a string).
   if (missing(body.careLevel) || body.careLevel === '' || (Array.isArray(body.careLevel) && !body.careLevel.length)) {
-    fail('careLevel', 'Select at least one care level.');
+    fail('careLevel', 'Select a care level.');
   } else {
     // Older builds send one string: the labels joined with ", ".
     const items = Array.isArray(body.careLevel) ? body.careLevel : typeof body.careLevel === 'string' ? body.careLevel.split(',') : null;
@@ -208,9 +210,8 @@ function validatePrivateCharterRequest(body, { now = Date.now(), cities = {} } =
       else if (LEGACY_CARE_LABEL_TO_KEY.has(text)) { keys.push(LEGACY_CARE_LABEL_TO_KEY.get(text)); usedLabel = true; }
       else { valid = false; break; }
     }
-    if (!valid) fail('careLevel', `Care level must be a list of: ${CARE_LEVEL_KEYS.join(', ')}.`);
-    else if (new Set(keys).size !== keys.length) fail('careLevel', 'Care level must not repeat a value.');
-    else if (keys.includes(CARE_LEVEL_EXCLUSIVE) && keys.length > 1) fail('careLevel', 'Not applicable cannot be combined with another care level.');
+    if (!valid) fail('careLevel', `Care level must be one of: ${CARE_LEVEL_KEYS.join(', ')}.`);
+    else if (keys.length !== 1) fail('careLevel', 'Select only one care level.');
     else {
       data.careLevel = keys.join(',');
       if (usedLabel || typeof body.careLevel === 'string') legacy.push('careLevel');

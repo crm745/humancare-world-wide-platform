@@ -54,8 +54,8 @@ export async function requestDocuments(id, reason) {
 }
 
 /**
- * POST /admin/requests/:id/approve. The backend approves the request and creates its Case in one transaction
- * (201 with the new Case; 200 if it was already approved). Resolves with { request, case, alreadyApproved }.
+ * POST /admin/requests/:id/approve. The backend completes the document review and copies the approved documents to the
+ * request's existing Case in one transaction (201; 200 if it was already approved). An older request with no Case is refused with 409 `case_missing_manual_review`. Resolves with { request, case, alreadyApproved }.
  * Refused with 409 `approval_blocked` (the body lists `blockers`), 404 when it does not exist, 400 for a bad id.
  * The frontend never creates a Case itself.
  */

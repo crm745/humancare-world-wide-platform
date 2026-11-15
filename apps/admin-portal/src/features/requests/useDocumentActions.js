@@ -127,7 +127,7 @@ export function useDocumentActions(requestId, { onChanged }) {
     setError(null);
   }, []);
 
-  // Approves the request; the BACKEND creates the Case in its own transaction. Nothing is assumed locally:
+  // Approves the request; the BACKEND completes the review on the existing Case in its own transaction. Nothing is assumed locally:
   // on success the page refetches and shows what the server now holds.
   const submitApproval = useCallback(async () => {
     if (saving.current || !approveDialog) return;

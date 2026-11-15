@@ -35,7 +35,7 @@ const details = {
 
 const approveBtn = (page) => page.getByRole('button', { name: 'Approve request' });
 const dialog = (page) => page.getByRole('dialog');
-const confirm = (page) => dialog(page).getByRole('button', { name: 'Approve and create Case' });
+const confirm = (page) => dialog(page).getByRole('button', { name: 'Approve request' });
 const header = (page) => page.getByRole('main').locator('header');
 const detailCalls = (api) => api.calls.filter((c) => /^\/admin\/requests\/\d+$/.test(c.path));
 const open = async (page, context, initial = {}, id = 801) => {
@@ -96,10 +96,10 @@ test.describe('eligibility', () => {
 });
 
 test.describe('confirming', () => {
-  test('the dialog explains that a Case is created; Cancel sends nothing', async ({ page, context }) => {
+  test('the dialog explains what approving does; Cancel sends nothing', async ({ page, context }) => {
     const api = await open(page, context);
     await approveBtn(page).click();
-    await expect(dialog(page)).toContainText('creates an operational Case');
+    await expect(dialog(page)).toContainText('completes the document review');
     await dialog(page).getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog(page)).toHaveCount(0);
     expect(api.approvals).toHaveLength(0);

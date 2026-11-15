@@ -20,13 +20,13 @@ export default function RequestStep2() {
   const transport = needsCareLevel(draft.service);
   // The API's message for a field, shown under it until the person changes the field.
   const serverError = (field) => (serverErrors ? serverErrors[field] : undefined);
-  // Private Charter needs at least one care level (the other transport services leave it optional).
+  // Private Charter needs exactly one care level (the other transport services leave it optional).
   const charter = isPrivateCharter(draft.service);
   const mortal = isMortal(draft.service);
   const [attempted, setAttempted] = useState(false);
 
   const problems = [
-    ['care', charter && !draft.care.length],
+    ['care', charter && draft.care.length !== 1],
     ['mobility', transport && !draft.mobility],
     ['files', needsDocument(draft)],
     ['urgency', !draft.urgency],
@@ -56,10 +56,11 @@ export default function RequestStep2() {
         <Anchor id="care">
           <FieldHeader title={t('field_care_level')} required={charter} />
           <ChoiceChips
-            multiple columns={2} label={t('field_care_level')} value={draft.care} onChange={(care) => updateDraft({ care })}
-            options={CARE_LEVELS.map((key) => ({ value: key, label: t(key), exclusive: key === 'care_na' }))}
+            columns={2} label={t('field_care_level')}
+            value={draft.care.length === 1 ? draft.care[0] : ''} onChange={(key) => updateDraft({ care: key ? [key] : [] })}
+            options={CARE_LEVELS.map((key) => ({ value: key, label: t(key) }))}
           />
-          <FieldError>{charter && attempted && !draft.care.length ? t('req_required') : serverError('careLevel')}</FieldError>
+          <FieldError>{charter && attempted && draft.care.length !== 1 ? t('req_required') : serverError('careLevel')}</FieldError>
         </Anchor>
       )}
 

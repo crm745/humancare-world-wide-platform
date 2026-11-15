@@ -1,6 +1,6 @@
-// When an Admin may approve a request (which makes the backend open an operational Case). Mirrors the
-// backend's approvalBlockers (request-review.service.js); the server checks again, in a transaction, and
-// is the only place a Case is ever created. Pure and DOM-free so `node --test` can run it.
+// When an Admin may approve a request (complete its document review; the Case already exists since the submission).
+// Mirrors the backend's approvalBlockers (request-review.service.js); the server checks again, in a transaction.
+// Pure and DOM-free so `node --test` can run it.
 
 // The Case details page (Phase G) is at /cases/:id.
 export const CASE_DETAILS_AVAILABLE = true;

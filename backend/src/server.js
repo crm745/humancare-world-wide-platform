@@ -15,6 +15,17 @@ if (isFirebasePhoneEnabled()) {
   }
 }
 
+// Private Charter Deal integration needs the master Bitrix switch and the request review workflow. An impossible
+// combination stops the process here, with every problem named, instead of leaving Private Charter with neither
+// Leads nor Deals.
+const { assertBitrixConfiguration } = require('./modules/bitrix/bitrix-config');
+try {
+  assertBitrixConfiguration();
+} catch (err) {
+  console.error(err.message);
+  process.exit(1);
+}
+
 // This process only serves HTTP. Scheduled jobs (Bitrix retry, security-log cleanup) run in
 // the separate worker — see worker.js and src/jobs.
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;

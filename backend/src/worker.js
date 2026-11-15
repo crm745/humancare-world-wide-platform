@@ -7,6 +7,17 @@
 // dotenv first: some modules read their settings at import time (bitrix.service.js).
 require('dotenv').config();
 
+// Same check as the API (server.js): the Deal switch needs the master switch and the review workflow.
+{
+  const { assertBitrixConfiguration } = require('./modules/bitrix/bitrix-config');
+  try {
+    assertBitrixConfiguration();
+  } catch (err) {
+    console.error(`[worker] Could not start: ${err.message}`);
+    process.exit(1);
+  }
+}
+
 const { prisma } = require('./db/prisma');
 const { createJobRunner } = require('./jobs/job-runner');
 const { jobs } = require('./jobs');

@@ -46,6 +46,8 @@ const {
   getRequests, getRequest, downloadDocument, postDocumentReview, postRequestDocuments, postApproval,
 } = require('../request-review/request-review.controller');
 
+const { postDealRecovery } = require('../bitrix/deal-recovery.controller');
+
 const adminRouter = Router();
 
 // Middleware order:
@@ -109,6 +111,9 @@ adminRouter.get('/cases', getCases);
 adminRouter.get('/cases/:id', getCase);
 adminRouter.patch('/cases/:id/assign', patchCaseAssign);
 adminRouter.patch('/cases/:id/stage', patchCaseStage);
+// Safe manual recovery of a Private Charter Bitrix Deal event that failed or needs manual review. Superadmin only:
+// it can authorise a new Deal-creation event. See modules/bitrix/deal-recovery.service.js.
+adminRouter.post('/cases/:id/deal-recovery', requireSuperAdmin, postDealRecovery);
 
 // Billing — step 1, a manual Ops/Finance tracker, same access level as the rest of
 // case data (not a sensitive-settings action like admin accounts or the catalog).
