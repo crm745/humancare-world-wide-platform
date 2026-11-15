@@ -616,7 +616,12 @@ model RequestDocument {
   rejectionReason   String?  @db.Text @map("rejection_reason")
   // The documents row created for it when the request was approved (a plain id).
   caseDocumentId    Int?     @unique @map("case_document_id")
+  // The Admin / Operations document request this upload answers (M4). NULL on every existing row and
+  // on a document the patient uploaded unprompted. Never required: an upload is valid without it.
+  documentRequestId Int?     @map("document_request_id")
+  documentRequest   DocumentRequest? @relation(fields: [documentRequestId], references: [id], onDelete: Restrict)
 
+  @@index([documentRequestId])
   @@index([serviceRequestId])
   @@index([scanStatus])
   @@index([scanStatus, scanNextAttemptAt])
@@ -651,8 +656,10 @@ model RequestEvent {
 model Case {
   id                  Int       @id @default(autoincrement())
   serviceRequestId    Int?      @unique @map("service_request_id")
-  serviceRequest      ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
-  corporateId         Int?      @map("corporate_id")
+  // M9: RESTRICT on delete (was SET NULL): a service request that has a Case cannot be deleted, so the Case/Deal
+  // history is never silently detached. Corporate Cases keep serviceRequestId NULL, which a foreign key never checks.
+  serviceRequest      ServiceRequest? @relation(fields: [serviceRequestId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  corporateId        Int?      @map("corporate_id")
   corporate           Corporate? @relation(fields: [corporateId], references: [id])
   referenceNumber     String    @unique @map("reference_number")
   patientName         String    @map("patient_name")
@@ -692,11 +699,21 @@ model Case {
   billingInvoicedAt   DateTime? @map("billing_invoiced_at")
   billingPaidAt       DateTime? @map("billing_paid_at")
   billingNotes        String?   @db.Text @map("billing_notes")
+  // Private Charter stage tracking (M1). NULL on every existing Case and on every Corporate Case.
+  // Separate from `status` above, whose values and meaning are unchanged.
+  charterStage        String?   @map("charter_stage")
+  stageVersion        Int       @default(0) @map("stage_version")
+  closedAt            DateTime? @map("closed_at")
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
   stageEvents         CaseStageEvent[]
   documents           Document[]
   communications      CaseCommunication[]
+  auditLogs           AuditLog[]
+  documentRequests    DocumentRequest[]
+  bitrixDealLink      BitrixDealLink?
+  outboxEvents        IntegrationOutbox[]
+  invoices            Invoice[]
 
   @@index([corporateId, status])
   @@map("cases")
@@ -727,9 +744,554 @@ model CaseStageEvent {
   stage      String
   note       String?  @db.Text
   occurredAt DateTime @default(now()) @map("occurred_at")
+  // Private Charter transition metadata (M2). NULL on every existing row and on rows written by the
+  // Corporate / legacy paths, which only set stage, note and occurredAt.
+  previousStage      String?   @map("previous_stage")
+  actorType          String?   @map("actor_type")
+  actorId            String?   @map("actor_id")
+  source             String?
+  reasonCode         String?   @map("reason_code")
+  reasonText         String?   @db.Text @map("reason_text")
+  idempotencyKey     String?   @map("idempotency_key")
+  externalModifiedAt DateTime? @map("external_modified_at")
 
+  @@unique([caseId, idempotencyKey])
   @@index([caseId])
   @@map("case_stage_events")
+}
+
+// Private Charter business audit history (M3): who did what, to which entity, from where and why,
+// with the before and after values. Append-only: rows are only ever inserted (nothing in the code
+// updates or deletes one), there is deliberately no updatedAt, and no purge job covers this table.
+// Deliberately not security_events, which is a security log with a retention purge.
+//
+// Sensitive data: beforeData and afterData may hold only explicitly allowlisted audit fields (for
+// example a stage, a status, an amount, an identifier). Medical content, reports, document contents,
+// passwords, tokens, webhook URLs and any other secret must NEVER be stored in this table, in any
+// column, reasonText included. Redaction and allowlist enforcement belong to the future audit-writing
+// service, not to the database. Application-level append-only enforcement (a single write path with
+// no update or delete) and database-account permissions (no UPDATE or DELETE for the application's
+// account) belong to later implementation and deployment work; this table does not enforce them.
+//
+// Identifiers: entityId and idempotencyKey are opaque and are stored exactly as given (a Bitrix Deal
+// ID, an invoice number, a client key). They are never trimmed, lowercased or otherwise changed. The
+// audit-writing service MUST reject (not silently trim or transform) any entityId or idempotencyKey
+// with leading or trailing whitespace, because utf8mb4_bin ignores trailing spaces when comparing and
+// would otherwise treat "AbC" and "AbC " as the same identifier. The
+// migration gives these two columns the case-sensitive utf8mb4_bin collation so "AbC" and "abc" are
+// different identifiers, including inside the unique key below. Prisma's schema cannot express a
+// column collation, so it is set in the migration SQL only.
+// The Case link is RESTRICT: a Case that has audit history cannot be deleted.
+model AuditLog {
+  id             Int      @id @default(autoincrement())
+  caseId         Int?     @map("case_id")
+  case           Case?    @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  entityType     String   @db.VarChar(40) @map("entity_type") // "case" | "invoice" | "payment" | "bitrix_deal_link" | ...
+  entityId       String   @db.VarChar(64) @map("entity_id")
+  action         String   @db.VarChar(64)
+  actorType      String   @db.VarChar(16) @map("actor_type") // "admin" | "operations" | "patient" | "system" | "bitrix"
+  actorId        String?  @db.VarChar(64) @map("actor_id")
+  actorRole      String?  @db.VarChar(32) @map("actor_role") // the actor's role at the time, e.g. "superadmin"
+  source         String   @db.VarChar(32) // "admin_portal" | "mobile_app" | "bitrix_webhook" | "system" | ...
+  isOverride     Boolean  @default(false) @map("is_override") // an Admin overrode the normal rules
+  reasonCode     String?  @db.VarChar(64) @map("reason_code")
+  reasonText     String?  @db.Text @map("reason_text")
+  beforeData     Json?    @map("before_data")
+  afterData      Json?    @map("after_data")
+  correlationId  String?  @db.VarChar(64) @map("correlation_id") // groups the rows written by one action or request
+  idempotencyKey String?  @db.VarChar(191) @map("idempotency_key")
+  occurredAt     DateTime @default(now()) @map("occurred_at") // when the business event happened
+  recordedAt     DateTime @default(now()) @map("recorded_at") // when HumanCare stored this audit entry
+
+  @@unique([entityType, entityId, idempotencyKey])
+  @@index([caseId, occurredAt])
+  @@index([entityType, entityId, occurredAt])
+  @@index([actorType, actorId, occurredAt])
+  @@index([action, occurredAt])
+  @@map("audit_logs")
+}
+
+// PRIVATE CHARTER ONLY. DocumentRequest is intended for Private Charter Cases and nothing else. The
+// Corporate document workflows (uploads, review, approval, downloads through the legacy documents
+// table) are unchanged and never use this table. The database cannot tell the two kinds of Case
+// apart, so the future service MUST, inside the same transaction that creates the row, load the Case
+// and refuse (without creating anything) unless Case.serviceRequestId is set AND that ServiceRequest's
+// serviceKey equals PRIVATE_CHARTER_KEY (common/constants/request.constants.js). A Corporate Case
+// (serviceRequestId NULL) and a Case of any other service must be refused. This table has no relation
+// to the legacy `Document` model and none may be added.
+//
+// A request from HumanCare (Admin or Operations) for one document from the patient (M4). It is NOT an
+// uploaded document: the upload is a RequestDocument (the canonical, scanned, reviewed record), which
+// may point back here through request_documents.document_request_id. A Case can have any number of
+// requests, several of them open at once, and a request has no expiry date and nothing expires it:
+// it stays open until someone fulfils or cancels it. Rows are kept for good (the Case link is RESTRICT)
+// and are never deleted. The legacy single-slot ask (service_requests.documents_request_reason) is
+// not touched and not backfilled into this table. description and reason are shown to the patient, so
+// never an internal note, and never medical content or a secret. Writing rules (who may open or
+// resolve a request, and the audit entries) belong to the future service, not to the database.
+//
+// idempotencyKey is an opaque client key: it is stored exactly as given and compared case-sensitively
+// (the migration gives the column utf8mb4_bin; Prisma's schema cannot express a column collation).
+// utf8mb4_bin ignores trailing spaces when comparing, so the future service MUST reject (never silently
+// trim or transform) an idempotencyKey with leading or trailing whitespace.
+model DocumentRequest {
+  id              Int       @id @default(autoincrement())
+  caseId          Int       @map("case_id")
+  case            Case      @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  documentType    String?   @db.VarChar(64) @map("document_type") // optional category, e.g. "medical_report", "passport"
+  description     String    @db.Text // what is being asked for
+  reason          String?   @db.Text // why it is needed
+  status          String    @default("open") @db.VarChar(24) // "open" | "fulfilled" | "cancelled"
+  requestedByType String    @db.VarChar(16) @map("requested_by_type") // "admin" | "operations" | "system"
+  requestedById   String?   @db.VarChar(64) @map("requested_by_id")
+  idempotencyKey  String?   @db.VarChar(191) @map("idempotency_key") // makes a retried create a no-op
+  resolvedAt      DateTime? @map("resolved_at")
+  resolvedByType  String?   @db.VarChar(16) @map("resolved_by_type")
+  resolvedById    String?   @db.VarChar(64) @map("resolved_by_id")
+  resolutionNote  String?   @db.Text @map("resolution_note")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  documents       RequestDocument[]
+
+  @@unique([caseId, idempotencyKey])
+  @@index([caseId, status])
+  @@map("document_requests")
+}
+
+// PRIVATE CHARTER ONLY (M5). The link between one Private Charter request / Case and the one Bitrix24
+// Deal that Operations works it in. It is separate from the Lead integration, which is unchanged:
+// service_requests.bitrix_lead_id and cases.bitrix_lead_id (signed INTEGER Lead IDs), their retry
+// columns and every existing Lead ID are not touched, never copied here, never converted into a Deal.
+// Corporate Cases and every other service never use this table. The database cannot tell the kinds of
+// Case apart, so the future service MUST, in the transaction that creates the row, load the Case and
+// refuse unless Case.serviceRequestId is set AND that ServiceRequest's serviceKey equals
+// PRIVATE_CHARTER_KEY (common/constants/request.constants.js). A Corporate Case (serviceRequestId NULL)
+// and a Case of any other service must be refused.
+//
+// At most one Deal per request: caseId is unique here, and Case.serviceRequestId is unique, so a request
+// has at most one Case and therefore at most one link. The ServiceRequest is DERIVED through the Case
+// and is deliberately not stored in this table, so there is no second reference that could disagree.
+// The row may be created BEFORE Bitrix is called, with bitrixDealId NULL and syncStatus "pending";
+// bitrixDealId is filled in when Bitrix answers. A row with a NULL bitrixDealId is not a Deal. Retry
+// scheduling and attempt counts belong to the future IntegrationOutbox, not to this table.
+//
+// M6 RELIABILITY REQUIREMENT (not implemented here): a pre-created link with a NULL bitrixDealId does
+// NOT by itself guarantee exactly-once Deal creation. If Bitrix creates the Deal but HumanCare crashes
+// (or loses the response) before saving the returned Deal ID, the row still reads "no Deal yet" and a
+// retry would create a second Deal. M6 MUST provide durable idempotency and recovery / reconciliation
+// for that case (for example, before creating, look the Deal up in Bitrix by the request's reference
+// number, and record the attempt durably in the outbox), so retries can never create duplicate Deals.
+//
+// Bitrix IDs: bitrixDealId, categoryId and stageId are opaque and are stored exactly as Bitrix returned
+// them, as text. HumanCare never generates, renumbers, truncates, pads or normalises one, and a Deal ID
+// is never interchangeable with a Lead ID. The future service MUST reject (never silently trim or
+// transform) a value with leading or trailing whitespace, because the case-sensitive utf8mb4_bin
+// collation set in the migration (Prisma's schema cannot express a column collation) ignores trailing
+// spaces when comparing. The service should also check the value is a plain decimal number string for a
+// Deal ID. Note the current Bitrix client reads the response with res.json(), so an ID above 2^53 would
+// already have lost precision before it reached this table; real Deal IDs are far below that.
+// lastError must never contain a webhook URL, a token or any other secret.
+// The Case foreign key is RESTRICT: a Case with a Deal link cannot be deleted.
+//
+// KNOWN INTEGRITY RISK, FIXED IN M9 (not in M5): the derived request relies on Case.serviceRequestId,
+// whose foreign key currently uses ON DELETE SET NULL. Deleting a ServiceRequest would therefore
+// detach its Case from the ServiceRequest while its BitrixDealLink remains, losing the historical link
+// between the request and its Deal. No code deletes requests today. M9 MUST change that foreign key to
+// ON DELETE RESTRICT ON UPDATE CASCADE, and MUST preserve every existing Corporate Case, where
+// serviceRequestId is NULL. M5 does not change this foreign key.
+model BitrixDealLink {
+  id                 Int       @id @default(autoincrement())
+  caseId             Int       @unique @map("case_id")
+  case               Case      @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  bitrixDealId       String?   @unique @db.VarChar(32) @map("bitrix_deal_id")
+  categoryId         String?   @db.VarChar(16) @map("category_id") // Bitrix CATEGORY_ID (the pipeline), as returned
+  stageId            String?   @db.VarChar(64) @map("stage_id") // Bitrix STAGE_ID (e.g. "C38:NEW"), as returned
+  syncStatus         String    @default("pending") @db.VarChar(24) @map("sync_status") // "pending" | "synced" | "error"
+  lastAttemptAt      DateTime? @map("last_attempt_at")
+  lastSyncedAt       DateTime? @map("last_synced_at")
+  externalModifiedAt DateTime? @map("external_modified_at") // Bitrix's own modified time at the last sync, to ignore stale events
+  lastError          String?   @db.Text @map("last_error")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@index([syncStatus, lastAttemptAt])
+  @@map("bitrix_deal_links")
+}
+
+// PRIVATE CHARTER ONLY (M6). The durable record of an outbound integration event (for example "create
+// the Bitrix Deal for this Case", "move its stage"), written in the SAME transaction as the business change
+// that caused it, then delivered by a worker. The existing Bitrix Lead integration (the retry columns on
+// service_requests / cases and its sweep) is unchanged and does not use this table; Corporate Cases never do.
+//
+// Payload: JSON holding only explicitly allowlisted fields, in practice stable ids and the few values the
+// target needs. NEVER medical content, reports, document contents, passwords, tokens, webhook URLs, other
+// secrets, or patient details that are not required. The allowlist is enforced by the future service.
+// idempotencyKey is a stable, caller-built key that names the event itself (for example one Deal-create
+// event per Case), unique across the table, so writing the same event twice is refused instead of doubled.
+// The key is PERMANENT for its event: it is never reused or overwritten. A deliberate new Deal-creation
+// attempt requires an explicit, separately authorised recovery decision and a NEW event with a new key (a new
+// event identity); the original event and its history stay as they were.
+// It is stored exactly as given and compared case-sensitively (utf8mb4_bin, set in the migration; Prisma's
+// schema cannot express a column collation). utf8mb4_bin ignores trailing spaces, so the service MUST reject
+// (never silently trim or transform) an idempotencyKey or entityId with leading or trailing whitespace.
+//
+// status: "pending" (due when nextAttemptAt has passed) | "processing" (claimed; lockedUntil is the lease end)
+// | "completed" | "failed" | "ambiguous".
+//  - "ambiguous": the external call was started and its outcome is UNKNOWN (timeout, lost response, or a
+//    worker that died or lost its lease mid-call). Such an event must NEVER simply be sent again; it goes
+//    through reconciliation rules R1-R5 below.
+//  - "failed": a DEFINITIVE outcome, for example a clear error response proving that no Deal was created, or
+//    retries used up. It is terminal for automatic processing: nothing retries, resolves or re-sends it
+//    automatically, and it needs an explicit HUMAN decision before any retry or resolution. Like any other
+//    result it may be written only by a worker whose lease is still valid (see Concurrency and fencing).
+// A non-completed event that has externalCallStartedAt set is NOT automatically "ambiguous"; see Expiry and
+// recovery below.
+//
+// Concurrency and fencing: a worker claims an event with a compare-and-swap UPDATE (status, attempts and the
+// lock columns in the WHERE, row count checked), as the document scan worker does, setting status
+// "processing", lockedBy, lockedUntil (the lease end) and attempts = attempts + 1.
+// A lease is the worker's authority to write. When lockedUntil passes, that authority ENDS immediately,
+// whether or not anyone has re-claimed the event. Every result update (completed, failed, ambiguous, or a
+// reschedule) MUST be ONE UPDATE whose WHERE verifies ALL of: the event id; status = "processing"; attempts
+// equal to the value this worker claimed; lockedBy equal to this worker; and lockedUntil still in the future.
+// The number of rows written is checked. An expired worker therefore writes 0 rows: it can NEVER record a
+// success or a failure, even if nobody has re-claimed the event, and a stale worker can never overwrite a
+// newer result.
+// CLOCK: the lease is set and checked with the SAME database-side UTC clock expression, for example
+// lockedUntil = UTC_TIMESTAMP(3) + INTERVAL <lease> SECOND when claiming, and lockedUntil > UTC_TIMESTAMP(3)
+// in the result update. Application-generated timestamps (what the Prisma client writes) must NOT be mixed
+// with MySQL's session-local NOW(3) for lease fencing: if the server's time zone is not UTC the two differ
+// by the zone offset. The same applies to nextAttemptAt: set it explicitly with the same UTC expression and
+// do not rely on its column default (CURRENT_TIMESTAMP(3) is session-local). Ordinary Prisma client update
+// methods use the application's clock, so the claim and the lease-fenced result update need an appropriate
+// database-side SQL operation (for example $executeRaw); a Prisma client update is NOT sufficient unless it
+// preserves this same-clock guarantee. This has not been tested here.
+// LIMIT: database fencing CANNOT cancel an external Bitrix call that is already in progress. An expired or
+// stale worker can still finish its HTTP call, and Bitrix may create the Deal, while the database refuses to
+// record that worker's result; two external calls for one event can overlap. The lease must therefore be
+// longer than the client's request timeout (15 seconds today, bitrix.service.js) with a generous margin, the
+// worker must re-check its claim just before starting a call, and the effect of such a call is found by
+// reconciliation, never assumed absent.
+//
+// Expiry and recovery: the recovery sweep MUST tell these cases apart, and may move an event only with the
+// same fenced compare-and-swap, never by the expired worker:
+//  (a) "processing", lease EXPIRED, externalCallStartedAt NULL: no external call was started, so the event
+//      may safely return to "pending".
+//  (b) "processing", lease EXPIRED, externalCallStartedAt SET: the outcome of the call is unknown, so the
+//      event MUST become "ambiguous" and goes through reconciliation rules R1-R5.
+//  (c) "failed": a definitive outcome was already recorded. The sweep leaves it alone, whether or not
+//      externalCallStartedAt is set; it waits for a human decision.
+// externalCallStartedAt is set and committed BEFORE the external call is made, only by the current claimant
+// (with the same lease check), and is kept as historical evidence that a call was attempted. It is never
+// cleared, and it does not by itself make an event "ambiguous": only (b) does. A definitive response that
+// proves no Deal was created may be recorded as "failed" by a worker whose lease is still valid. If its lease
+// has already expired the write is refused and the event is handled by (b), which is the safe outcome.
+//
+// Ordering: events of one entity (entityType + entityId) are applied strictly in creation order (id). A later
+// event MUST NOT be claimed while any earlier event of the same entity is "pending", "processing" or
+// "ambiguous", nor "failed" (which stays blocking until a person decides), so a stage update can never
+// overtake the Deal-create it depends on. The database does not enforce this: the claim must be ONE atomic
+// step that both checks for an earlier non-final event and takes the claim (for example a transaction with a
+// locking read of the entity's rows, since MySQL does not allow an UPDATE to subquery its own table
+// directly). This has not been tested here.
+//
+// Exactly-once is NOT claimed. This table gives at-least-once delivery with durable, ambiguity-aware
+// recovery. Reconciliation rules R1-R5 for an "ambiguous" Deal-create (the Bitrix API code of the "Primary
+// Deal Reference" custom field is NOT verified or invented here; the create call must write the stable
+// Private Charter reference into it):
+//  R1. Reconcile first: search Bitrix for a Deal with that reference. If a matching Deal is found, adopt its
+//      exact Deal ID (stored as text, untouched) and complete the event; the Deal ID, the "completed" status
+//      and the BitrixDealLink update are saved in one database transaction.
+//  R2. If the lookup fails, times out, or its result is uncertain in any way, the event stays "ambiguous".
+//  R3. One empty search result is NOT proof that no Deal exists (the search may lag behind a creation, or the
+//      field may have been edited in Bitrix). Reconciliation must be repeated, over a conservative waiting
+//      period (its length is a business decision, not set here), before another create is even considered.
+//  R4. If any uncertainty remains after that, the event is left for MANUAL REVIEW. HumanCare MUST NEVER
+//      automatically create another Deal while the previous outcome is uncertain.
+//  R5. A duplicate Deal found later (two Deals with one reference) is reported and alerted, and MUST NEVER be
+//      deleted automatically; a person decides.
+// Other limits: whether Bitrix can filter on the reference field, and the fact that Bitrix does not enforce
+// its uniqueness, are not verified; a periodic duplicate-reference check is required.
+// lastError must never contain a webhook URL, a token or any other secret.
+// The Case foreign key is RESTRICT: a Case with outbox history cannot be deleted. caseId is nullable for
+// events that belong to no Case. Rows are kept for good; nothing in the schema purges them.
+model IntegrationOutbox {
+  id                    Int       @id @default(autoincrement())
+  eventType             String    @db.VarChar(64) @map("event_type") // e.g. "bitrix.deal.create"
+  entityType            String    @db.VarChar(40) @map("entity_type") // e.g. "case"
+  entityId              String    @db.VarChar(64) @map("entity_id")
+  caseId                Int?      @map("case_id")
+  case                  Case?     @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  idempotencyKey        String    @unique @db.VarChar(191) @map("idempotency_key")
+  payload               Json?
+  status                String    @default("pending") @db.VarChar(16) // "pending" | "processing" | "completed" | "failed" | "ambiguous"
+  attempts              Int       @default(0)
+  nextAttemptAt         DateTime  @default(now()) @map("next_attempt_at")
+  lockedBy              String?   @db.VarChar(64) @map("locked_by")
+  lockedUntil           DateTime? @map("locked_until")
+  externalCallStartedAt DateTime? @map("external_call_started_at")
+  lastError             String?   @db.Text @map("last_error")
+  correlationId         String?   @db.VarChar(64) @map("correlation_id") // matches audit_logs.correlation_id
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  completedAt           DateTime? @map("completed_at")
+
+  @@index([status, nextAttemptAt])
+  @@index([entityType, entityId])
+  @@index([caseId])
+  @@map("integration_outbox")
+}
+
+// PRIVATE CHARTER ONLY (M6). The durable record of an inbound integration event, such as a Bitrix24 webhook
+// delivery, stored BEFORE it is processed so that a duplicate, a late or an out-of-order delivery is handled
+// safely and a processed event is never applied twice. Existing Lead handling and Corporate flows are unchanged.
+//
+// Identity: (source, externalEventId) is unique, so a repeated delivery of the same event is recorded once.
+// It is NOT assumed that Bitrix supplies a unique delivery id. Before the handler is built, the
+// implementation MUST verify whether one exists, by reading Bitrix's documentation for the exact event type
+// in use and inspecting a real sample delivery from a NON-production Bitrix account (recording only the shape
+// of the payload, never tokens or secrets), and write the finding down. If a reliable delivery id exists,
+// externalEventId is that id. If not, externalEventId is built deterministically from the source, the event
+// name, the external entity id and the event's own timestamp (for example as a lowercase hex digest), and
+// these limits apply: two genuinely different updates of the same entity that carry the same event name and
+// the same timestamp (the timestamp's precision is not verified) produce the SAME key, and the second would
+// be suppressed as a "duplicate"; and a repeated delivery whose timestamp differs is NOT recognised as a
+// duplicate. Protection against accidental suppression: deduplication is not what keeps the data correct.
+// The payload is only a hint; the worker always reads the entity's current state from Bitrix and applies it
+// by comparing modified times, so processing the same event twice is harmless, and a suppressed event loses
+// nothing as long as the state is read again. A periodic reconciliation sweep that re-reads the current state
+// of every open Deal is therefore REQUIRED as a safety net, and the key must use the finest timestamp
+// precision Bitrix provides. The table keeps no count of suppressed duplicates; adding one is a possible
+// future change, not made here.
+// externalEventId and entityId are opaque identifiers, stored exactly as given or built and compared
+// case-sensitively (utf8mb4_bin, set in the migration). utf8mb4_bin ignores trailing spaces when comparing,
+// so the service MUST reject (never silently trim or normalise) an externalEventId or an entityId with
+// leading or trailing whitespace.
+//
+// Payload: JSON with only allowlisted fields (the event name, the entity id and the event timestamp). The
+// future handler MUST authenticate the delivery first and MUST NOT store the delivery's authentication
+// block or application token, nor any webhook URL, secret, medical content or unnecessary patient detail.
+//
+// status: "received" (due when nextAttemptAt has passed) | "processing" (claimed; lockedUntil is the lease
+// end) | "processed" | "failed" (final) | "ignored" (a duplicate or stale event that changed nothing).
+// A "processed" or "ignored" row is final and is never claimed again, so an event is never applied twice.
+// Claiming and fencing work as for IntegrationOutbox, including its CLOCK rule: lockedUntil and nextAttemptAt
+// are set and checked with the same database-side UTC expression (for example UTC_TIMESTAMP(3)), never with
+// application-generated timestamps mixed with MySQL's session-local NOW(3), which needs database-side SQL
+// rather than ordinary Prisma client updates. A result is written only by a worker whose lease is still valid
+// (id, status "processing", claimed attempts, lockedBy and lockedUntil in the future, all checked in one
+// UPDATE), so an expired or stale worker writes nothing. Because each event is applied by reading Bitrix's
+// current state, strict ordering between inbox events of one entity is not needed for correctness, and
+// repeating a read is harmless.
+//
+// Out of order: the payload is a hint, not the truth. To apply an event the future worker reads the entity's
+// CURRENT state from Bitrix and applies it only if Bitrix's modified time is newer than the one stored on
+// the BitrixDealLink (externalModifiedAt), so a late event can never move a Case backwards. externalOccurredAt
+// is the event's own time, kept for ordering and diagnosis. entityId is the external id (for Bitrix, the
+// exact Deal ID as text, never transformed or confused with a Lead ID).
+// lastError must never contain a webhook URL, a token or any other secret. Rows are kept for good.
+model IntegrationInbox {
+  id                 Int       @id @default(autoincrement())
+  source             String    @db.VarChar(32) // e.g. "bitrix24"
+  externalEventId    String    @db.VarChar(191) @map("external_event_id")
+  eventType          String    @db.VarChar(64) @map("event_type") // e.g. "ONCRMDEALUPDATE"
+  entityType         String?   @db.VarChar(40) @map("entity_type") // e.g. "deal"
+  entityId           String?   @db.VarChar(64) @map("entity_id")
+  externalOccurredAt DateTime? @map("external_occurred_at")
+  payload            Json?
+  status             String    @default("received") @db.VarChar(16) // "received" | "processing" | "processed" | "failed" | "ignored"
+  attempts           Int       @default(0)
+  nextAttemptAt      DateTime  @default(now()) @map("next_attempt_at")
+  lockedBy           String?   @db.VarChar(64) @map("locked_by")
+  lockedUntil        DateTime? @map("locked_until")
+  lastError          String?   @db.Text @map("last_error")
+  receivedAt         DateTime  @default(now()) @map("received_at")
+  processedAt        DateTime? @map("processed_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  @@unique([source, externalEventId])
+  @@index([status, nextAttemptAt])
+  @@index([entityType, entityId, externalOccurredAt], map: "inbox_entity_modified_idx")
+  @@map("integration_inbox")
+}
+
+// PRIVATE CHARTER ONLY (M7). An invoice HumanCare issues for a Private Charter Case. It is NOT the legacy
+// billing block on `cases` (billing_amount, billing_currency, billing_status, billing_invoiced_at,
+// billing_paid_at, billing_notes). Those columns, their meaning, the /admin/billing endpoints and the
+// Corporate billing workflow are UNCHANGED by this migration, and nothing here reads or writes them. Nothing
+// is backfilled: no Invoice or Payment is created from a legacy value. billing_invoiced_at / billing_paid_at
+// are the time an Admin changed a status (admin.service.js), not an invoice date or a payment transaction,
+// and must never be copied into issueDate or transactedAt.
+// LEGACY BILLING POLICY (approved, for the future application work, NOT done here): PATCH
+// /admin/cases/:id/billing (updateCaseBilling) updates any Case today, Private Charter ones included. The
+// future implementation MUST make it reject updates for Private Charter Cases (a Case whose ServiceRequest
+// serviceKey equals PRIVATE_CHARTER_KEY), while Corporate Cases and every other Case keep working exactly as
+// before. Private Charter billing uses Invoice and Payment records only.
+// The database cannot tell the kinds of Case apart, so the future service MUST, in the transaction that
+// creates an invoice, load the Case and refuse unless Case.serviceRequestId is set AND that ServiceRequest's
+// serviceKey equals PRIVATE_CHARTER_KEY (common/constants/request.constants.js). A Corporate Case
+// (serviceRequestId NULL) and a Case of any other service must be refused.
+//
+// One Case can have many invoices; one invoice can have many payments. Rows are kept for good and are never
+// deleted or overwritten: a mistaken invoice is voided, never removed. Every foreign key is RESTRICT. Who did
+// what is recorded in audit_logs (entityType "invoice"), written in the same transaction; this table keeps no
+// actor columns.
+//
+// status: "draft" (not yet issued) | "issued" | "void". There is deliberately NO "paid", "partially paid" or
+// "overdue" status: issuing an invoice and receiving money are separate events, and the amount paid is
+// computed from the payments (completed payments minus completed refunds) at read time, never stored here
+// and never inferred from a timestamp. "Overdue" is likewise derived from dueDate. issueDate and dueDate are
+// the ACTUAL calendar dates on the invoice, supplied by the person who issues it (SQL DATE, written as
+// "YYYY-MM-DD" at 00:00 UTC like service_requests.preferred_date); they are never filled from the time a
+// status was changed.
+//
+// VOID POLICY (approved): a "draft" invoice may be voided with a MANDATORY reason. An "issued" invoice may be
+// voided only when it has NO completed payment AND NO unresolved pending payment, and again with a mandatory
+// reason (CHECK in the migration: a void invoice has voidedAt and a non-blank voidReason, and a non-void
+// invoice has neither). An invoice that has ANY completed payment can NEVER be voided, even if it has since
+// been fully refunded: money is returned by separate refund records, never by voiding. Pending payments must
+// first be cancelled or otherwise resolved before the invoice can be voided. A payment must never be
+// completed against an already voided invoice. If an external payment is confirmed AFTER its record was
+// cancelled, the actual transaction evidence must be preserved and flagged for financial reconciliation:
+// evidence of money received is never discarded. The database cannot see other rows, so the future service
+// MUST enforce the void rule in one transaction that locks the invoice row (SELECT ... FOR UPDATE), checks
+// that no completed and no unresolved pending payment exists, and sets the status. Voiding and payment
+// completion MUST use the same invoice-row locking discipline: every payment write locks the same invoice
+// row first and refuses an invoice that is not "issued", so a void and a payment completion cannot
+// interleave. Financial history is never deleted or overwritten.
+//
+// invoiceNumber is the reference printed on the invoice, supplied by Finance exactly as issued. HumanCare
+// does not generate, renumber or invent invoice numbers. It is optional (a draft may have none) and, when
+// present, unique across all invoices. It is stored exactly as given and compared case-sensitively
+// (utf8mb4_bin, set in the migration; Prisma's schema cannot express a column collation). utf8mb4_bin ignores
+// trailing spaces when comparing, so the service MUST reject (never silently trim or transform) an
+// invoiceNumber or idempotencyKey with leading or trailing whitespace.
+//
+// MONEY (approved): amount is DECIMAL(14,3), exact, in MAJOR currency units (for example 1250.500 for an
+// amount of 1,250.50, 1250.000 for a zero-decimal currency, 12.345 for a three-decimal one), never a float.
+// The largest value is 99,999,999,999.999. Three fractional digits let ISO 4217 currencies with zero, two or
+// three decimal places be stored exactly; currencies with four decimals (for example CLF, UYW) do not fit and
+// must be refused. The DATABASE does not know a currency's precision and would round a value with more than
+// three fractional digits, so the future service MUST validate precision itself, BEFORE the database: use
+// maintained ISO 4217 currency metadata to find each currency's number of minor-unit digits (0, 2 or 3); refuse
+// an unsupported currency; refuse any amount with more fractional digits than that currency allows; NEVER
+// silently round; keep the unused trailing digits zero; and pass amounts to the database as exact decimal
+// strings, never as JavaScript numbers (the legacy code converts to a number, which is not acceptable here).
+// No approved list of currencies exists and none is defined here. currency is an ISO 4217 code, three
+// uppercase letters, case-sensitive (utf8mb4_bin) with a CHECK only on its FORM, not on whether the code
+// exists. amount must be greater than zero (CHECK). No tax, rounding or accounting rule is defined; none is
+// approved.
+//
+// CHECK CONSTRAINTS: this migration relies on SQL CHECK constraints, which Prisma cannot see. Whether this
+// database product and version enforces them is NOT verified: MySQL ignores CHECK before 8.0.16, the server
+// version string "26.7.0" does not establish compatibility, and MySQL documents a restriction on CHECK
+// constraints for columns used in foreign-key referential actions whose application to RESTRICT is not
+// verified here. Before relying on them, and before applying this migration to any shared environment, they
+// MUST be verified independently against the actual database product and version, in a separately authorised
+// scratch environment. The future service MUST NOT depend on them: it validates every rule itself.
+//
+// Ownership: (id, caseId, currency) is unique so that Payment can reference it as a composite foreign key.
+// That makes the database itself refuse a payment whose Case or currency differs from its invoice's, and,
+// because that foreign key is ON UPDATE RESTRICT, refuse any change of an invoice's Case or currency once it
+// has payments. idempotencyKey makes a retried create a no-op (unique per Case; NULL never conflicts, so the
+// service should always supply one). Its case-sensitive collation matches the other opaque keys.
+model Invoice {
+  id             Int       @id @default(autoincrement())
+  caseId         Int       @map("case_id")
+  case           Case      @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  invoiceNumber  String?   @unique @db.VarChar(64) @map("invoice_number")
+  amount         Decimal   @db.Decimal(14, 3)
+  currency       String    @db.VarChar(3)
+  status         String    @default("draft") @db.VarChar(16) // "draft" | "issued" | "void"
+  issueDate      DateTime? @db.Date @map("issue_date")
+  dueDate        DateTime? @db.Date @map("due_date")
+  voidedAt       DateTime? @map("voided_at")
+  voidReason     String?   @db.Text @map("void_reason")
+  idempotencyKey String?   @db.VarChar(191) @map("idempotency_key")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  payments       Payment[]
+
+  @@unique([id, caseId, currency])
+  @@unique([caseId, idempotencyKey])
+  @@index([caseId, status])
+  @@map("invoices")
+}
+
+// PRIVATE CHARTER ONLY (M7). One money movement against an invoice: a payment received, or a refund. A
+// payment is a separate record from its invoice (issuing an invoice does not mean it is paid), and a refund is
+// a separate row of its own that points at the payment it reverses; the original payment is never edited,
+// overwritten or removed to show a refund. Partial payments are simply several rows. Rows are kept for good,
+// never deleted: a mistaken one is marked "cancelled" or "failed", and audit_logs (entityType "payment")
+// records who did what. Nothing is backfilled from the legacy billing_paid_at, which is only the time an
+// Admin changed a status. The same Private Charter isolation and legacy billing policy apply as for Invoice:
+// the future service MUST refuse any Case that is not a Private Charter Case, and legacy billing updates for
+// Private Charter Cases are to be rejected by the future application work, while Corporate billing is
+// unchanged.
+//
+// Ownership: (invoiceId, caseId, currency) is a composite foreign key to invoices (id, case_id, currency), so
+// the database refuses a payment attached to an invoice of another Case, or in another currency. It is
+// RESTRICT on delete and on update (an invoice's Case or currency cannot be changed under existing payments).
+//
+// REFUNDS (approved): kind is "payment" or "refund". A refund MUST reference an ORIGINAL payment, never
+// another refund. A foreign key alone does not guarantee that, because it can point at any row, so the
+// migration adds refundOfKind: for a refund it is always "payment" (CHECK), and the composite foreign key
+// (refundOfPaymentId, invoiceId, refundOfKind) references payments (id, invoice_id, kind), so the database
+// refuses a refund whose target is not a "payment"-kind row of the SAME invoice. A payment has neither
+// refundOfPaymentId nor refundOfKind (CHECK). The service sets refundOfKind to "payment" when it creates a
+// refund. Several refunds against one original payment are allowed; every payment and refund row is kept.
+// amount is always positive (CHECK); the direction comes from kind, so no negative amounts are stored.
+// The database cannot enforce the following, so the future service MUST, in ONE transaction: lock the invoice
+// row and then the original payment row (SELECT ... FOR UPDATE, always in that order, to avoid deadlocks);
+// refuse a refund unless the original payment is "completed"; sum the completed refunds already recorded
+// against that payment; and refuse the refund if the cumulative completed refunds, including this one, would
+// exceed the original payment's amount. Likewise it refuses a completed payment total above the invoice
+// amount unless an overpayment rule is approved (none is defined here). A refund never changes the invoice's
+// status (an invoice that has had any completed payment cannot be voided, even when fully refunded). It must
+// not infer an invoice's state from payment timestamps.
+//
+// status: "pending" | "completed" | "failed" | "cancelled". Only "completed" rows count as money received
+// or returned. A "completed" row MUST have transactedAt (CHECK). transactedAt is the ACTUAL time of the
+// transaction reported by the bank or gateway, never the time HumanCare recorded it (createdAt is that).
+//
+// externalReference is the payment's reference at the bank, gateway or other source, preserved exactly as
+// given (case-sensitive utf8mb4_bin) and never generated, normalised or trimmed; the service MUST reject
+// leading or trailing whitespace. It is unique per (invoice, kind), so recording the same transfer twice on
+// one invoice is refused. It is deliberately NOT unique across invoices, because one real transfer may be
+// split across several invoices. NULL (no reference) never conflicts. method is free text (for example
+// "bank_transfer"), with no list approved yet. idempotencyKey makes a retried create a no-op, unique per
+// invoice (the service should always supply one). Amount, precision, currency and CHECK-verification rules are
+// the same as for Invoice: DECIMAL(14,3) in major units, validated for precision by the service before the
+// database, never silently rounded, passed as exact decimal strings; the CHECK constraints are unverified on
+// this database and must be independently verified in a separately authorised scratch environment.
+model Payment {
+  id                Int       @id @default(autoincrement())
+  invoiceId         Int       @map("invoice_id")
+  caseId            Int       @map("case_id")
+  currency          String    @db.VarChar(3)
+  invoice           Invoice   @relation(fields: [invoiceId, caseId, currency], references: [id, caseId, currency], onDelete: Restrict, onUpdate: Restrict)
+  kind              String    @default("payment") @db.VarChar(16) // "payment" | "refund"
+  refundOfPaymentId Int?      @map("refund_of_payment_id")
+  refundOfKind      String?   @db.VarChar(16) @map("refund_of_kind") // "payment" for a refund, NULL for a payment
+  refundOf          Payment?  @relation("PaymentRefunds", fields: [refundOfPaymentId, invoiceId, refundOfKind], references: [id, invoiceId, kind], onDelete: Restrict, onUpdate: Restrict)
+  refunds           Payment[] @relation("PaymentRefunds")
+  amount            Decimal   @db.Decimal(14, 3)
+  status            String    @default("pending") @db.VarChar(16) // "pending" | "completed" | "failed" | "cancelled"
+  method            String?   @db.VarChar(32)
+  externalReference String?   @db.VarChar(191) @map("external_reference")
+  transactedAt      DateTime? @map("transacted_at")
+  idempotencyKey    String?   @db.VarChar(191) @map("idempotency_key")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@unique([id, invoiceId, kind])
+  @@unique([invoiceId, kind, externalReference])
+  @@unique([invoiceId, idempotencyKey])
+  @@index([invoiceId, caseId, currency])
+  @@index([refundOfPaymentId, invoiceId, refundOfKind])
+  @@index([invoiceId, status])
+  @@index([caseId])
+  @@map("payments")
 }
 
 model Document {
@@ -777,9 +1339,118 @@ model Notification {
   body          String?   @db.Text
   readAt        DateTime? @map("read_at")
   createdAt     DateTime  @default(now()) @map("created_at")
+  // M8: Prisma back-relation only; no column is added to `notifications`. A Notification remains the in-app
+  // message and keeps its meaning, including being deleted by its owner.
+  deliveries    NotificationDelivery[]
 
   @@index([recipientType, recipientId, readAt])
   @@map("notifications")
+}
+
+// M8. The delivery record of ONE channel ("push" or "sms") for ONE in-app Notification. The Notification stays
+// the in-app message and is unchanged in meaning and use: the in-app list, read/unread, mark-all-read and
+// delete (Corporate portal and patient app) keep working exactly as before. This table only tracks whether
+// and how the same message was also sent out of the app. Existing notifications get NO delivery row: nothing
+// is backfilled and no history is invented. Today push is sent best-effort and untracked (cases.service.js
+// notifyPatient -> expo-push.service.js) and the backend sends NO SMS at all (OTP SMS is sent by Firebase from
+// the app); this migration changes none of that. "sms" is a channel the schema can describe; no SMS provider
+// is chosen or implied, and `provider` is free text ("expo" for the current push path).
+//
+// One row per (notification, channel): a notification is tracked at most once per channel. Retries are
+// attempts of the same delivery (NotificationDeliveryAttempt), never a second delivery row.
+//
+// DELETE BEHAVIOUR: a user can delete a Notification (notifications.service.js deleteNotification), so the
+// foreign key is ON DELETE SET NULL, not RESTRICT (RESTRICT would break that existing feature). The delivery
+// row and its attempts are kept as history; recipientType/recipientId are copied here when the row is
+// created so history still says whose message it was. A delivery whose Notification is gone has no message to
+// send: the future service MUST cancel it if it is still pending. A delivery stores NO message text and NO
+// destination (no push token, no phone number): the future service reads the title/body from the Notification
+// and the destination from the recipient's current record at send time.
+//
+// status — what is actually known, and no more:
+//   "pending"   not yet sent; due when nextAttemptAt has passed.
+//   "sending"   claimed by a worker (lockedBy/lockedUntil lease, same claiming and fencing rules and the same
+//               database-side UTC CLOCK rule as IntegrationOutbox); an attempt row is written first.
+//   "accepted"  the provider ACCEPTED the request and returned (or did not need) a reference. This is NOT
+//               proof that the message reached the device or the person. acceptedAt is set.
+//   "delivered" the provider CONFIRMED delivery by its own definition (deliveredAt set). Only set when a
+//               provider really reports it; a channel/provider that cannot confirm never reaches this status.
+//               What the confirmation means differs by provider (for example a push receipt may confirm only
+//               hand-off to the platform push service) and MUST be checked against the provider's documents
+//               before the service claims more than that.
+//   "failed"    final failure (closedAt set). "cancelled" will not be sent (closedAt set).
+//   "uncertain" a request may have reached the provider but the outcome is unknown (timeout, crash after the
+//               call began). It is NOT retried automatically, because a retry could send a duplicate; a person
+//               or a reconciliation rule decides. Most providers give no idempotency key, so duplicate sends
+//               cannot be fully ruled out after an uncertain outcome.
+// attemptCount is the number of attempt rows written; the future service increments it and inserts the
+// attempt in the SAME transaction (the database cannot enforce that equality). There is deliberately no
+// maximum-attempts or backoff value here: those are service/business decisions not yet made.
+// lastErrorCode/lastError hold a SHORT, sanitised, application-defined description of the last failure. They
+// must never contain a push token, phone number, message text, provider credential, webhook or URL with a
+// secret, or patient information; store the provider's error CODE, not its raw response.
+// providerMessageId is the provider's reference for the accepted message (case-sensitive, utf8mb4_bin in the
+// migration), kept so a later receipt can be matched.
+// CHECKs in the migration (channel and status values, attemptCount >= 0, accepted/delivered need their
+// timestamp) were all tested against MySQL Community Server - GPL 26.7.0 on humancare_test, using temporary,
+// prefixed copies of the tables: the compatibility test passed and did not modify existing application tables
+// or data. The M8 migration itself has NOT yet been applied. The service still validates every rule. The
+// CHECKs cover no column used by the SET NULL foreign key, because MySQL forbids that.
+model NotificationDelivery {
+  id                Int                           @id @default(autoincrement())
+  notificationId    Int?                          @map("notification_id")
+  notification      Notification?                 @relation(fields: [notificationId], references: [id], onDelete: SetNull)
+  recipientType     String                        @db.VarChar(32) @map("recipient_type") // copied from the Notification: "patient" | "corporate_user"
+  recipientId       Int                           @map("recipient_id")
+  channel           String                        @db.VarChar(16) // "push" | "sms"
+  provider          String?                       @db.VarChar(32)
+  status            String                        @default("pending") @db.VarChar(16) // "pending" | "sending" | "accepted" | "delivered" | "failed" | "cancelled" | "uncertain"
+  attemptCount      Int                           @default(0) @map("attempt_count")
+  nextAttemptAt     DateTime                      @default(now()) @map("next_attempt_at")
+  lockedBy          String?                       @db.VarChar(64) @map("locked_by")
+  lockedUntil       DateTime?                     @map("locked_until")
+  providerMessageId String?                       @db.VarChar(191) @map("provider_message_id")
+  acceptedAt        DateTime?                     @map("accepted_at")
+  deliveredAt       DateTime?                     @map("delivered_at")
+  closedAt          DateTime?                     @map("closed_at")
+  lastErrorCode     String?                       @db.VarChar(64) @map("last_error_code")
+  lastError         String?                       @db.VarChar(512) @map("last_error")
+  createdAt         DateTime                      @default(now()) @map("created_at")
+  updatedAt         DateTime                      @updatedAt @map("updated_at")
+  attempts          NotificationDeliveryAttempt[]
+
+  @@unique([notificationId, channel])
+  @@index([status, nextAttemptAt])
+  @@index([recipientType, recipientId])
+  @@map("notification_deliveries")
+}
+
+// M8. One try at sending a NotificationDelivery. Rows are the history of failures and retries and are kept
+// for good: never deleted, and never overwritten once finished (only a "started" row is finalised). The
+// future worker writes the row with status "started" BEFORE calling the provider, so a crash mid-call leaves
+// evidence; it then finalises it as "accepted", "failed" or "uncertain" (never left "started" once the
+// outcome is known; a stale "started" row is found through the status/startedAt index and treated as
+// "uncertain"). attemptNumber starts at 1 and is unique per delivery, which also stops two workers from
+// recording the same attempt. errorCode/errorMessage follow the same no-secrets, no-patient-data,
+// no-raw-provider-response rule as NotificationDelivery.lastError. providerMessageId is the reference the
+// provider returned for THIS attempt, if any. The foreign key to the delivery is RESTRICT on delete: a
+// delivery with attempts cannot be deleted.
+model NotificationDeliveryAttempt {
+  id                Int                  @id @default(autoincrement())
+  deliveryId        Int                  @map("delivery_id")
+  delivery          NotificationDelivery @relation(fields: [deliveryId], references: [id], onDelete: Restrict)
+  attemptNumber     Int                  @map("attempt_number")
+  status            String               @default("started") @db.VarChar(16) // "started" | "accepted" | "failed" | "uncertain"
+  provider          String?              @db.VarChar(32)
+  providerMessageId String?              @db.VarChar(191) @map("provider_message_id")
+  errorCode         String?              @db.VarChar(64) @map("error_code")
+  errorMessage      String?              @db.VarChar(512) @map("error_message")
+  startedAt         DateTime             @default(now()) @map("started_at")
+  finishedAt        DateTime?            @map("finished_at")
+
+  @@unique([deliveryId, attemptNumber])
+  @@index([status, startedAt])
+  @@map("notification_delivery_attempts")
 }
 
 // The local GeoNames populated-place table that Private Charter origin and destination cities are

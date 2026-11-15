@@ -1,7 +1,7 @@
 const { prisma } = require('../../db/prisma');
 const { createLead } = require('../bitrix/bitrix.service');
 const { leadInputFromRequest } = require('../bitrix/bitrix-lead');
-const { isBitrixSyncEnabled } = require('../bitrix/bitrix-config');
+const { isBitrixSyncEnabled, isPrivateCharterDealRequested } = require('../bitrix/bitrix-config');
 const { URGENCY_TO_CASE, PRIVATE_CHARTER_KEY } = require('../../common/constants/request.constants');
 const { isRequestReviewEnabled, PATIENT_DOCUMENT_SELECT } = require('../request-review/request-review.config');
 const { createReviewRequest } = require('../request-review/request-review.service');
@@ -118,6 +118,9 @@ async function createRequest(userId, data) {
   // which has already been saved above by this point. While the switch is off nothing
   // is sent and nothing is recorded as failed (see bitrix-config.js).
   if (!isBitrixSyncEnabled()) return request;
+  // Once Private Charter Deal integration is switched on, Private Charter uses the Deal workflow and never a Lead.
+  // (The startup check also requires the review workflow then, which never reaches this line; this is the second guard.)
+  if (serviceKey === PRIVATE_CHARTER_KEY && isPrivateCharterDealRequested()) return request;
   try {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const leadId = await createLead(leadInputFromRequest(request, user));

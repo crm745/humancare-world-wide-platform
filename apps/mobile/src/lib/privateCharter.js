@@ -45,7 +45,7 @@ export const isPrivateCharterAge = (value) => {
 
 // The request body for POST /requests, in the formats the backend stores: gender in lower case,
 // the contact number in E.164, the country as an ISO code, each city as { geonameId } only, the
-// care level as a list of keys, the date as YYYY-MM-DD. There is no patientLocation, and no
+// care level as a list holding the ONE chosen key (a draft that somehow holds several is sent as it is, so the server refuses it), the date as YYYY-MM-DD. There is no patientLocation, and no
 // deceased fields. Optional values the person left empty are left out.
 export function buildPrivateCharterPayload(draft) {
   const contact = contactE164(draft.cc, draft.phone);

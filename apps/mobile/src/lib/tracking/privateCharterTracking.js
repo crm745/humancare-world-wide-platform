@@ -7,7 +7,7 @@
 //
 // Two lifecycles (see docs/PRIVATE_CHARTER_TRACKING_IMPLEMENTATION_PLAN.md):
 //   'review'  reviewStatus carries any non-empty value. Four values are known (documents, review, changes,
-//             approval); the Case is created only on approval. Any other value is 'unknown': not approved,
+//             approval); the Case exists from submission but is ignored for progress until approval. Any other value is 'unknown': not approved,
 //             nothing inferred, the Case and request.status are ignored for progress, the raw value is never exposed.
 //   'legacy'  reviewStatus is null/missing/empty: the Case exists from submission. The two review milestones
 //             do not apply. A Case drives progress but is never an approval (review.approved stays false).

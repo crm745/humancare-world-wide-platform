@@ -5,8 +5,8 @@ import { isMortalRequest } from './requestShape';
 import { reviewPill, reviewState } from './requestDocuments';
 
 // Opens a patient's request on the Tracking screen: the request id (never a Case id), no `kind`.
-// The screen then loads GET /requests/me/:id, which carries the Case and its stage events once the
-// request is approved, so the same link keeps working before and after approval.
+// The screen then loads GET /requests/me/:id, which carries the Case and its stage events (a review-workflow
+// Case exists from submission), so the same link keeps working before and after approval.
 export const trackingRoute = (request, tab) => ({ pathname: '/tracking', params: { id: request.id, ...(tab ? { tab } : {}) } });
 
 // Whether a loaded request is the one the route asks for (the route id is a string, the request id a number).

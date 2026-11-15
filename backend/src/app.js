@@ -10,6 +10,7 @@ const { adminRouter } = require('./modules/admin/admin.routes');
 const { geoRouter } = require('./modules/geo/geo.routes');
 const { documentsRouter } = require('./modules/documents/documents.routes');
 const { corporatePortalRouter } = require('./modules/corporate-portal/corporate-portal.routes');
+const { bitrixInboundRouter } = require('./modules/bitrix/bitrix-inbound.controller');
 const { corporateRegistrationRouter } = require('./modules/corporate-registration/corporate-registration.routes');
 
 const app = express();
@@ -72,6 +73,8 @@ app.use('/corporate', corporatePortalRouter);
 app.use('/corporates', corporateRegistrationRouter);
 app.use('/notifications', notificationsRouter);
 app.use('/admin', adminRouter);
+// Bitrix24 event handler (own token authentication, no JWT): receipt only, see bitrix-inbound.controller.js.
+app.use('/integrations/bitrix', bitrixInboundRouter);
 app.use('/documents', documentsRouter);
 
 app.use((req, res) => {

@@ -453,16 +453,23 @@ describe('Private Charter: care level', () => {
   it.each([
     ['unknown key', ['care_vip']], ['empty array', []], ['an empty string', ''], ['duplicate keys', ['care_icu', 'care_icu']],
     ['care_na with another', ['care_na', 'care_icu']], ['another with care_na', ['care_stable', 'care_na']],
+    ['two different keys', ['care_icu', 'care_stable']], ['three keys', ['care_icu', 'care_stable', 'care_ambulatory']],
     ['a number in the list', ['care_icu', 3]], ['an object', { care_icu: true }], ['a number', 1], ['a boolean', true],
     ['a key among the legacy labels', 'care_icu'], ['an unknown label', 'Intensive'], ['a label and an unknown label', 'ICU / Critical, Intensive'],
   ])('refuses %s', async (_label, value) => {
     await expectRefused({ ...valid(), careLevel: value }, 'careLevel');
   });
 
-  it('accepts several keys and stores them joined', () => {
+  it('refuses several keys with a clear message and does not keep the first one', () => {
     const { data, fields } = validate({ ...valid(), careLevel: ['care_icu', 'care_stable'] });
+    expect(fields.careLevel).toBe('Select only one care level.');
+    expect(data.careLevel).toBeUndefined();
+  });
+
+  it.each(['care_icu', 'care_stable', 'care_ambulatory', 'care_na'])('accepts the single key %s and stores it as it is', (key) => {
+    const { data, fields } = validate({ ...valid(), careLevel: [key] });
     expect(fields.careLevel).toBeUndefined();
-    expect(data.careLevel).toBe('care_icu,care_stable');
+    expect(data.careLevel).toBe(key);
   });
 
   it('accepts care_na on its own', () => {
@@ -478,12 +485,11 @@ describe('Private Charter: care level', () => {
         expect(legacy).toContain('careLevel');
       }
     }
-    const { data } = validate({ ...valid(), careLevel: 'ICU / गंभीर, स्थिर / निगरानी में' });
-    expect(data.careLevel).toBe('care_icu,care_stable');
+    expect(validate({ ...valid(), careLevel: 'ICU / गंभीर, स्थिर / निगरानी में' }).fields.careLevel).toBe('Select only one care level.');
   });
 
-  it('still applies the duplicate and exclusivity rules to legacy labels', () => {
-    expect(validate({ ...valid(), careLevel: 'Not Applicable, ICU / Critical' }).fields.careLevel).toBeDefined();
+  it('refuses several legacy labels as well (joined, duplicated or with Not Applicable)', () => {
+    expect(validate({ ...valid(), careLevel: 'Not Applicable, ICU / Critical' }).fields.careLevel).toBe('Select only one care level.');
     expect(validate({ ...valid(), careLevel: 'ICU / Critical, ICU / गंभीर' }).fields.careLevel).toBeDefined();
   });
 

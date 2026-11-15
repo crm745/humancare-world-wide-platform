@@ -9,7 +9,8 @@
 const { prisma } = require('../../db/prisma');
 const { createLead, sendMedicalReportToBitrix } = require('./bitrix.service');
 const { leadInputFromRequest, leadInputFromCase, commentWithReports } = require('./bitrix-lead');
-const { isBitrixSyncEnabled } = require('./bitrix-config');
+const { isBitrixSyncEnabled, isPrivateCharterDealRequested } = require('./bitrix-config');
+const { PRIVATE_CHARTER_KEY } = require('../../common/constants/request.constants');
 
 const MAX_ATTEMPTS = 5;
 // ~5 attempts spaced this far apart covers roughly the "30 minutes" window the
@@ -24,6 +25,25 @@ const pendingWhere = (now = Date.now()) => ({
   bitrixSyncAttempts: { gt: 0, lt: MAX_ATTEMPTS },
   bitrixSyncFailedAt: { lt: new Date(now - RETRY_BACKOFF_MINUTES * 60 * 1000) },
 });
+
+// Once Private Charter Deal integration is switched on, Private Charter never gets a Lead from the sweeps. The filter
+// names the service explicitly, and handles a NULL service key itself: Prisma's `not` becomes `<>`, which never
+// matches NULL, so an older request without a service key would silently drop out of the sweep without the first branch.
+const NOT_PRIVATE_CHARTER = { OR: [{ serviceKey: null }, { serviceKey: { not: PRIVATE_CHARTER_KEY } }] };
+
+// Requests: skip Private Charter ones when the Deal switch is on; otherwise exactly the original filter.
+const requestSweepWhere = (now) => {
+  const where = pendingWhere(now);
+  return isPrivateCharterDealRequested() ? { ...where, ...NOT_PRIVATE_CHARTER } : where;
+};
+
+// Cases: Corporate Cases (no service request) always stay in; a Case whose service request is Private Charter
+// is skipped when the Deal switch is on; Cases of every other service stay in.
+const caseSweepWhere = (now) => {
+  const where = pendingWhere(now);
+  if (!isPrivateCharterDealRequested()) return where;
+  return { ...where, OR: [{ serviceRequestId: null }, { serviceRequest: { is: NOT_PRIVATE_CHARTER } }] };
+};
 
 // `label` is just for log lines; `model` is the Prisma delegate (prisma.serviceRequest
 // or prisma.case) so the same retry/backoff/alert logic isn't duplicated per source.
@@ -69,7 +89,7 @@ async function retryFailedBitrixSyncs() {
   const requestsRetried = await retryModel(
     prisma.serviceRequest,
     'request',
-    () => prisma.serviceRequest.findMany({ where: pendingWhere(), include: { user: true, case: { include: { documents: ALL_REPORTS } } } }),
+    () => prisma.serviceRequest.findMany({ where: requestSweepWhere(), include: { user: true, case: { include: { documents: ALL_REPORTS } } } }),
     (request) => leadInputFromRequest(request, request.user),
     (request) => request.case?.documents ?? [],
   );
@@ -77,7 +97,7 @@ async function retryFailedBitrixSyncs() {
   const casesRetried = await retryModel(
     prisma.case,
     'case',
-    () => prisma.case.findMany({ where: pendingWhere(), include: { documents: ALL_REPORTS } }),
+    () => prisma.case.findMany({ where: caseSweepWhere(), include: { documents: ALL_REPORTS } }),
     (caseRecord) => leadInputFromCase(caseRecord),
     (caseRecord) => caseRecord.documents,
   );

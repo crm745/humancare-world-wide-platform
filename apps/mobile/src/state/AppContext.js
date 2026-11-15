@@ -46,7 +46,7 @@ export const INITIAL_DRAFT = {
   phoneCountry: 'IN', // the country picked for the contact number's code (+1 and +7 are shared)
   ccEdited: false, // true once the person has changed the code by hand
   phone: '',
-  care: [], // care-level keys, one or more; only asked for air & ground ambulance (see needsCareLevel)
+  care: [], // the ONE chosen care-level key, as a list of 0 or 1; only asked for air & ground ambulance (see needsCareLevel)
   airlineMode: '', // 'stretcher' | 'wheelchair'; only asked for Commercial Airlines
   // Mortal Remains only (see isMortal); `name`/`age`/`gender` are then the deceased's.
   mortalTransfer: '', // 'domestic' | 'international'

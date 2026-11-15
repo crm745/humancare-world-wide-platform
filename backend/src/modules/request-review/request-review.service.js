@@ -1,9 +1,11 @@
 // The request-first review workflow (Private Charter only; see backend/REQUEST-REVIEW-WORKFLOW.md).
 //
-// A new request is saved with its permanent REQ- reference and NO Case. The patient uploads one or
-// more documents against it; every document is scanned by ClamAV and then approved or rejected by
-// an Admin; only when an Admin approves the request, and every current document is clean and
-// approved, is the operational Case (CASE- reference) created, in one transaction.
+// A new request is saved with its permanent REQ- reference AND, in the same transaction, its operational
+// Case (CASE- reference), so Operations see it at once, whether or not any document has arrived. The
+// patient uploads one or more documents against the request; every document is scanned by ClamAV and then
+// approved or rejected by an Admin. Document review is a separate process: when an Admin approves the
+// request (every current document clean and approved), the approved documents are copied to the existing
+// Case. Approval never creates a Case: an older request that has none is refused (manual historical review).
 //
 // Every change to a request or its documents writes an event to request_events in the same
 // transaction (append-only: this file only ever inserts events).
@@ -15,6 +17,8 @@ const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
 const { URGENCY_TO_CASE } = require('../../common/constants/request.constants');
 const clamav = require('../../integrations/clamav/clamav');
 const { requestRecordData } = require('../requests/request-record');
+const { enqueueDealCreation } = require('../bitrix/deal-outbox');
+const { appendAuditLog } = require('../../common/audit/business-audit');
 const {
   REQUEST_STATUS, REQUEST_STATUSES, SCAN, REVIEW, ACTION, MAX_DOCUMENTS_PER_REQUEST, REASON_MIN, REASON_MAX, SCAN_RETRY, scanBackoffMs, isStorageErrorCode,
 } = require('./request-review.config');
@@ -58,8 +62,54 @@ function numericId(value, label) {
 
 // ---- creating the request ---------------------------------------------------------------------
 
-// `data` is what the Private Charter validator returned. Request, permanent reference and first
-// event are saved together or not at all. No Case, and no Bitrix lead, is created here.
+// Opens the operational Case of a request, inside the caller's transaction `tx` (only the submission,
+// createReviewRequest, calls it). The Case gets its permanent CASE- reference, status "submitted", the Private
+// Charter stage "patient_details" with stageVersion 0, its first stage event and its first audit entry (the M3
+// audit_logs row: identifiers only, never patient details). The Case's serviceRequestId is unique, so a second Case
+// for the same request is refused by the database.
+async function createCaseForRequest(tx, request, { actorType, actorId, note }) {
+  const created = await tx.case.create({
+    data: {
+      serviceRequestId: request.id,
+      referenceNumber: `TEMP-${Date.now()}-${randomSuffix()}`,
+      patientName: request.patientName,
+      patientAge: request.patientAge,
+      patientGender: request.patientGender,
+      patientContact: request.patientContact,
+      serviceType: request.serviceType,
+      origin: request.origin,
+      destination: request.destination,
+      country: request.country,
+      careLevel: request.careLevel,
+      description: request.description,
+      // Left out when the request has none, so the Case keeps its own 'routine' default.
+      ...(request.urgency && { urgency: URGENCY_TO_CASE[request.urgency] }),
+      status: 'submitted',
+      charterStage: 'patient_details',
+      stageVersion: 0,
+    },
+  });
+  const caseRecord = await tx.case.update({ where: { id: created.id }, data: { referenceNumber: `CASE-${1000 + created.id}` } });
+  await tx.caseStageEvent.create({
+    data: {
+      caseId: caseRecord.id, stage: 'submitted', note,
+      actorType, actorId: actorId == null ? null : String(actorId), source: 'system', idempotencyKey: `case.created:request:${request.id}`,
+    },
+  });
+  await appendAuditLog(tx, {
+    caseId: caseRecord.id, entityType: 'case', entityId: caseRecord.id, action: 'case.created',
+    actorType, actorId, source: 'mobile_app', reasonCode: 'automatic_case_creation',
+    afterData: {
+      caseId: caseRecord.id, caseReference: caseRecord.referenceNumber, serviceRequestId: request.id, requestReference: request.referenceNumber,
+      charterStage: 'patient_details', status: 'submitted', stageVersion: 0,
+    },
+    correlationId: `request:${request.id}`, idempotencyKey: `case.created:request:${request.id}`,
+  });
+  return caseRecord;
+}
+
+// `data` is what the Private Charter validator returned. Request, permanent reference, first event, Case, its
+// stage event and its Bitrix Deal-creation records are saved together or not at all. No Bitrix call is made here.
 async function createReviewRequest(userId, data) {
   return prisma.$transaction(async (tx) => {
     const created = await tx.serviceRequest.create({
@@ -75,6 +125,15 @@ async function createReviewRequest(userId, data) {
       serviceRequestId: request.id, action: ACTION.REQUEST_CREATED, toStatus: REQUEST_STATUS.AWAITING_DOCUMENTS,
       actorType: 'patient', actorId: userId, detail: { referenceNumber: request.referenceNumber },
     });
+    const caseRecord = await createCaseForRequest(tx, request, {
+      actorType: 'patient', actorId: userId, note: `Case opened automatically when ${request.referenceNumber} was submitted.`,
+    });
+    await appendEvent(tx, {
+      serviceRequestId: request.id, action: ACTION.CASE_CREATED, actorType: 'system',
+      detail: { caseId: caseRecord.id, caseReference: caseRecord.referenceNumber },
+    });
+    // The Bitrix Deal for this Case: recorded now, sent later by the worker (once it is switched on).
+    await enqueueDealCreation(tx, caseRecord, request);
     return request;
   });
 }
@@ -623,9 +682,12 @@ function approvalBlockers(request, currentDocuments) {
   return blockers;
 }
 
-// Approves the request and creates its Case, in one transaction. Safe to repeat: a request that is
-// already approved returns its existing Case (the Case's serviceRequestId is unique, and the request
-// row is locked, so two approvals can never create two Cases).
+// Approves the request (document review complete) and copies its approved documents to its Case, in one
+// transaction. The Case already exists (it is opened when the request is submitted). A request that has NO Case is
+// an older one, made before that: it is refused with a clear error and nothing is created, because such requests
+// are reviewed by hand, one at a time. Safe to repeat: a request that is already approved returns its existing Case
+// (the Case's serviceRequestId is unique, and the request row is locked, so two approvals can never copy the
+// documents twice).
 async function approveRequest({ requestId, adminId }) {
   // The timeout leaves room to re-hash every stored file while the request row is locked.
   return prisma.$transaction(async (tx) => {
@@ -637,11 +699,16 @@ async function approveRequest({ requestId, adminId }) {
       return { request, case: existing, alreadyApproved: true };
     }
 
+    const caseRecord = await tx.case.findUnique({ where: { serviceRequestId: request.id } });
+    if (!caseRecord) {
+      throw httpError(409, 'This request has no Case. It was made before Cases were opened at submission, so it needs manual historical review and cannot be approved here.', 'case_missing_manual_review');
+    }
+
     const documents = await tx.requestDocument.findMany({ where: { serviceRequestId: request.id, supersededAt: null }, orderBy: { id: 'asc' } });
     const blockers = approvalBlockers(request, documents);
     if (request.reviewStatus !== REQUEST_STATUS.IN_REVIEW && !blockers.length) blockers.push({ code: 'not_in_review', message: 'The request is not in review.' });
-    // Before a Case exists, every file must still be there and byte-identical to what was scanned: the
-    // Case's documents are served later on the strength of this check.
+    // Every file must still be there and byte-identical to what was scanned: the Case's documents are
+    // served later on the strength of this check.
     if (!blockers.length) {
       for (const d of documents) {
         const problem = await fileProblem(d);
@@ -650,29 +717,6 @@ async function approveRequest({ requestId, adminId }) {
     }
     if (blockers.length) throw httpError(409, 'This request cannot be approved yet.', 'approval_blocked', { blockers });
 
-    const created = await tx.case.create({
-      data: {
-        serviceRequestId: request.id,
-        referenceNumber: `TEMP-${Date.now()}-${randomSuffix()}`,
-        patientName: request.patientName,
-        patientAge: request.patientAge,
-        patientGender: request.patientGender,
-        patientContact: request.patientContact,
-        serviceType: request.serviceType,
-        origin: request.origin,
-        destination: request.destination,
-        country: request.country,
-        careLevel: request.careLevel,
-        description: request.description,
-        // Left out when the request has none, so the Case keeps its own 'routine' default.
-        ...(request.urgency && { urgency: URGENCY_TO_CASE[request.urgency] }),
-        status: 'submitted',
-      },
-    });
-    const caseRecord = await tx.case.update({ where: { id: created.id }, data: { referenceNumber: `CASE-${1000 + created.id}` } });
-    await tx.caseStageEvent.create({
-      data: { caseId: caseRecord.id, stage: 'submitted', note: `Case opened after Admin approval of ${request.referenceNumber}.` },
-    });
     for (const d of documents) {
       const row = await tx.document.create({
         data: { caseId: caseRecord.id, type: 'Medical Report', name: d.originalName, fileUrl: `/uploads/${d.storageKey}`, fileSizeBytes: d.sizeBytes },
@@ -687,16 +731,12 @@ async function approveRequest({ requestId, adminId }) {
       serviceRequestId: request.id, action: ACTION.REQUEST_APPROVED, fromStatus: request.reviewStatus, toStatus: REQUEST_STATUS.APPROVED,
       actorType: 'admin', actorId: adminId, detail: { documents: documents.length },
     });
-    await appendEvent(tx, {
-      serviceRequestId: request.id, action: ACTION.CASE_CREATED, actorType: 'admin', actorId: adminId,
-      detail: { caseId: caseRecord.id, caseReference: caseRecord.referenceNumber },
-    });
     return { request: updated, case: caseRecord, alreadyApproved: false };
   }, { timeout: 30000, maxWait: 10000 });
 }
 
 module.exports = {
-  createReviewRequest, addPatientDocument, toUploadResponse, scanRequestDocument, sweepPendingScans,
+  createCaseForRequest, createReviewRequest, addPatientDocument, toUploadResponse, scanRequestDocument, sweepPendingScans,
   listReviewRequests, countReviewRequests, getReviewRequest, resolveAdminDownload, reviewDocument, requestAdditionalDocuments, approveRequest,
   approvalBlockers, documentSummary, QUARANTINE_DIR,
 };

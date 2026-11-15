@@ -9,7 +9,7 @@ import { SUBMISSION_COLUMNS } from '../columns';
 import { OPEN_STATUSES } from '../requestStatus.mjs';
 import { PAGE_SIZE, useRequestList } from '../useRequestList';
 
-// Every submitted request that has not been approved yet (so no operational Case exists).
+// Every submitted request whose document review is not complete yet (its Case already exists).
 // Drafts (no document uploaded) and approved requests are not part of this list.
 const TABS = [
   { value: OPEN_STATUSES, label: 'All open' },

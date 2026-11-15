@@ -70,7 +70,7 @@ export default function SubmissionDetailsPage() {
   const equipment = equipmentList(request);
   // Offered only while the request is in review (the backend refuses drafts, requests already waiting for the patient, and approved ones).
   const documentRequest = canRequestDocuments(request);
-  // Approval (the backend creates the Case). Drafts are not in the workflow, so nothing is offered for them.
+  // Approval completes the document review (the Case already exists). Drafts are not in the workflow, so nothing is offered for them.
   const approval = approvalEligibility(request);
   const showApprove = !isDraft && !approval.approved;
   const linkedCase = request.case ?? null;
@@ -229,7 +229,7 @@ export default function SubmissionDetailsPage() {
                 {caseLink && <Link to={caseLink} className="text-sm font-semibold text-brand-700 hover:underline">Open Case</Link>}
               </div>
             ) : (
-              <p className="text-sm text-slate-500">No Case yet. It is created when an Admin approves the request.</p>
+              <p className="text-sm text-slate-500">No Case yet. This request was made before Cases were opened at submission and needs manual historical review; it cannot be approved here.</p>
             )}
           </DetailSection>
         </div>
@@ -238,14 +238,14 @@ export default function SubmissionDetailsPage() {
         open={docs.approveDialog}
         title="Approve this request?"
         description={request.referenceNumber}
-        confirmLabel="Approve and create Case"
+        confirmLabel="Approve request"
         busy={docs.busy}
         error={docs.error}
         onConfirm={docs.submitApproval}
         onCancel={docs.closeApproveDialog}
       >
         <p className="text-sm text-slate-600">
-          Approving creates an operational Case from this request and copies its documents to it. The request will be locked: documents can no longer be reviewed
+          Approving completes the document review and copies the approved documents to this request's Case (which already exists). The request will be locked: documents can no longer be reviewed
           and no further documents can be requested. This cannot be undone from this page.
         </p>
       </ConfirmDialog>

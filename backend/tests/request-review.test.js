@@ -1,6 +1,7 @@
-// The request-first review workflow (Private Charter): a request without a Case, documents scanned
-// by ClamAV (here a fake clamd speaking the real protocol) and reviewed by an Admin, and a Case
-// created only on approval. Run with --runInBand (it fills the shared GeoNames fixture table).
+// The request-first review workflow (Private Charter): a request whose Case is opened at once, in the same
+// transaction (with its Bitrix Deal records, nothing sent), documents scanned by ClamAV (here a fake clamd
+// speaking the real protocol) and reviewed by an Admin, and an approval that completes the document review on
+// the existing Case. Run with --runInBand (it fills the shared GeoNames fixture table).
 jest.mock('../src/modules/auth/otp-delivery.service', () => ({
   deliverOtp: jest.fn().mockResolvedValue(undefined),
 }));
@@ -21,6 +22,7 @@ const { createLead } = require('../src/modules/bitrix/bitrix.service');
 const { scanFile } = require('../src/integrations/clamav/clamav');
 const { UPLOAD_DIR } = require('../src/middleware/upload.middleware');
 const review = require('../src/modules/request-review/request-review.service');
+const { enqueueDealCreation, assertDealEligible, dealCreateIdempotencyKey } = require('../src/modules/bitrix/deal-outbox');
 const { SCAN_RETRY } = require('../src/modules/request-review/request-review.config');
 const { IDS, ROWS } = require('./fixtures/geo-cities');
 
@@ -33,7 +35,7 @@ const sha = (content) => crypto.createHash('sha256').update(content).digest('hex
 const pcBody = {
   serviceKey: 'privatecharter', patientName: 'Maria Fernandez', patientAge: 61, patientGender: 'female', country: 'AE',
   origin: { geonameId: IDS.MUMBAI }, destination: { geonameId: IDS.DUBAI }, patientContact: '+971501234567', preferredDate: '2099-01-01',
-  careLevel: ['care_icu', 'care_stable'], description: 'Needs ICU transfer', mobility: 'bedridden', urgency: 'urgent_24h',
+  careLevel: ['care_icu'], description: 'Needs ICU transfer', mobility: 'bedridden', urgency: 'urgent_24h',
 };
 
 let clamd;
@@ -91,6 +93,8 @@ const approveDocument = (reqId, docId) => adminPost(`/admin/requests/${reqId}/do
 const eventsOf = async (id) => (await prisma.requestEvent.findMany({ where: { serviceRequestId: id }, orderBy: { id: 'asc' } }));
 const actions = async (id) => (await eventsOf(id)).map((e) => e.action);
 const caseOf = (id) => prisma.case.findUnique({ where: { serviceRequestId: id } });
+// Documents copied to the request's Case (that only happens on approval).
+const caseDocuments = (id) => prisma.document.count({ where: { case: { serviceRequestId: id } } });
 
 // A request with one clean document that an Admin has approved.
 async function approvableRequest() {
@@ -102,17 +106,46 @@ async function approvableRequest() {
 
 // ---- creating the request ---------------------------------------------------------------------
 describe('creating a Private Charter request in the workflow', () => {
-  it('saves it with a permanent REQ- reference, no Case, no Bitrix lead and an initial event', async () => {
+  it('saves it with a permanent REQ- reference, its Case, the Bitrix Deal records, no Bitrix lead and the first events', async () => {
     createLead.mockClear();
     const r = await newRequest();
     expect(r.res.status).toBe(201);
     expect(r.res.body.request).toMatchObject({ reviewStatus: 'awaiting_documents', status: 'submitted' });
     expect(r.res.body.request.referenceNumber).toBe(`REQ-${1000 + r.id}`);
-    expect(await caseOf(r.id)).toBeNull();
     expect(createLead).not.toHaveBeenCalled();
+    // The Case exists at once: no document, no Admin approval.
+    const made = await caseOf(r.id);
+    expect(made).toMatchObject({ referenceNumber: `CASE-${1000 + made.id}`, status: 'submitted', charterStage: 'patient_details', stageVersion: 0, corporateId: null, bitrixLeadId: null });
+    expect(await prisma.case.count({ where: { serviceRequestId: r.id } })).toBe(1);
+    expect(await caseDocuments(r.id)).toBe(0);
+    const stage = await prisma.caseStageEvent.findMany({ where: { caseId: made.id } });
+    expect(stage).toHaveLength(1);
+    expect(stage[0]).toMatchObject({ stage: 'submitted', previousStage: null, actorType: 'patient', actorId: String(r.user.id), source: 'system', idempotencyKey: `case.created:request:${r.id}` });
+    // Bitrix: recorded for the worker, nothing sent.
+    expect(await prisma.bitrixDealLink.findUnique({ where: { caseId: made.id } })).toMatchObject({ bitrixDealId: null, syncStatus: 'pending' });
+    const outbox = await prisma.integrationOutbox.findMany({ where: { caseId: made.id } });
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]).toMatchObject({
+      eventType: 'bitrix.deal.create', entityType: 'case', entityId: String(made.id), idempotencyKey: `bitrix.deal.create:case:${made.id}`,
+      status: 'pending', attempts: 0, lockedBy: null, externalCallStartedAt: null,
+    });
+    expect(outbox[0].payload).toEqual({ caseId: made.id, serviceRequestId: r.id }); // ids only
+    // The audit entry of the Case creation: identifiers and state names only.
+    const audit = await prisma.auditLog.findMany({ where: { caseId: made.id } });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      entityType: 'case', entityId: String(made.id), action: 'case.created', actorType: 'patient', actorId: String(r.user.id), source: 'mobile_app',
+      reasonCode: 'automatic_case_creation', isOverride: false, correlationId: `request:${r.id}`, idempotencyKey: `case.created:request:${r.id}`,
+    });
+    expect(audit[0].afterData).toEqual({
+      caseId: made.id, caseReference: made.referenceNumber, serviceRequestId: r.id, requestReference: r.res.body.request.referenceNumber,
+      charterStage: 'patient_details', status: 'submitted', stageVersion: 0,
+    });
+    expect(JSON.stringify(audit[0])).not.toMatch(/Maria|Fernandez|971501234567|ICU/);
     const events = await eventsOf(r.id);
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ action: 'request_created', toStatus: 'awaiting_documents', actorType: 'patient', actorId: r.user.id });
+    expect(events.map((e) => e.action)).toEqual(['request_created', 'case_created']);
+    expect(events[0]).toMatchObject({ toStatus: 'awaiting_documents', actorType: 'patient', actorId: r.user.id });
+    expect(events[1]).toMatchObject({ actorType: 'system', detail: { caseId: made.id, caseReference: made.referenceNumber } });
   });
 
   it('stores exactly the same fields as the original flow does', async () => {
@@ -144,19 +177,80 @@ describe('creating a Private Charter request in the workflow', () => {
     expect(await prisma.serviceRequest.count({ where: { userId: patient.user.id } })).toBe(0);
   });
 
+  describe('is all-or-nothing for the Case and the Bitrix records too', () => {
+    const failing = (key) => async () => {
+      const patient = await createPatient();
+      const before = {
+        cases: await prisma.case.count(), stageEvents: await prisma.caseStageEvent.count(),
+        links: await prisma.bitrixDealLink.count(), outbox: await prisma.integrationOutbox.count(), audit: await prisma.auditLog.count(),
+      };
+      const realTransaction = prisma.$transaction.bind(prisma);
+      const spy = jest.spyOn(prisma, '$transaction').mockImplementationOnce((fn, options) => realTransaction(
+        (tx) => fn(new Proxy(tx, { get: (target, name) => (name === key ? { create: () => Promise.reject(new Error('disk full')), update: () => Promise.reject(new Error('disk full')) } : target[name]) })),
+        options,
+      ));
+      const quiet = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const res = await request(app).post('/requests').set(auth(patient.token)).send(pcBody);
+      spy.mockRestore();
+      quiet.mockRestore();
+      expect(res.status).toBe(500);
+      expect(await prisma.serviceRequest.count({ where: { userId: patient.user.id } })).toBe(0);
+      expect(await prisma.case.count()).toBe(before.cases);
+      expect(await prisma.caseStageEvent.count()).toBe(before.stageEvents);
+      expect(await prisma.bitrixDealLink.count()).toBe(before.links);
+      expect(await prisma.integrationOutbox.count()).toBe(before.outbox);
+      expect(await prisma.auditLog.count()).toBe(before.audit);
+    };
+    it('if the Case cannot be saved, no request, link or event is left behind', failing('case'));
+    it('if the audit entry cannot be saved, no request, Case, link or event is left behind', failing('auditLog'));
+    it('if the Deal event cannot be saved, no request, Case or link is left behind', failing('integrationOutbox'));
+    it('if the Deal link cannot be saved, no request, Case or event is left behind', failing('bitrixDealLink'));
+  });
+
+  it('records one Deal event per Case: a second one is refused by the database and nothing extra is written', async () => {
+    const r = await newRequest();
+    const made = await caseOf(r.id);
+    const saved = await prisma.serviceRequest.findUnique({ where: { id: r.id } });
+    await expect(prisma.$transaction((tx) => enqueueDealCreation(tx, made, saved))).rejects.toThrow();
+    expect(await prisma.integrationOutbox.count({ where: { caseId: made.id } })).toBe(1);
+    expect(await prisma.bitrixDealLink.count({ where: { caseId: made.id } })).toBe(1);
+    expect(dealCreateIdempotencyKey(made.id)).toBe(`bitrix.deal.create:case:${made.id}`);
+  });
+
+  it('refuses to record a Deal for a Corporate Case, another service, a request outside the review workflow, or one that has a Lead', () => {
+    const base = { id: 7, serviceKey: 'privatecharter', reviewStatus: 'awaiting_documents', bitrixLeadId: null };
+    const kase = { id: 9, serviceRequestId: 7 };
+    expect(() => assertDealEligible(kase, base)).not.toThrow();
+    expect(() => assertDealEligible({ id: 9, serviceRequestId: null }, base)).toThrow(/Corporate/);
+    expect(() => assertDealEligible(kase, { ...base, serviceKey: 'ground' })).toThrow(/Private Charter/);
+    expect(() => assertDealEligible(kase, { ...base, serviceKey: null })).toThrow(/Private Charter/);
+    expect(() => assertDealEligible(kase, { ...base, reviewStatus: null })).toThrow(/excluded/);
+    expect(() => assertDealEligible(kase, { ...base, bitrixLeadId: 55 })).toThrow(/Lead/);
+    expect(() => assertDealEligible({ id: 9, serviceRequestId: 8 }, base)).toThrow(/does not belong/);
+  });
+
   it('is unchanged when the workflow is off: the Case is created with the request', async () => {
     process.env.PRIVATE_CHARTER_REVIEW_WORKFLOW = 'false';
     const r = await newRequest();
     process.env.PRIVATE_CHARTER_REVIEW_WORKFLOW = 'true';
     expect(r.res.body.request.reviewStatus).toBeNull();
-    expect((await caseOf(r.id)).referenceNumber).toBe(r.res.body.request.referenceNumber);
+    const made = await caseOf(r.id);
+    expect(made.referenceNumber).toBe(r.res.body.request.referenceNumber);
+    // The original flow records nothing for Bitrix Deals, and charter stages stay empty.
+    expect(made.charterStage).toBeNull();
+    expect(await prisma.integrationOutbox.count({ where: { caseId: made.id } })).toBe(0);
+    expect(await prisma.bitrixDealLink.count({ where: { caseId: made.id } })).toBe(0);
   });
 
   it('is unchanged for other services even with the workflow on', async () => {
     const r = await newRequest({ serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground', patientName: 'John Doe', origin: 'Pune', destination: 'Mumbai' });
     expect(r.res.status).toBe(201);
     expect(r.res.body.request.reviewStatus).toBeNull();
-    expect(await caseOf(r.id)).not.toBeNull();
+    const made = await caseOf(r.id);
+    expect(made).not.toBeNull();
+    expect(made.charterStage).toBeNull();
+    expect(await prisma.integrationOutbox.count({ where: { caseId: made.id } })).toBe(0);
+    expect(await prisma.bitrixDealLink.count({ where: { caseId: made.id } })).toBe(0);
   });
 });
 
@@ -170,8 +264,9 @@ describe('uploading documents', () => {
     const saved = await prisma.serviceRequest.findUnique({ where: { id: r.id } });
     expect(saved.reviewStatus).toBe('in_review');
     expect(saved.submittedAt).toBeTruthy();
-    expect(await caseOf(r.id)).toBeNull();
-    expect(await actions(r.id)).toEqual(['request_created', 'document_uploaded', 'status_changed', 'scan_clean']);
+    expect(await caseOf(r.id)).not.toBeNull(); // the Case exists since the submission; the upload does not touch it
+    expect(await caseDocuments(r.id)).toBe(0);
+    expect(await actions(r.id)).toEqual(['request_created', 'case_created', 'document_uploaded', 'status_changed', 'scan_clean']);
     const docRow = await prisma.requestDocument.findUnique({ where: { id: up.body.document.id } });
     expect(docRow).toMatchObject({ scanEngine: 'clamav', serviceRequestId: r.id, uploadedByUserId: r.user.id });
     expect(docRow.sha256).toMatch(/^[0-9a-f]{64}$/);
@@ -189,7 +284,7 @@ describe('uploading documents', () => {
     await upload(r.token, r.id, { name: 'two.pdf' });
     const res = await request(app).get(`/requests/me/${r.id}`).set(auth(r.token));
     expect(res.status).toBe(200);
-    expect(res.body.request.case).toBeNull();
+    expect(res.body.request.case).toMatchObject({ referenceNumber: expect.stringMatching(/^CASE-\d+$/), documents: [] });
     expect(res.body.request.reviewStatus).toBe('in_review');
     expect(res.body.request.requestDocuments.map((d) => d.originalName)).toEqual(['one.pdf', 'two.pdf']);
     for (const d of res.body.request.requestDocuments) {
@@ -456,7 +551,7 @@ describe('Admin can see every request, including incomplete ones', () => {
     expect(body.requestDocuments.map((d) => d.originalName)).toEqual(['old.pdf', 'new.pdf']);
     expect(body.requestDocuments[0].supersededAt).toBeTruthy();
     expect(body.requestEvents.map((e) => e.action)).toEqual(expect.arrayContaining(['request_created', 'document_uploaded', 'document_replaced', 'scan_clean']));
-    expect(body.case).toBeNull();
+    expect(body.case).toMatchObject({ referenceNumber: expect.stringMatching(/^CASE-\d+$/), status: 'submitted' });
     expect(JSON.stringify(body)).not.toMatch(/storageKey/);
   });
 
@@ -474,7 +569,7 @@ describe('Admin can see every request, including incomplete ones', () => {
       expect(body).toHaveProperty(field);
     }
     expect(body).toMatchObject({ reviewStatus: 'in_review', patientName: 'Maria Fernandez', patientAge: 61, patientGender: 'female', urgency: 'urgent_24h', country: 'AE' });
-    expect(body.careLevel).toBe('care_icu,care_stable'); // keys: the page translates them
+    expect(body.careLevel).toBe('care_icu'); // keys: the page translates them
     // Account holder.
     expect(body.user).toEqual({ id: r.user.id, name: expect.any(String), email: expect.any(String), mobile: expect.anything() });
     // Document history, including the replaced original with its rejection and the replacement link.
@@ -494,7 +589,7 @@ describe('Admin can see every request, including incomplete ones', () => {
     expect(body.requestEvents.find((e) => e.action === 'document_replaced').detail).toMatchObject({ name: 'new.pdf', replacesId: old.id });
     // Summary and linked Case.
     expect(body.documentSummary).toEqual({ current: 1, awaitingScan: 0, scanErrors: 0, scanFailed: 0, infected: 0, awaitingReview: 1, approved: 0, rejected: 0 });
-    expect(body.case).toBeNull();
+    expect(body.case).toMatchObject({ referenceNumber: expect.stringMatching(/^CASE-\d+$/), status: 'submitted' });
     const text = JSON.stringify(body);
     expect(text).not.toMatch(/storageKey/);
     expect(text).not.toMatch(/passwordHash|password_hash/);
@@ -699,14 +794,16 @@ describe('asking for additional documents is only possible in review, once at a 
     expect(await prisma.case.count({ where: { serviceRequestId: r.id } })).toBe(1); // the Case from the approval, no second one
   });
 
-  it('does not create a Case, and approval stays blocked until the patient answers', async () => {
+  it('does not touch the Case, and approval stays blocked until the patient answers', async () => {
     const r = await approvableRequest();
+    const before = await caseOf(r.id);
     expect((await ask(r.id)).status).toBe(200);
-    expect(await caseOf(r.id)).toBeNull();
+    expect((await caseOf(r.id)).id).toBe(before.id);
     const blocked = await adminPost(`/admin/requests/${r.id}/approve`);
     expect(blocked.status).toBe(409);
     expect(blocked.body.blockers.map((b) => b.code)).toEqual(['documents_requested']);
-    expect(await caseOf(r.id)).toBeNull();
+    expect((await caseOf(r.id)).id).toBe(before.id);
+    expect(await caseDocuments(r.id)).toBe(0);
   });
 
   describe('the reason: 3 to 1000 characters after trimming', () => {
@@ -782,16 +879,21 @@ describe('asking for additional documents is only possible in review, once at a 
 });
 
 // ---- approval and the Case --------------------------------------------------------------------
-describe('approving a request creates the Case', () => {
-  it('creates a CASE- Case with the request\'s details and copies the approved documents', async () => {
+describe('approving a request completes its document review on the existing Case', () => {
+  it('opens the CASE- Case at submission with the request\'s details, and approval copies the approved documents to that same Case', async () => {
     const r = await approvableRequest();
+    const opened = await caseOf(r.id);
+    expect(opened).not.toBeNull();
+    expect(await caseDocuments(r.id)).toBe(0);
     const res = await adminPost(`/admin/requests/${r.id}/approve`);
     expect(res.status).toBe(201);
     const made = await caseOf(r.id);
+    expect(made.id).toBe(opened.id);
+    expect(res.body.case.id).toBe(opened.id);
     expect(made.referenceNumber).toBe(`CASE-${1000 + made.id}`);
     expect(made).toMatchObject({
       patientName: 'Maria Fernandez', patientAge: 61, patientGender: 'female', patientContact: '+971501234567', country: 'AE',
-      origin: 'Mumbai, Maharashtra, India', destination: 'Dubai, United Arab Emirates', careLevel: 'care_icu,care_stable',
+      origin: 'Mumbai, Maharashtra, India', destination: 'Dubai, United Arab Emirates', careLevel: 'care_icu',
       description: 'Needs ICU transfer', urgency: 'urgent', status: 'submitted', corporateId: null,
     });
     expect((await prisma.serviceRequest.findUnique({ where: { id: r.id } })).referenceNumber).toBe(`REQ-${1000 + r.id}`);
@@ -803,8 +905,10 @@ describe('approving a request creates the Case', () => {
     expect(docs[0]).toMatchObject({ name: 'report.pdf', type: 'Medical Report', fileSizeBytes: PDF.length });
     expect((await prisma.requestDocument.findUnique({ where: { id: r.docId } })).caseDocumentId).toBe(docs[0].id);
     const stage = await prisma.caseStageEvent.findMany({ where: { caseId: made.id } });
-    expect(stage).toHaveLength(1);
-    expect((await actions(r.id)).slice(-2)).toEqual(['request_approved', 'case_created']);
+    expect(stage).toHaveLength(1); // approval adds no stage event; the one from the submission is the only one
+    expect(made.charterStage).toBe('patient_details');
+    expect((await actions(r.id)).slice(-2)).toEqual(['document_approved', 'request_approved']);
+    expect((await actions(r.id)).filter((a) => a === 'case_created')).toHaveLength(1);
     expect((await eventsOf(r.id)).find((e) => e.action === 'request_approved')).toMatchObject({ actorType: 'admin', actorId: admin.id, fromStatus: 'in_review', toStatus: 'approved' });
   });
 
@@ -817,6 +921,36 @@ describe('approving a request creates the Case', () => {
     const dl = await request(app).get(`/documents/${mine.body.request.case.documents[0].id}/file`).set(auth(r.token));
     expect(dl.status).toBe(200);
     expect(Buffer.from(dl.body).toString()).toBe(PDF);
+  });
+
+  it('a request with no document at all still has its Case, and approval is refused for the documents, not for the Case', async () => {
+    const r = await newRequest();
+    expect(await caseOf(r.id)).not.toBeNull();
+    const res = await adminPost(`/admin/requests/${r.id}/approve`);
+    expect(res.status).toBe(409);
+    expect(res.body.blockers.map((b) => b.code)).toEqual(['no_documents']);
+    expect(await prisma.case.count({ where: { serviceRequestId: r.id } })).toBe(1);
+  });
+
+  it('an older request that has no Case is refused on approval: nothing is created, copied or recorded for Bitrix', async () => {
+    const r = await approvableRequest();
+    const made = await caseOf(r.id);
+    // Make it look like a request from before the Case was opened at submission.
+    await prisma.auditLog.deleteMany({ where: { caseId: made.id } });
+    await prisma.integrationOutbox.deleteMany({ where: { caseId: made.id } });
+    await prisma.bitrixDealLink.deleteMany({ where: { caseId: made.id } });
+    await prisma.caseStageEvent.deleteMany({ where: { caseId: made.id } });
+    await prisma.case.delete({ where: { id: made.id } });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const res = await adminPost(`/admin/requests/${r.id}/approve`);
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('case_missing_manual_review');
+    }
+    expect(await caseOf(r.id)).toBeNull();
+    expect(await prisma.case.count({ where: { serviceRequestId: r.id } })).toBe(0);
+    expect(await caseDocuments(r.id)).toBe(0);
+    expect((await prisma.serviceRequest.findUnique({ where: { id: r.id } })).reviewStatus).toBe('in_review');
+    expect((await actions(r.id)).filter((a) => a === 'request_approved')).toHaveLength(0);
   });
 
   it('is safe to repeat: the same Case is returned, never a second one', async () => {
@@ -844,7 +978,7 @@ describe('approving a request creates the Case', () => {
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('approval_blocked');
     expect(res.body.blockers.map((b) => b.code)).toEqual(['no_documents']);
-    expect(await caseOf(r.id)).toBeNull();
+    expect(await caseDocuments(r.id)).toBe(0);
   });
 
   it('is refused while a document is waiting for review', async () => {
@@ -866,7 +1000,7 @@ describe('approving a request creates the Case', () => {
     const res = await adminPost(`/admin/requests/${r.id}/approve`);
     expect(res.status).toBe(409);
     expect(res.body.blockers.map((b) => b.code).sort()).toEqual(['infected', 'scan_failed', 'unscanned']);
-    expect(await caseOf(r.id)).toBeNull();
+    expect(await caseDocuments(r.id)).toBe(0);
   });
 
   it('is refused while a rejected document has not been replaced, and allowed once it has and the new one is approved', async () => {
@@ -893,7 +1027,7 @@ describe('approving a request creates the Case', () => {
     const res = await adminPost(`/admin/requests/${r.id}/approve`);
     expect(res.status).toBe(409);
     expect(res.body.blockers.map((b) => b.code)).toEqual(['documents_requested']);
-    expect(await caseOf(r.id)).toBeNull();
+    expect(await caseDocuments(r.id)).toBe(0);
   });
 
   it('leaves corporate-created Cases and the admin Case list working', async () => {
@@ -916,8 +1050,8 @@ describe('the business audit history', () => {
     await adminPost(`/admin/requests/${r.id}/approve`);
     const events = await eventsOf(r.id);
     expect(events.map((e) => e.action)).toEqual([
-      'request_created', 'document_uploaded', 'status_changed', 'scan_clean', 'document_rejected', 'status_changed',
-      'document_replaced', 'status_changed', 'scan_clean', 'document_approved', 'request_approved', 'case_created',
+      'request_created', 'case_created', 'document_uploaded', 'status_changed', 'scan_clean', 'document_rejected', 'status_changed',
+      'document_replaced', 'status_changed', 'scan_clean', 'document_approved', 'request_approved',
     ]);
     expect(events.filter((e) => e.actorType === 'admin').every((e) => e.actorId === admin.id)).toBe(true);
     expect(events.filter((e) => e.actorType === 'patient').every((e) => e.actorId === r.user.id)).toBe(true);
@@ -1140,7 +1274,7 @@ describe('approval checks the stored files before creating the Case', () => {
     const refused = await adminPost(`/admin/requests/${r.id}/approve`);
     expect(refused.status).toBe(409);
     expect(refused.body.blockers).toEqual([expect.objectContaining({ code: 'file_changed', documentId: up.body.document.id })]);
-    expect(await caseOf(r.id)).toBeNull();
+    expect(await caseDocuments(r.id)).toBe(0);
     fs.writeFileSync(file, original);
     expect((await adminPost(`/admin/requests/${r.id}/approve`)).status).toBe(201);
   });
@@ -1157,7 +1291,7 @@ describe('approval checks the stored files before creating the Case', () => {
     await prisma.requestDocument.update({ where: { id: up.body.document.id }, data: { sha256: null } });
     const noSum = await adminPost(`/admin/requests/${r.id}/approve`);
     expect(noSum.body.blockers.map((b) => b.code)).toEqual(['checksum_missing']);
-    expect(await caseOf(r.id)).toBeNull();
+    expect(await caseDocuments(r.id)).toBe(0);
   });
 
   it('an Admin cannot download a document whose file changed or whose checksum is missing', async () => {
@@ -1217,7 +1351,7 @@ describe('a request needs at least one document to be submitted', () => {
     const approval = await adminPost(`/admin/requests/${r.id}/approve`);
     expect(approval.status).toBe(409);
     expect(approval.body.blockers.map((b) => b.code)).toEqual(['no_documents']);
-    expect(await caseOf(r.id)).toBeNull();
+    expect(await caseDocuments(r.id)).toBe(0);
   });
 
   it('becomes a submission with its first document, and is then visible to Admin', async () => {
