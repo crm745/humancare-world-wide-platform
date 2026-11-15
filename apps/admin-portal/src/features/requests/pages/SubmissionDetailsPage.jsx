@@ -245,7 +245,7 @@ export default function SubmissionDetailsPage() {
         onCancel={docs.closeApproveDialog}
       >
         <p className="text-sm text-slate-600">
-          Approving completes the document review and copies the approved documents to this request's Case (which already exists). The request will be locked: documents can no longer be reviewed
+          Approving completes the document review and copies the approved documents to this request&apos;s Case (which already exists). The request will be locked: documents can no longer be reviewed
           and no further documents can be requested. This cannot be undone from this page.
         </p>
       </ConfirmDialog>
