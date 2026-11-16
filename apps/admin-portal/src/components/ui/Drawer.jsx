@@ -7,7 +7,7 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), selec
  * within the panel, closes on Escape, locks background scrolling, and gives focus back to
  * whatever opened it when it closes.
  */
-export function Drawer({ open, onClose, label, children }) {
+export function Drawer({ open, onClose, label, children, panelClassName = 'bg-white' }) {
   const panelRef = useRef(null);
   const onCloseRef = useRef(onClose);
 
@@ -67,7 +67,7 @@ export function Drawer({ open, onClose, label, children }) {
         aria-modal="true"
         aria-label={label}
         tabIndex={-1}
-        className="absolute inset-y-0 left-0 flex w-72 max-w-[85vw] animate-slide-in-left flex-col bg-white shadow-elevated focus:outline-none"
+        className={`absolute inset-y-0 left-0 flex w-72 max-w-[85vw] animate-slide-in-left flex-col shadow-elevated focus:outline-none ${panelClassName}`}
       >
         {children}
       </aside>

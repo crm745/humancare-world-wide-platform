@@ -12,8 +12,11 @@ import { Spinner } from './Loading';
  *
  * `onRowClick` makes the row clickable; the first cell should still contain a real link so the
  * row is reachable by keyboard.
+ *
+ * `dense` tightens the cell padding; `embedded` drops the table's own border, radius and shadow so it
+ * can sit inside a card that already has them. Both are optional and change nothing when omitted.
  */
-export function DataTable({ columns, rows, rowKey, loading = false, error, empty, onRowClick, caption }) {
+export function DataTable({ columns, rows, rowKey, loading = false, error, empty, onRowClick, caption, dense = false, embedded = false }) {
   if (error && !rows?.length) return <Alert tone="error">{error}</Alert>;
   if (loading && !rows?.length) {
     return (
@@ -28,13 +31,13 @@ export function DataTable({ columns, rows, rowKey, loading = false, error, empty
   return (
     <div className="space-y-3">
       {error && <Alert tone="error">{error}</Alert>}
-      <div className={cn('overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-card transition-opacity', loading && 'opacity-60')} aria-busy={loading || undefined}>
+      <div className={cn('overflow-x-auto bg-white transition-opacity', !embedded && 'rounded-xl border border-slate-200 shadow-card', loading && 'opacity-60')} aria-busy={loading || undefined}>
         <table className="min-w-full divide-y divide-slate-200 text-sm">
           {caption && <caption className="sr-only">{caption}</caption>}
           <thead className="bg-slate-50">
             <tr>
               {columns.map((c) => (
-                <th key={c.key} scope="col" className={cn('whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500', c.className)}>
+                <th key={c.key} scope="col" className={cn('whitespace-nowrap px-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500', dense ? 'py-2.5' : 'py-3', c.className)}>
                   {c.header}
                 </th>
               ))}
@@ -48,7 +51,7 @@ export function DataTable({ columns, rows, rowKey, loading = false, error, empty
                 className={cn(onRowClick && 'cursor-pointer hover:bg-slate-50')}
               >
                 {columns.map((c) => (
-                  <td key={c.key} className={cn('px-4 py-3 align-middle text-slate-700', c.className)}>
+                  <td key={c.key} className={cn('px-4 align-middle text-slate-700', dense ? 'py-2.5' : 'py-3', c.className)}>
                     {c.render ? c.render(row) : row[c.key]}
                   </td>
                 ))}

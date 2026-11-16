@@ -1,11 +1,12 @@
 import { useRef, useState } from 'react';
-import { Eye, EyeOff, KeyRound } from 'lucide-react';
+import { ArrowRight, Eye, EyeOff, KeyRound, Lock, Mail, ShieldCheck } from 'lucide-react';
 import { AuthLayout } from '@/layouts/AuthLayout';
 import { useAuth } from '@/hooks/useAuth';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
+import { AuthHeading } from '../components/AuthHeading';
 import { isWebAuthnSupported } from '@/services/webauthn';
 
 // Basic shape check only; the server is the authority on whether the account exists.
@@ -61,11 +62,8 @@ export default function LoginPage() {
   }
 
   return (
-    <AuthLayout>
-      <div className="mb-6 text-center">
-        <h1 className="text-2xl font-bold tracking-tight text-ink">Admin sign in</h1>
-        <p className="mt-1 text-sm text-slate-500">Use your HumanCare admin account and your passkey.</p>
-      </div>
+    <AuthLayout variant="split">
+      <AuthHeading title="Admin sign in">Welcome back. Access the HumanCare operations console.</AuthHeading>
 
       {serverUnreachable && !error && (
         <Alert className="mb-4">
@@ -87,7 +85,7 @@ export default function LoginPage() {
       )}
       {error && <Alert className="mb-4">{error}</Alert>}
       {stage === 'passkey' && (
-        <p role="status" className="mb-4 flex items-center gap-2 rounded-lg border border-brand-100 bg-brand-50 px-3.5 py-3 text-sm text-brand-800">
+        <p role="status" className="mb-4 flex items-center gap-2 rounded-xl border border-brand-100 bg-brand-50 px-3.5 py-3 text-sm text-brand-800">
           <KeyRound className="h-4 w-4 shrink-0" aria-hidden="true" />
           Confirm with your passkey: use your security key, fingerprint, face or screen lock when your browser asks.
         </p>
@@ -97,10 +95,12 @@ export default function LoginPage() {
         <Input
           ref={emailRef}
           label="Email"
+          variant="premium"
+          leftSlot={<Mail className="h-[18px] w-[18px]" />}
           type="email"
           name="email"
           autoComplete="username"
-          placeholder="you@humancareworldwide.com"
+          placeholder="Enter your admin email"
           value={email}
           error={fieldErrors.email}
           onChange={(e) => {
@@ -111,6 +111,8 @@ export default function LoginPage() {
         <Input
           ref={passwordRef}
           label="Password"
+          variant="premium"
+          leftSlot={<Lock className="h-[18px] w-[18px]" />}
           type={showPassword ? 'text' : 'password'}
           name="password"
           autoComplete="current-password"
@@ -125,17 +127,25 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => setShowPassword((v) => !v)}
-              className="rounded-md p-1.5 text-slate-400 hover:text-slate-600"
+              className="rounded-md p-1.5 text-slate-400 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
-              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {showPassword ? <EyeOff className="h-[18px] w-[18px]" /> : <Eye className="h-[18px] w-[18px]" />}
             </button>
           }
         />
-        <Button type="submit" size="lg" loading={submitting} disabled={!passkeysSupported} className="w-full">
+        <Button type="submit" variant="accent" size="xl" loading={submitting} disabled={!passkeysSupported} className="w-full">
           {stage === 'passkey' ? 'Waiting for passkey' : 'Sign in'}
+          {!submitting && <ArrowRight className="h-5 w-5" aria-hidden="true" />}
         </Button>
       </form>
+
+      <div className="mt-6 flex items-start gap-3 rounded-xl border border-slate-200 bg-white/70 px-4 py-3.5 text-sm text-slate-600">
+        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" aria-hidden="true" />
+        <p>
+          <span className="font-semibold text-ink">Passkey-protected access.</span> After your password, your browser will ask for your passkey (security key, fingerprint, face or screen lock) before you are signed in.
+        </p>
+      </div>
     </AuthLayout>
   );
 }
