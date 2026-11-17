@@ -160,6 +160,7 @@ async function uploadRequestDocument(req, res, next) {
     if (request.reviewStatus != null) {
       const stored = await addPatientDocument({
         userId: req.user.id, requestId: request.id, file: req.file, replacesDocumentId: req.body && req.body.replacesDocumentId,
+        documentRequestId: req.body && req.body.documentRequestId,
       });
       // Fail closed: if the scanner is down the document is saved but stays "error" (unusable)
       // until the worker's next sweep scans it.

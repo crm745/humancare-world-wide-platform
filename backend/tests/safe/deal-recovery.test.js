@@ -212,7 +212,7 @@ describe('requeue: a failure before any Bitrix call', () => {
   });
 
   test('is refused while the original problem is still there', async () => {
-    caseRow.serviceRequest.careLevel = 'care_icu,care_stable';
+    caseRow.serviceRequest.careLevel = 'care_icu,care_na';
     expect(await code(recover())).toBe('422:not_corrected');
     expect(events).toHaveLength(1);
     expect(audit).toHaveLength(0);

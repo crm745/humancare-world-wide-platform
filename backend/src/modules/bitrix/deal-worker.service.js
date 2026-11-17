@@ -24,7 +24,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { prisma: defaultPrisma } = require('../../db/prisma');
 const { isPrivateCharterDealWorkerActive } = require('./bitrix-config');
-const { assertDealEligible } = require('./deal-outbox');
+const { assertDealEligible, assertDealCreationAllowed } = require('./deal-outbox');
 const { buildDealFields, DealMappingError, DEAL } = require('./bitrix-deal');
 const bitrixDealApi = require('./bitrix-deal.api');
 const defaultStore = require('./deal-outbox.store');
@@ -48,10 +48,14 @@ class LeaseLostError extends Error {
 const makeWorkerId = () => `${os.hostname()}:${process.pid}:${crypto.randomBytes(4).toString('hex')}`.slice(0, 64);
 
 function buildContext(overrides = {}) {
-  return {
+  const ctx = {
     prisma: defaultPrisma, store: defaultStore, api: bitrixDealApi, env: process.env, log: console,
     reportFailures: reportDealFailures, workerId: makeWorkerId(), ...overrides,
   };
+  // A scoped pass (scope: { caseIds }, used by scripts/e2e-worker.js) never writes failure alerts about events that are
+  // not in its scope: the default alert writer looks at EVERY failed event, so it is replaced unless the caller gives one.
+  if (ctx.scope && !('reportFailures' in overrides)) ctx.reportFailures = async () => 0;
+  return ctx;
 }
 
 // ---- recording results ---------------------------------------------------------------------------------------------
@@ -187,7 +191,18 @@ async function processClaim(ctx, claim) {
     return complete(ctx, claim, caseRecord, link.bitrixDealId, link.stageId, true);
   }
   // A call may already have been started for this event (evidence set): never send crm.deal.add again.
-  if (claim.fromStatus === 'pending' && claim.externalCallStartedAt == null) return createFlow(ctx, claim, caseRecord);
+  if (claim.fromStatus === 'pending' && claim.externalCallStartedAt == null) {
+    // Defence in depth (the candidate query already offers only approved requests): a Deal is never CREATED for a
+    // request that is not approved. Nothing is sent and nothing is written; the event is left as it is (its lease
+    // runs out and it returns to pending), so it can still be sent once the request is approved.
+    try {
+      assertDealCreationAllowed(caseRecord, caseRecord.serviceRequest);
+    } catch (err) {
+      ctx.log.warn(`[deal-worker] event ${claim.id}: the request is not approved; no Deal is created.`);
+      return false;
+    }
+    return createFlow(ctx, claim, caseRecord);
+  }
   return reconcileFlow(ctx, claim, caseRecord);
 }
 
@@ -199,10 +214,10 @@ async function runDealWorker(overrides = {}) {
   const ctx = buildContext(overrides);
   if (!isPrivateCharterDealWorkerActive(ctx.env)) return { active: false, claimed: 0 };
 
-  await ctx.store.recoverExpiredLeases(ctx.prisma, { maxClaims: MAX_CLAIMS_BEFORE_ANY_CALL });
+  await ctx.store.recoverExpiredLeases(ctx.prisma, { maxClaims: MAX_CLAIMS_BEFORE_ANY_CALL, ...(ctx.scope && { caseIds: ctx.scope.caseIds }) });
   let claimed = 0;
   for (const fromStatus of ['pending', 'ambiguous']) {
-    const ids = await ctx.store.findCandidateIds(ctx.prisma, fromStatus, BATCH_SIZE);
+    const ids = await ctx.store.findCandidateIds(ctx.prisma, fromStatus, BATCH_SIZE, ctx.scope);
     for (const id of ids) {
       const claim = await ctx.store.claim(ctx.prisma, { id, fromStatus, workerId: ctx.workerId, leaseSeconds: LEASE_SECONDS });
       if (!claim) continue;

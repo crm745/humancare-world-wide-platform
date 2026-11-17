@@ -67,6 +67,12 @@ const ACTION = {
   STATUS_CHANGED: 'status_changed',
   REQUEST_APPROVED: 'request_approved',
   CASE_CREATED: 'case_created',
+  // Bitrix Deal document sharing (Admin authorization is separate from document review) and post-Case document requests.
+  DOCUMENT_SHARE_AUTHORIZED: 'document_share_authorized',
+  DOCUMENT_SHARE_REVOKED: 'document_share_revoked',
+  DOCUMENT_SHARE_RETRIED: 'document_share_retried',
+  DOCUMENT_REQUEST_OPENED: 'document_request_opened',
+  DOCUMENT_REQUEST_FULFILLED: 'document_request_fulfilled',
 };
 
 const MAX_DOCUMENTS_PER_REQUEST = 30; // every version counts, including replaced ones

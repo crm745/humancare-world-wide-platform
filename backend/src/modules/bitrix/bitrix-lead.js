@@ -54,7 +54,7 @@ const RELATION = { father: 352, mother: 354, brother: 356, spouse: 358, friend: 
 const MORTAL_TRANSFER = { mortal_domestic: 'Within India', mortal_international: 'International' };
 const isMortal = (serviceKey) => /^mortal(_|$)/.test(serviceKey || '');
 
-const { MOBILITY_LABEL, URGENCY_LABEL, URGENCY_TO_CASE, EQUIPMENT } = require('../../common/constants/request.constants');
+const { mobilityText, URGENCY_LABEL, URGENCY_TO_CASE, EQUIPMENT } = require('../../common/constants/request.constants');
 const { careLevelText } = require('../../common/utils/care-level');
 
 // "Other" in this account's own Source list (confirmed with crm.status.list SOURCE);
@@ -137,7 +137,7 @@ function leadInputFromRequest(request, user) {
       ['Requirement', request.description],
       // Display only: a stored key reads as its English label; older text is sent as it was stored.
       ['Care level', careLevelText(request.careLevel)],
-      ['Mobility', MOBILITY_LABEL[request.mobility]],
+      ['Mobility', mobilityText(request.mobility)],
       ['On board', equipmentOnBoard(request)],
       ['Urgency', URGENCY_LABEL[request.urgency]],
       // Only when "Required Service" can't say it (no Bitrix service mapped yet).

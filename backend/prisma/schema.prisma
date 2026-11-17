@@ -535,7 +535,7 @@ model ServiceRequest {
   // The medical page of the New Request form. Mobility and the equipment flags are only set
   // for patient-transport services (null otherwise, and on requests made before the page
   // existed); urgency is null on those older requests too.
-  mobility          String?   @db.VarChar(16) // "bedridden" | "wheelchair" | "walking"
+  mobility          String?   @db.VarChar(191) // one or more of "bedridden" | "wheelchair" | "walking", joined with commas (Private Charter is multi-select)
   equipOxygen       Boolean?  @map("equip_oxygen")
   equipCardiacMonitor Boolean? @map("equip_cardiac_monitor")
   equipVentilator   Boolean?  @map("equip_ventilator")
@@ -620,6 +620,7 @@ model RequestDocument {
   // on a document the patient uploaded unprompted. Never required: an upload is valid without it.
   documentRequestId Int?     @map("document_request_id")
   documentRequest   DocumentRequest? @relation(fields: [documentRequestId], references: [id], onDelete: Restrict)
+  dealShares        BitrixDealDocument[]
 
   @@index([documentRequestId])
   @@index([serviceRequestId])
@@ -911,11 +912,54 @@ model BitrixDealLink {
   lastSyncedAt       DateTime? @map("last_synced_at")
   externalModifiedAt DateTime? @map("external_modified_at") // Bitrix's own modified time at the last sync, to ignore stale events
   lastError          String?   @db.Text @map("last_error")
+  // Per-Deal lease that serializes updates of the Deal's file field (see BitrixDealDocument).
+  fileLockedBy       String?   @db.VarChar(64) @map("file_locked_by")
+  fileLockedUntil    DateTime? @map("file_locked_until")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
+  documentShares     BitrixDealDocument[]
 
   @@index([syncStatus, lastAttemptAt])
   @@map("bitrix_deal_links")
+}
+
+// Private Charter document sharing. One row per Admin-authorized share of one HumanCare document (a request_documents row) to
+// one Bitrix24 Deal, attached as an ORIGINAL FILE in the Deal's multiple file field UF_CRM_1794832401. Admin authorization to
+// share is separate from document review. The HumanCare original is never changed or deleted by sharing or revoking; a revoked
+// share only removes the Bitrix attachment, and a re-share is a new generation. See modules/bitrix/deal-document-*.js.
+// Statuses: authorized -> attaching -> attached | ambiguous | failed; revoking -> revoked | revoke_failed.
+model BitrixDealDocument {
+  id                  Int      @id @default(autoincrement())
+  dealLinkId          Int      @map("deal_link_id")
+  dealLink            BitrixDealLink @relation(fields: [dealLinkId], references: [id], onDelete: Restrict)
+  requestDocumentId   Int      @map("request_document_id")
+  requestDocument     RequestDocument @relation(fields: [requestDocumentId], references: [id], onDelete: Restrict)
+  caseDocumentId      Int?     @map("case_document_id")
+  generation          Int      @default(1)
+  sha256              String   @db.Char(64)
+  sizeBytes           Int      @map("size_bytes")
+  detectedType        String   @db.VarChar(16) @map("detected_type") // "pdf" | "jpeg" | "png" | "webp", from the file's own bytes
+  shareToken          String   @unique @db.VarChar(64) @map("share_token")
+  status              String   @default("authorized") @db.VarChar(24)
+  bitrixFileId        String?  @db.VarChar(32) @map("bitrix_file_id")
+  fileIdsBefore       Json?    @map("file_ids_before")
+  tryCount            Int      @default(1) @map("try_count")
+  attempts            Int      @default(0)
+  lastError           String?  @db.VarChar(500) @map("last_error")
+  authorizedByAdminId Int      @map("authorized_by_admin_id")
+  authorizedAt        DateTime @default(now()) @map("authorized_at")
+  attachedAt          DateTime? @map("attached_at")
+  revokedByAdminId    Int?     @map("revoked_by_admin_id")
+  revokedAt           DateTime? @map("revoked_at")
+  revokeReason        String?  @db.VarChar(1000) @map("revoke_reason")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@unique([dealLinkId, requestDocumentId, generation], map: "bitrix_deal_documents_link_doc_gen_key")
+  @@unique([dealLinkId, bitrixFileId])
+  @@index([status])
+  @@index([requestDocumentId])
+  @@map("bitrix_deal_documents")
 }
 
 // PRIVATE CHARTER ONLY (M6). The durable record of an outbound integration event (for example "create

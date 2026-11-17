@@ -16,7 +16,7 @@ const { normalizeMobile } = require('../../common/utils/phone');
 const { isValidTimeZone, todayInTimeZone } = require('../../common/utils/local-date');
 const { readCityRef } = require('../geo/city-ref');
 const {
-  MOBILITY, URGENCY, EQUIPMENT, GENDERS, CARE_LEVEL_KEYS, CARE_LEVEL_LEGACY_LABELS,
+  MOBILITY, URGENCY, EQUIPMENT, GENDERS, CARE_LEVEL_KEYS, CARE_LEVEL_EXCLUSIVE, CARE_LEVEL_LEGACY_LABELS,
   PRIVATE_CHARTER_KEY, PRIVATE_CHARTER_SERVICE_TYPE,
 } = require('../../common/constants/request.constants');
 
@@ -192,9 +192,10 @@ function validatePrivateCharterRequest(body, { now = Date.now(), cities = {} } =
     data.preferredDate = body.preferredDate;
   }
 
-  // --- Care level: EXACTLY ONE key (single-select). The wire format is unchanged: a list holding the one key.
-  //     Several values are refused, never reduced to the first one. Recognised translated labels are still
-  //     accepted during the compatibility period (older builds send one label as a string).
+  // --- Care level: one or more keys (multi-select); "care_na" (Not Applicable) can only be chosen on its own. The wire format
+  //     is a list of keys; it is stored as the keys joined with commas, in the fixed order of CARE_LEVEL_KEYS. A repeated key is
+  //     refused, never silently collapsed. Recognised translated labels are still accepted during the compatibility period
+  //     (older builds send the label(s) as one string joined with ", ").
   if (missing(body.careLevel) || body.careLevel === '' || (Array.isArray(body.careLevel) && !body.careLevel.length)) {
     fail('careLevel', 'Select a care level.');
   } else {
@@ -211,9 +212,10 @@ function validatePrivateCharterRequest(body, { now = Date.now(), cities = {} } =
       else { valid = false; break; }
     }
     if (!valid) fail('careLevel', `Care level must be one of: ${CARE_LEVEL_KEYS.join(', ')}.`);
-    else if (keys.length !== 1) fail('careLevel', 'Select only one care level.');
+    else if (new Set(keys).size !== keys.length) fail('careLevel', 'Each care level can be selected only once.');
+    else if (keys.length > 1 && keys.includes(CARE_LEVEL_EXCLUSIVE)) fail('careLevel', 'Not Applicable cannot be combined with another care level.');
     else {
-      data.careLevel = keys.join(',');
+      data.careLevel = CARE_LEVEL_KEYS.filter((key) => keys.includes(key)).join(',');
       if (usedLabel || typeof body.careLevel === 'string') legacy.push('careLevel');
     }
   }
@@ -230,9 +232,13 @@ function validatePrivateCharterRequest(body, { now = Date.now(), cities = {} } =
   }
 
   // --- Mobility, urgency ---------------------------------------------------------------
-  if (missing(body.mobility) || body.mobility === '') fail('mobility', 'Mobility is required.');
-  else if (typeof body.mobility === 'string' && MOBILITY.includes(body.mobility)) data.mobility = body.mobility;
-  else fail('mobility', `Mobility must be one of: ${MOBILITY.join(', ')}.`);
+  // Mobility: one or more of the allowed keys (a list, or one string as older builds send). Stored joined with commas, in the
+  // fixed order of MOBILITY. At least one is required; a repeated key is refused.
+  const mobilityItems = Array.isArray(body.mobility) ? body.mobility : typeof body.mobility === 'string' && body.mobility !== '' ? [body.mobility] : null;
+  if (missing(body.mobility) || body.mobility === '' || (Array.isArray(body.mobility) && !body.mobility.length)) fail('mobility', 'Mobility is required.');
+  else if (!mobilityItems || mobilityItems.some((item) => typeof item !== 'string' || !MOBILITY.includes(item))) fail('mobility', `Mobility must be one of: ${MOBILITY.join(', ')}.`);
+  else if (new Set(mobilityItems).size !== mobilityItems.length) fail('mobility', 'Each mobility option can be selected only once.');
+  else data.mobility = MOBILITY.filter((key) => mobilityItems.includes(key)).join(',');
 
   if (missing(body.urgency) || body.urgency === '') fail('urgency', 'Urgency is required.');
   else if (typeof body.urgency === 'string' && URGENCY.includes(body.urgency)) data.urgency = body.urgency;

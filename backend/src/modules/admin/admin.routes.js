@@ -47,6 +47,7 @@ const {
 } = require('../request-review/request-review.controller');
 
 const { postDealRecovery } = require('../bitrix/deal-recovery.controller');
+const { getShares, postShare, postRevokeShare, postRetryShare, postDocumentRequest } = require('../bitrix/deal-document.controller');
 
 const adminRouter = Router();
 
@@ -106,6 +107,14 @@ adminRouter.get('/requests/:id/documents/:docId/file', downloadDocument);
 adminRouter.post('/requests/:id/documents/:docId/review', postDocumentReview);
 adminRouter.post('/requests/:id/request-documents', postRequestDocuments);
 adminRouter.post('/requests/:id/approve', postApproval);
+// Sharing documents with the Bitrix24 Deal. Reviewing a document never shares it: an Admin authorizes each document explicitly.
+// Any Admin may authorize, revoke or retry (there is no separate permission, as for document review).
+adminRouter.get('/requests/:id/shares', getShares);
+adminRouter.post('/requests/:id/documents/:docId/share', postShare);
+adminRouter.post('/requests/:id/shares/:shareId/revoke', postRevokeShare);
+adminRouter.post('/requests/:id/shares/:shareId/retry', postRetryShare);
+// Ask the patient for more documents after the approval (a document request on the Case).
+adminRouter.post('/requests/:id/document-requests', postDocumentRequest);
 
 adminRouter.get('/cases', getCases);
 adminRouter.get('/cases/:id', getCase);

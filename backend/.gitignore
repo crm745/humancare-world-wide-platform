@@ -6,6 +6,9 @@ node_modules
 # Present only while a manual integration session uses humancare_test: tests/global-setup.js refuses to run
 /.integration-session.lock
 
+# Backups, snapshots and reports of scoped test runs (a backup holds a copy of the test database)
+/.scoped-runs/
+
 /src/generated/prisma
 
 # Test-only folders (isolated uploads and captured mail; mail holds one-time tokens)

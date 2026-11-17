@@ -453,17 +453,34 @@ describe('Private Charter: care level', () => {
   it.each([
     ['unknown key', ['care_vip']], ['empty array', []], ['an empty string', ''], ['duplicate keys', ['care_icu', 'care_icu']],
     ['care_na with another', ['care_na', 'care_icu']], ['another with care_na', ['care_stable', 'care_na']],
-    ['two different keys', ['care_icu', 'care_stable']], ['three keys', ['care_icu', 'care_stable', 'care_ambulatory']],
+    ['care_na among several', ['care_icu', 'care_na', 'care_stable']], ['a known and an unknown key', ['care_icu', 'care_vip']],
     ['a number in the list', ['care_icu', 3]], ['an object', { care_icu: true }], ['a number', 1], ['a boolean', true],
     ['a key among the legacy labels', 'care_icu'], ['an unknown label', 'Intensive'], ['a label and an unknown label', 'ICU / Critical, Intensive'],
   ])('refuses %s', async (_label, value) => {
     await expectRefused({ ...valid(), careLevel: value }, 'careLevel');
   });
 
-  it('refuses several keys with a clear message and does not keep the first one', () => {
-    const { data, fields } = validate({ ...valid(), careLevel: ['care_icu', 'care_stable'] });
-    expect(fields.careLevel).toBe('Select only one care level.');
-    expect(data.careLevel).toBeUndefined();
+  it.each([
+    [['care_icu', 'care_stable'], 'care_icu,care_stable'],
+    [['care_stable', 'care_icu'], 'care_icu,care_stable'], // stored in the fixed order, whatever order was sent
+    [['care_icu', 'care_stable', 'care_ambulatory'], 'care_icu,care_stable,care_ambulatory'],
+    [['care_ambulatory', 'care_icu'], 'care_icu,care_ambulatory'],
+  ])('accepts several care levels %j and stores them joined with commas: %s', (value, stored) => {
+    const { data, fields } = validate({ ...valid(), careLevel: value });
+    expect(fields.careLevel).toBeUndefined();
+    expect(data.careLevel).toBe(stored);
+  });
+
+  it('Not Applicable is exclusive, with a clear message, and nothing is kept', () => {
+    for (const value of [['care_na', 'care_icu'], ['care_icu', 'care_na'], ['care_icu', 'care_na', 'care_stable']]) {
+      const { data, fields } = validate({ ...valid(), careLevel: value });
+      expect(fields.careLevel).toBe('Not Applicable cannot be combined with another care level.');
+      expect(data.careLevel).toBeUndefined();
+    }
+  });
+
+  it('a repeated care level is refused with its own message', () => {
+    expect(validate({ ...valid(), careLevel: ['care_icu', 'care_icu'] }).fields.careLevel).toBe('Each care level can be selected only once.');
   });
 
   it.each(['care_icu', 'care_stable', 'care_ambulatory', 'care_na'])('accepts the single key %s and stores it as it is', (key) => {
@@ -485,12 +502,19 @@ describe('Private Charter: care level', () => {
         expect(legacy).toContain('careLevel');
       }
     }
-    expect(validate({ ...valid(), careLevel: 'ICU / गंभीर, स्थिर / निगरानी में' }).fields.careLevel).toBe('Select only one care level.');
   });
 
-  it('refuses several legacy labels as well (joined, duplicated or with Not Applicable)', () => {
-    expect(validate({ ...valid(), careLevel: 'Not Applicable, ICU / Critical' }).fields.careLevel).toBe('Select only one care level.');
-    expect(validate({ ...valid(), careLevel: 'ICU / Critical, ICU / गंभीर' }).fields.careLevel).toBeDefined();
+  it('accepts several legacy labels joined in one string (the multi-select), stored as keys in the fixed order', () => {
+    const { data, fields, legacy } = validate({ ...valid(), careLevel: 'ICU / गंभीर, स्थिर / निगरानी में' });
+    expect(fields.careLevel).toBeUndefined();
+    expect(data.careLevel).toBe('care_icu,care_stable');
+    expect(legacy).toContain('careLevel');
+    expect(validate({ ...valid(), careLevel: 'Stable / Monitored, ICU / Critical' }).data.careLevel).toBe('care_icu,care_stable');
+  });
+
+  it('still refuses legacy labels that repeat a level or combine Not Applicable with another', () => {
+    expect(validate({ ...valid(), careLevel: 'Not Applicable, ICU / Critical' }).fields.careLevel).toBe('Not Applicable cannot be combined with another care level.');
+    expect(validate({ ...valid(), careLevel: 'ICU / Critical, ICU / गंभीर' }).fields.careLevel).toBe('Each care level can be selected only once.');
   });
 
   it('covers every care_* label of every language in the mobile app', () => {
@@ -536,13 +560,38 @@ describe('Private Charter: medical description', () => {
 });
 
 describe('Private Charter: mobility, urgency and equipment', () => {
-  it.each([['mobility', 'crawling'], ['mobility', 'Walking'], ['mobility', ['walking']], ['mobility', 1],
+  it.each([['mobility', 'crawling'], ['mobility', 'Walking'], ['mobility', 1], ['mobility', true], ['mobility', {}], ['mobility', []], ['mobility', ''],
+    ['mobility', ['walking', 'crawling']], ['mobility', ['walking', 'walking']], ['mobility', ['walking', 1]], ['mobility', ['Walking']], ['mobility', ['walking,wheelchair']],
     ['urgency', 'urgent'], ['urgency', 'critical'], ['urgency', 'routine'], ['urgency', 'URGENT_24H'], ['urgency', ['planned']]])(
     'refuses %s = %j', async (field, value) => { await expectRefused({ ...valid(), [field]: value }, field); },
   );
 
-  it.each(['bedridden', 'wheelchair', 'walking'])('accepts mobility %s', (mobility) => {
+  it.each(['bedridden', 'wheelchair', 'walking'])('accepts mobility %s (one string, as older app builds send it)', (mobility) => {
     expect(validate({ ...valid(), mobility }).data.mobility).toBe(mobility);
+  });
+
+  it.each([
+    [['walking'], 'walking'],
+    [['bedridden', 'wheelchair'], 'bedridden,wheelchair'],
+    [['walking', 'bedridden'], 'bedridden,walking'], // fixed order, whatever order was sent
+    [['bedridden', 'wheelchair', 'walking'], 'bedridden,wheelchair,walking'],
+  ])('accepts several mobility options %j and stores them joined with commas: %s', (mobility, stored) => {
+    const { data, fields } = validate({ ...valid(), mobility });
+    expect(fields.mobility).toBeUndefined();
+    expect(data.mobility).toBe(stored);
+  });
+
+  it('at least one mobility option is required, a repeated one is refused with its own message, and an unknown one names the allowed values', () => {
+    expect(validate({ ...valid(), mobility: [] }).fields.mobility).toBe('Mobility is required.');
+    expect(validate({ ...valid(), mobility: undefined }).fields.mobility).toBe('Mobility is required.');
+    expect(validate({ ...valid(), mobility: ['walking', 'walking'] }).fields.mobility).toBe('Each mobility option can be selected only once.');
+    expect(validate({ ...valid(), mobility: ['walking', 'flying'] }).fields.mobility).toBe('Mobility must be one of: bedridden, wheelchair, walking.');
+  });
+
+  it('the longest stored mobility value fits the widened column (VARCHAR(191)) and not the old one (16)', () => {
+    const stored = validate({ ...valid(), mobility: ['bedridden', 'wheelchair', 'walking'] }).data.mobility;
+    expect(stored.length).toBeGreaterThan(16);
+    expect(stored.length).toBeLessThanOrEqual(191);
   });
 
   it.each(['critical_6h', 'urgent_24h', 'planned'])('keeps urgency %s as it is', (urgency) => {

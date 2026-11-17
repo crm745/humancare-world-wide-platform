@@ -9,8 +9,11 @@ const { deliverOtp } = require('../src/modules/auth/otp-delivery.service');
 function uniqueMobile() {
   return `9${Date.now().toString().slice(-6)}${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`;
 }
+// In a SCOPED run (jest.scoped.config.js) the run id is part of every address, which is how the run's own rows are told apart
+// from every other row of the shared test database and removed afterwards. Without it the address is exactly as before.
 function uniqueEmail(tag = 'test') {
-  return `${tag}-${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.com`;
+  const run = process.env.HC_SCOPED_RUN_ID ? `${process.env.HC_SCOPED_RUN_ID}-` : '';
+  return `${tag}-${run}${Date.now()}-${Math.floor(Math.random() * 1e6)}@example.com`;
 }
 
 function codeSentTo(identifier) {

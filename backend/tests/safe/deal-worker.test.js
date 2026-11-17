@@ -88,7 +88,7 @@ function makePrisma() {
 const goodCase = () => ({
   id: 7, referenceNumber: REF, serviceRequestId: 3, patientName: 'Asha Rao',
   serviceRequest: {
-    id: 3, serviceKey: 'privatecharter', reviewStatus: 'in_review', bitrixLeadId: null, patientName: 'Asha Rao', patientContact: '+971501234567',
+    id: 3, serviceKey: 'privatecharter', reviewStatus: 'approved', bitrixLeadId: null, patientName: 'Asha Rao', patientContact: '+971501234567',
     preferredDate: new Date('2030-03-05T00:00:00Z'), careLevel: 'care_icu', mobility: 'walking', equipCardiacMonitor: false, urgency: 'planned',
   },
 });
@@ -142,6 +142,49 @@ describe('the switches', () => {
   test('a problem while writing alerts never stops the pass', async () => {
     reportFailures.mockRejectedValue(new Error('db down'));
     await expect(run()).resolves.toEqual({ active: true, claimed: 1 });
+    expect(events[0].status).toBe('completed');
+  });
+});
+
+// ---- approved requests only ---------------------------------------------------------------------------------------
+describe('only approved requests can create a Deal', () => {
+  test.each(['awaiting_documents', 'in_review', 'changes_requested'])('a new event for a %s request is not sent, written or marked: no Deal is created', async (reviewStatus) => {
+    caseRow.serviceRequest.reviewStatus = reviewStatus;
+    expect(await run()).toEqual({ active: true, claimed: 1 });
+    expect(api.createDeal).not.toHaveBeenCalled();
+    expect(api.findDealsByReference).not.toHaveBeenCalled();
+    expect(store.markExternalCallStarted).not.toHaveBeenCalled();
+    expect(store.writeResult).not.toHaveBeenCalled(); // not failed either: it can still be sent once the request is approved
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(linkRow).toMatchObject({ bitrixDealId: null, syncStatus: 'pending' });
+    expect(events[0].callStartedAt).toBeNull();
+    expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/not approved; no Deal is created/));
+  });
+
+  test('the same event is sent as usual once its request is approved', async () => {
+    caseRow.serviceRequest.reviewStatus = 'in_review';
+    await run();
+    expect(api.createDeal).not.toHaveBeenCalled();
+    clock += LEASE_SECONDS + 1; // the unused lease runs out and the event returns to pending
+    caseRow.serviceRequest.reviewStatus = 'approved';
+    await run();
+    expect(api.createDeal).toHaveBeenCalledTimes(1);
+    expect(events[0].status).toBe('completed');
+  });
+
+  test('an ambiguous event (a call may have been made) is still reconciled, whatever the request state: never a second crm.deal.add', async () => {
+    caseRow.serviceRequest.reviewStatus = 'in_review';
+    events[0] = newEvent({ status: 'ambiguous', callStartedAt: 900, attempts: 1 });
+    await run();
+    expect(api.findDealsByReference).toHaveBeenCalledWith(REF, { env: ENV_ON });
+    expect(api.createDeal).not.toHaveBeenCalled();
+  });
+
+  test('a Case that already has its Deal ID is simply completed, as before', async () => {
+    caseRow.serviceRequest.reviewStatus = 'in_review';
+    linkRow = { ...linkRow, bitrixDealId: '4340', stageId: 'C38:NEW' };
+    await run();
+    expect(api.createDeal).not.toHaveBeenCalled();
     expect(events[0].status).toBe('completed');
   });
 });
@@ -218,9 +261,9 @@ describe('a definitive Bitrix failure', () => {
 
 describe('a Case that cannot be mapped', () => {
   test('is refused before any marker or call', async () => {
-    caseRow.serviceRequest.careLevel = 'care_icu,care_stable';
+    caseRow.serviceRequest.careLevel = 'care_icu,care_na';
     await run();
-    expect(events[0]).toMatchObject({ status: 'failed', lastError: 'mapping:care_level_not_single' });
+    expect(events[0]).toMatchObject({ status: 'failed', lastError: 'mapping:care_level_na_combined' });
     expect(events[0].callStartedAt).toBeNull();
     expect(api.createDeal).not.toHaveBeenCalled();
   });
@@ -457,6 +500,7 @@ describe('the SQL of the real store', () => {
     expect(sql).toContain('JOIN service_requests sr ON sr.id = c.service_request_id');
     expect(sql).toContain('sr.service_key = ?');
     expect(sql).toContain('sr.review_status IS NOT NULL');
+    expect(sql).toContain("(o.status <> 'pending' OR sr.review_status = 'approved')"); // a NEW event is offered only for an approved request
     expect(sql).toContain('sr.bitrix_lead_id IS NULL');
     expect(sql).toContain('o.next_attempt_at <= UTC_TIMESTAMP(3)');
     expect(sql).toContain('NOT LIKE');

@@ -1,5 +1,5 @@
 const PDFDocument = require('pdfkit');
-const { MOBILITY_LABEL, URGENCY_LABEL, EQUIPMENT } = require('../../common/constants/request.constants');
+const { mobilityText, URGENCY_LABEL, EQUIPMENT } = require('../../common/constants/request.constants');
 const { careLevelText } = require('../../common/utils/care-level');
 
 // A date-only value (a preferred date, a date of death) is stored as that calendar day at 00:00 UTC.
@@ -53,7 +53,7 @@ function streamRequestSummaryPdf(res, request) {
   // Keys read as English labels; so do the older translated labels, which the PDF's built-in font
   // cannot draw (Hindi, Marathi, Gujarati, Telugu and Arabic printed as garbage or not at all).
   row(doc, 'Care level:', careLevelText(request.careLevel, { translateLegacy: true }));
-  row(doc, 'Patient mobility:', MOBILITY_LABEL[request.mobility]);
+  row(doc, 'Patient mobility:', mobilityText(request.mobility));
   row(doc, 'Required on board:', EQUIPMENT.filter(([field]) => request[field] === true).map(([, label]) => label).join(', '));
 
   const stageEvents = request.case && request.case.stageEvents;

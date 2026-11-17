@@ -10,8 +10,8 @@
 //
 // Nothing here logs or returns the webhook URL, a token, a phone number or patient data: errors carry a short
 // code and, for Bitrix API errors, Bitrix's own error code and a sanitised, truncated description.
-const { isPrivateCharterDealEnabled } = require('./bitrix-config');
-const { DEAL, FIELD } = require('./bitrix-deal');
+const { isPrivateCharterDealEnabled, bitrixHostProblem } = require('./bitrix-config');
+const { DEAL, FIELD, DOCUMENTS_FIELD } = require('./bitrix-deal');
 
 const REQUEST_TIMEOUT_MS = 15000; // same policy as bitrix.service.js
 const MAX_DETAIL = 200;
@@ -38,6 +38,9 @@ async function post(method, payload, { env = process.env, fetchImpl = (...args) 
   if (!isPrivateCharterDealEnabled(env)) throw new BitrixDealCallError('definitive', 'switch_off', 'a Bitrix switch is off');
   const base = env.BITRIX24_WEBHOOK_URL;
   if (!base) throw new BitrixDealCallError('definitive', 'webhook_not_configured');
+  // Before ANY request leaves this server: the webhook's host must be the allowed portal (see bitrix-config.js).
+  const hostProblem = bitrixHostProblem(env, base);
+  if (hostProblem) throw new BitrixDealCallError('definitive', 'host_not_allowed', hostProblem);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -147,4 +150,83 @@ async function getDeal(dealId, options) {
   }
 }
 
-module.exports = { createDeal, findDealsByReference, getDeal, BitrixDealCallError, exactDealId, REQUEST_TIMEOUT_MS };
+// ---- the Deal's Documents file field (UF_CRM_1794832401, multiple) ------------------------------------------------------------
+// The field value as exact file ids. A multiple file field is a list of file objects ({ id, ... }); with no files it may be missing,
+// empty, false or null. Any other shape is NOT guessed at (null = unreadable), so an update is never built on a misread list.
+function fileIdsOf(value) {
+  if (value === undefined || value === null || value === false || value === '') return [];
+  if (!Array.isArray(value)) return null;
+  const ids = [];
+  for (const entry of value) {
+    const id = exactDealId(entry && typeof entry === 'object' ? entry.id : entry);
+    if (id === null) return null;
+    ids.push(id);
+  }
+  return ids;
+}
+
+// The Documents field is read and written through the UNIVERSAL CRM methods (crm.item.get / crm.item.update, entityTypeId 2 = Deal), not
+// the legacy crm.deal.update: the legacy method is deprecated, Bitrix does not recommend it for file fields, and a legacy update that
+// listed the existing file as { id: "65608" } replaced the whole field with only the new file (verified against the live portal).
+// What was verified against the portal (read-only): the field is type "file", multiple, its original name is UF_CRM_1794832401 and its
+// camelCase key is ufCrm_1794832401; crm.item.get returns the existing files as objects with a NUMERIC id.
+//   * READ  uses useOriginalUfNames "Y": the Deal comes back with the original UF_CRM_ names (the spelling used everywhere else here).
+//   * WRITE uses useOriginalUfNames "N" and the verified camelCase key. A retained file is { id: <number> }, a new file is the documented
+//     pair [name, base64]; a file whose id is left out of the list is deleted by Bitrix without warning, so every file to keep is listed.
+const DEAL_ENTITY_TYPE_ID = 2;
+const DOCUMENTS_ITEM_KEY = 'ufCrm_1794832401'; // DOCUMENTS_FIELD in camelCase, as crm.item.fields reports it
+
+// Reads the ids of the files on a Deal's Documents field (crm.item.get). Resolves { status, ids } ("ok" with the exact ids, in Bitrix's
+// order), "not_found", or "uncertain" (switch off, timeout, error, a different Deal, an unreadable shape): try again later.
+async function getDealFiles(dealId, options) {
+  if (!/^[1-9]\d*$/.test(String(dealId)) || !Number.isSafeInteger(Number(dealId))) return { status: 'uncertain', reason: 'deal_id_invalid' };
+  let data;
+  try {
+    data = await post('crm.item.get', { entityTypeId: DEAL_ENTITY_TYPE_ID, id: Number(dealId), useOriginalUfNames: 'Y' }, options);
+  } catch (err) {
+    if (err instanceof BitrixDealCallError && err.outcome === 'definitive' && /NOT_FOUND/i.test(err.message)) return { status: 'not_found' };
+    return { status: 'uncertain', reason: (err && err.code) || 'lookup_failed' };
+  }
+  const item = data.result && typeof data.result === 'object' && !Array.isArray(data.result) ? data.result.item : null;
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return { status: 'uncertain', reason: 'unexpected_shape' };
+  if (String(item.id) !== String(dealId)) return { status: 'uncertain', reason: 'wrong_deal' };
+  const ids = fileIdsOf(item[DOCUMENTS_FIELD]);
+  if (ids === null) return { status: 'uncertain', reason: 'unexpected_files_shape' };
+  return { status: 'ok', ids };
+}
+
+// Sets the Deal's Documents field to `entries` (crm.item.update): { id } to KEEP a file that is already there (sent as { id: <number> }),
+// { fileData: [name, base64] } to add one (sent as the pair [name, base64]). Bitrix sets the whole list, so the caller must always send
+// every file it wants to keep. Resolves { ok: true }; rejects with BitrixDealCallError (definitive: Bitrix refused, nothing changed;
+// ambiguous: the update may have been applied, including an answer that does not look like the documented one).
+// An empty list is sent only with allowEmpty (the caller has proved the field held nothing else).
+async function updateDealFiles(dealId, entries, options = {}) {
+  if (!/^[1-9]\d*$/.test(String(dealId)) || !Number.isSafeInteger(Number(dealId))) throw new BitrixDealCallError('definitive', 'deal_id_invalid');
+  if (!Array.isArray(entries) || (entries.length === 0 && !options.allowEmpty)) throw new BitrixDealCallError('definitive', 'file_list_invalid');
+  const kept = new Set();
+  const list = entries.map((entry) => {
+    const keepId = entry && typeof entry === 'object' && entry.fileData === undefined ? exactDealId(entry.id) : null;
+    if (keepId !== null && Number.isSafeInteger(Number(keepId))) {
+      if (kept.has(keepId)) throw new BitrixDealCallError('definitive', 'file_entry_duplicate');
+      kept.add(keepId);
+      return { id: Number(keepId) };
+    }
+    const add = entry && typeof entry === 'object' && entry.id === undefined && Array.isArray(entry.fileData) && entry.fileData.length === 2
+      && typeof entry.fileData[0] === 'string' && entry.fileData[0] !== '' && typeof entry.fileData[1] === 'string' && entry.fileData[1] !== '';
+    if (!add) throw new BitrixDealCallError('definitive', 'file_entry_invalid');
+    return [entry.fileData[0], entry.fileData[1]];
+  });
+  const { allowEmpty, ...callOptions } = options; // eslint-disable-line no-unused-vars
+  const data = await post('crm.item.update', {
+    entityTypeId: DEAL_ENTITY_TYPE_ID, id: Number(dealId), useOriginalUfNames: 'N', fields: { [DOCUMENTS_ITEM_KEY]: list },
+  }, callOptions);
+  // The documented answer is { result: { item: {...} } } for this Deal. Anything else may still have been applied: never a failure.
+  const item = data.result && typeof data.result === 'object' && !Array.isArray(data.result) ? data.result.item : null;
+  if (!item || typeof item !== 'object' || String(item.id) !== String(dealId)) throw new BitrixDealCallError('ambiguous', 'unexpected_result');
+  return { ok: true };
+}
+
+module.exports = {
+  createDeal, findDealsByReference, getDeal, getDealFiles, updateDealFiles, fileIdsOf, BitrixDealCallError, exactDealId, REQUEST_TIMEOUT_MS,
+  DEAL_ENTITY_TYPE_ID, DOCUMENTS_ITEM_KEY,
+};

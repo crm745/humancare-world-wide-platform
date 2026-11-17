@@ -38,9 +38,42 @@ function isPrivateCharterDealWorkerActive(env = process.env) {
   return isPrivateCharterDealEnabled(env) && env.PRIVATE_CHARTER_REVIEW_WORKFLOW === 'true';
 }
 
+// ---- which Bitrix24 portal may be contacted ----------------------------------------------------------------------------
+// BITRIX_ALLOWED_PORTAL_HOST is a bare host name (no scheme, path or wildcard), for example "sandbox.example.bitrix24.in".
+// The host of BITRIX24_WEBHOOK_URL must equal it EXACTLY, or nothing is sent. In a test environment (NODE_ENV=test) the
+// allowlist is REQUIRED: .env.test may hold the live portal's webhook, so a test process can only reach Bitrix24 after
+// someone has named the host on purpose. Outside tests it is optional (unset = no restriction, as before). Codes only,
+// never the host value, so nothing sensitive reaches a log.
+const HOST_NAME = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/;
+
+function webhookHost(webhookUrl) {
+  try {
+    const url = new URL(String(webhookUrl));
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    return url.hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+// null when the webhook host may be used, otherwise a short reason code.
+function bitrixHostProblem(env = process.env, webhookUrl = env.BITRIX24_WEBHOOK_URL) {
+  const host = webhookHost(webhookUrl);
+  if (!host) return 'webhook_host_invalid';
+  const allowed = String(env.BITRIX_ALLOWED_PORTAL_HOST || '').trim().toLowerCase();
+  if (!allowed) return env.NODE_ENV === 'test' ? 'allowlist_required_in_test' : null;
+  if (!HOST_NAME.test(allowed)) return 'allowlist_invalid';
+  return host === allowed ? null : 'host_not_allowed';
+}
+
 // The reasons the current settings cannot be used (empty when they can).
 function bitrixConfigurationProblems(env = process.env) {
   const problems = [];
+  // A configured webhook that is not on the allowlist is refused at start-up when any Bitrix switch is on.
+  if ((isBitrixSyncEnabled(env) || isPrivateCharterDealRequested(env)) && env.BITRIX24_WEBHOOK_URL) {
+    const hostProblem = bitrixHostProblem(env);
+    if (hostProblem) problems.push(`The Bitrix24 webhook host is not allowed (${hostProblem}); set BITRIX_ALLOWED_PORTAL_HOST to the portal that may be contacted.`);
+  }
   if (isPrivateCharterDealRequested(env)) {
     if (!isBitrixSyncEnabled(env)) {
       problems.push('BITRIX_PRIVATE_CHARTER_DEAL_ENABLED=true needs BITRIX_SYNC_ENABLED=true.');
@@ -66,4 +99,6 @@ module.exports = {
   isPrivateCharterDealWorkerActive,
   bitrixConfigurationProblems,
   assertBitrixConfiguration,
+  webhookHost,
+  bitrixHostProblem,
 };

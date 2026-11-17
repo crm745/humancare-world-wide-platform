@@ -156,7 +156,14 @@ async function getRequestForUser(userId, id) {
   const request = await prisma.serviceRequest.findFirst({
     where: { id: Number(id), userId },
     include: {
-      case: { include: { stageEvents: { orderBy: { occurredAt: 'asc' } }, documents: { select: SAFE_DOCUMENT_SELECT } } },
+      case: {
+        include: {
+          stageEvents: { orderBy: { occurredAt: 'asc' } },
+          documents: { select: SAFE_DOCUMENT_SELECT },
+          // What an Admin has asked the patient for after the approval (safe fields only).
+          documentRequests: { where: { status: 'open' }, select: { id: true, description: true, reason: true, createdAt: true }, orderBy: { id: 'asc' } },
+        },
+      },
       // Empty for every request made before the review workflow; never exposes stored file names.
       requestDocuments: { select: PATIENT_DOCUMENT_SELECT, orderBy: { id: 'asc' } },
     },

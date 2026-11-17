@@ -36,6 +36,16 @@ function assertDealEligible(caseRecord, request) {
   if (problem) throw new Error(`Bitrix Deal creation not recorded: ${problem}.`);
 }
 
+// Creating a Deal is allowed only for an APPROVED request (the Admin approval is what opens the Case and the Deal).
+// assertDealEligible stays the looser check (it is also used for Deals that already exist: inbound stage sync,
+// reconciliation, recovery), so a linked Deal of an older, unapproved request keeps working.
+function assertDealCreationAllowed(caseRecord, request) {
+  assertDealEligible(caseRecord, request);
+  if (request.reviewStatus !== 'approved') {
+    throw new Error('Bitrix Deal creation not recorded: only approved requests get a Deal.');
+  }
+}
+
 // `tx` is the caller's transaction. Returns the two rows it wrote.
 async function enqueueDealCreation(tx, caseRecord, request) {
   assertDealEligible(caseRecord, request);
@@ -55,4 +65,37 @@ async function enqueueDealCreation(tx, caseRecord, request) {
   return { link, event };
 }
 
-module.exports = { enqueueDealCreation, assertDealEligible, dealCreateIdempotencyKey, dealRecoveryIdempotencyKey, DEAL_CREATE_EVENT, DEAL_ENTITY_TYPE };
+// Idempotent version used by the Admin approval, inside the approval's transaction. It writes only what is MISSING:
+// the Deal link (unique per Case) and the "bitrix.deal.create" event (unique key per Case). A Case that already has
+// its link and event (an older one, or a repeated call) gets nothing new, and a Case whose link already holds a Deal
+// ID never gets another event. An existing event is never reset or recreated, whatever its status (a failed or
+// ambiguous one is a person's decision, see deal-recovery.service.js).
+async function ensureDealCreation(tx, caseRecord, request) {
+  assertDealCreationAllowed(caseRecord, request);
+  let link = await tx.bitrixDealLink.findUnique({ where: { caseId: caseRecord.id } });
+  let linkCreated = false;
+  if (!link) {
+    link = await tx.bitrixDealLink.create({ data: { caseId: caseRecord.id, syncStatus: 'pending' } });
+    linkCreated = true;
+  }
+  let event = await tx.integrationOutbox.findUnique({ where: { idempotencyKey: dealCreateIdempotencyKey(caseRecord.id) } });
+  let eventCreated = false;
+  if (!event && !link.bitrixDealId) {
+    event = await tx.integrationOutbox.create({
+      data: {
+        eventType: DEAL_CREATE_EVENT,
+        entityType: DEAL_ENTITY_TYPE,
+        entityId: String(caseRecord.id),
+        caseId: caseRecord.id,
+        idempotencyKey: dealCreateIdempotencyKey(caseRecord.id),
+        payload: { caseId: caseRecord.id, serviceRequestId: request.id },
+        status: 'pending',
+        nextAttemptAt: new Date(),
+      },
+    });
+    eventCreated = true;
+  }
+  return { link, event, linkCreated, eventCreated };
+}
+
+module.exports = { enqueueDealCreation, ensureDealCreation, assertDealCreationAllowed, assertDealEligible, dealCreateIdempotencyKey, dealRecoveryIdempotencyKey, DEAL_CREATE_EVENT, DEAL_ENTITY_TYPE };

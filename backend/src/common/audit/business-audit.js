@@ -18,6 +18,7 @@ const ALLOWED_DATA_KEYS = new Set([
   'charterStage', 'previousCharterStage', 'stageVersion', 'status', 'previousStatus', 'reviewStatus', 'bitrixDealId',
   'bitrixStageId', 'inboxEventId', // inbound Deal-stage synchronization
   'eventId', 'newEventId', // integration_outbox ids (Deal failure alerts and manual recovery)
+  'shareId', 'requestDocumentId', 'documentRequestId', 'bitrixFileId', // Bitrix Deal document sharing (identifiers only)
 ]);
 const MAX_TEXT = 200;
 const CODE = /^[a-z0-9_.:-]{1,64}$/;

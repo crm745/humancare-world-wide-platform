@@ -17,12 +17,13 @@ const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
 const { URGENCY_TO_CASE } = require('../../common/constants/request.constants');
 const clamav = require('../../integrations/clamav/clamav');
 const { requestRecordData } = require('../requests/request-record');
-const { enqueueDealCreation } = require('../bitrix/deal-outbox');
+const { ensureDealCreation } = require('../bitrix/deal-outbox');
 const { appendAuditLog } = require('../../common/audit/business-audit');
+const { SHARE_SELECT } = require('../bitrix/deal-document.service');
 const {
   REQUEST_STATUS, REQUEST_STATUSES, SCAN, REVIEW, ACTION, MAX_DOCUMENTS_PER_REQUEST, REASON_MIN, REASON_MAX, SCAN_RETRY, scanBackoffMs, isStorageErrorCode,
 } = require('./request-review.config');
-const { httpError, hashFile, storedPath, fileProblem, readVerifiedFile, cleanOriginalName } = require('./request-review.files');
+const { httpError, hashFile, storedPath, fileProblem, readVerifiedFile, cleanOriginalName, STATUS_BY_PROBLEM } = require('./request-review.files');
 
 const QUARANTINE_DIR = path.join(UPLOAD_DIR, 'quarantine');
 
@@ -62,12 +63,12 @@ function numericId(value, label) {
 
 // ---- creating the request ---------------------------------------------------------------------
 
-// Opens the operational Case of a request, inside the caller's transaction `tx` (only the submission,
-// createReviewRequest, calls it). The Case gets its permanent CASE- reference, status "submitted", the Private
+// Opens the operational Case of a request, inside the caller's transaction `tx` (only the Admin approval,
+// approveRequest, calls it: a submission creates the request alone). The Case gets its permanent CASE- reference, status "submitted", the Private
 // Charter stage "patient_details" with stageVersion 0, its first stage event and its first audit entry (the M3
 // audit_logs row: identifiers only, never patient details). The Case's serviceRequestId is unique, so a second Case
 // for the same request is refused by the database.
-async function createCaseForRequest(tx, request, { actorType, actorId, note }) {
+async function createCaseForRequest(tx, request, { actorType, actorId, note, source = 'mobile_app', reasonCode = 'automatic_case_creation' }) {
   const created = await tx.case.create({
     data: {
       serviceRequestId: request.id,
@@ -98,7 +99,7 @@ async function createCaseForRequest(tx, request, { actorType, actorId, note }) {
   });
   await appendAuditLog(tx, {
     caseId: caseRecord.id, entityType: 'case', entityId: caseRecord.id, action: 'case.created',
-    actorType, actorId, source: 'mobile_app', reasonCode: 'automatic_case_creation',
+    actorType, actorId, source, reasonCode,
     afterData: {
       caseId: caseRecord.id, caseReference: caseRecord.referenceNumber, serviceRequestId: request.id, requestReference: request.referenceNumber,
       charterStage: 'patient_details', status: 'submitted', stageVersion: 0,
@@ -108,8 +109,9 @@ async function createCaseForRequest(tx, request, { actorType, actorId, note }) {
   return caseRecord;
 }
 
-// `data` is what the Private Charter validator returned. Request, permanent reference, first event, Case, its
-// stage event and its Bitrix Deal-creation records are saved together or not at all. No Bitrix call is made here.
+// `data` is what the Private Charter validator returned. A submission creates the REQUEST ONLY (with its permanent
+// reference and first audit event, in one transaction). The Case and the Bitrix Deal-creation event are created later,
+// together, when an Admin approves the request (approveRequest). No Bitrix call is made here.
 async function createReviewRequest(userId, data) {
   return prisma.$transaction(async (tx) => {
     const created = await tx.serviceRequest.create({
@@ -125,15 +127,6 @@ async function createReviewRequest(userId, data) {
       serviceRequestId: request.id, action: ACTION.REQUEST_CREATED, toStatus: REQUEST_STATUS.AWAITING_DOCUMENTS,
       actorType: 'patient', actorId: userId, detail: { referenceNumber: request.referenceNumber },
     });
-    const caseRecord = await createCaseForRequest(tx, request, {
-      actorType: 'patient', actorId: userId, note: `Case opened automatically when ${request.referenceNumber} was submitted.`,
-    });
-    await appendEvent(tx, {
-      serviceRequestId: request.id, action: ACTION.CASE_CREATED, actorType: 'system',
-      detail: { caseId: caseRecord.id, caseReference: caseRecord.referenceNumber },
-    });
-    // The Bitrix Deal for this Case: recorded now, sent later by the worker (once it is switched on).
-    await enqueueDealCreation(tx, caseRecord, request);
     return request;
   });
 }
@@ -145,7 +138,7 @@ async function createReviewRequest(userId, data) {
 // document as replaced; the earlier row is kept untouched apart from that mark. The first document
 // moves the request into review, and any upload while changes were requested puts it back into
 // review. The file is removed again if anything fails.
-async function addPatientDocument({ userId, requestId, file, replacesDocumentId }) {
+async function addPatientDocument({ userId, requestId, file, replacesDocumentId, documentRequestId }) {
   try {
     const sha256 = await hashFile(file.path);
     const id = numericId(requestId, 'The request');
@@ -153,8 +146,16 @@ async function addPatientDocument({ userId, requestId, file, replacesDocumentId 
       const request = await lockRequest(tx, id);
       if (!request || request.userId !== userId) throw httpError(404, 'Request not found');
       if (request.reviewStatus == null) throw httpError(409, 'This request is not in the document review workflow.');
+      const given = documentRequestId !== undefined && documentRequestId !== null && documentRequestId !== '';
+      let documentRequest = null;
       if (request.reviewStatus === REQUEST_STATUS.APPROVED) {
-        throw httpError(409, 'This request has been approved. Please contact HumanCare to add more documents.', 'request_approved');
+        // After the approval a patient can add documents ONLY for an open document request an Admin made on the Case.
+        if (!given) throw httpError(409, 'This request has been approved. Please contact HumanCare to add more documents.', 'request_approved');
+        const caseRecord = await tx.case.findUnique({ where: { serviceRequestId: id } });
+        documentRequest = caseRecord && await tx.documentRequest.findFirst({ where: { id: numericId(documentRequestId, 'The document request'), caseId: caseRecord.id, status: 'open' } });
+        if (!documentRequest) throw httpError(409, 'This document request is not open.', 'document_request_not_open');
+      } else if (given) {
+        throw httpError(400, 'A document request applies only after the request is approved.', 'document_request_not_applicable');
       }
 
       const existing = await tx.requestDocument.findMany({ where: { serviceRequestId: id }, select: { id: true, supersededAt: true } });
@@ -172,6 +173,7 @@ async function addPatientDocument({ userId, requestId, file, replacesDocumentId 
         data: {
           serviceRequestId: id, originalName: cleanOriginalName(file.originalname), storageKey: file.filename, sizeBytes: file.size,
           mimeType: clip(file.mimetype, 191), sha256, uploadedByUserId: userId, replacesId: replaced ? replaced.id : null,
+          documentRequestId: documentRequest ? documentRequest.id : null,
         },
       });
       if (replaced) await tx.requestDocument.update({ where: { id: replaced.id }, data: { supersededAt: new Date() } });
@@ -481,6 +483,7 @@ const ADMIN_DOCUMENT_SELECT = {
   id: true, serviceRequestId: true, originalName: true, sizeBytes: true, mimeType: true, sha256: true, uploadedByUserId: true,
   uploadedAt: true, replacesId: true, supersededAt: true, scanStatus: true, scanEngine: true, scanDetail: true, scannedAt: true,
   reviewStatus: true, reviewedByAdminId: true, reviewedAt: true, rejectionReason: true, caseDocumentId: true,
+  documentRequestId: true, // set only on a document sent in answer to a post-Case document request
 };
 
 function documentSummary(documents) {
@@ -556,11 +559,48 @@ async function getReviewRequest(requestId) {
       user: { select: { id: true, name: true, email: true, mobile: true } },
       requestDocuments: { select: ADMIN_DOCUMENT_SELECT, orderBy: { id: 'asc' } },
       requestEvents: { orderBy: { id: 'asc' } },
-      case: { select: { id: true, referenceNumber: true, status: true } },
+      case: {
+        select: {
+          id: true, referenceNumber: true, status: true,
+          // Post-Case document requests (read-only here; the Admin opens one with POST /admin/requests/:id/document-requests).
+          documentRequests: { select: { id: true, description: true, reason: true, status: true, createdAt: true, resolvedAt: true }, orderBy: { id: 'asc' } },
+        },
+      },
     },
   });
   if (!request) throw httpError(404, 'Request not found');
-  return { ...request, documentSummary: documentSummary(request.requestDocuments) };
+  // The Bitrix sharing status of the Case's documents (Admin-visible: failures need a person).
+  const shares = request.case
+    ? await prisma.bitrixDealDocument.findMany({ where: { dealLink: { caseId: request.case.id } }, select: SHARE_SELECT, orderBy: { id: 'asc' } })
+    : [];
+  return { ...request, documentSummary: documentSummary(request.requestDocuments), documentShares: shares };
+}
+
+// Asks the patient for more documents AFTER the approval (a document request on the Case). Only an approved request with a Case can
+// have one. The patient answers by uploading for that request (addPatientDocument), the Admin reviews, and an approved document
+// joins the Case; sharing it with Bitrix stays a separate Admin authorization.
+async function openDocumentRequest({ requestId, adminId, description, reason }) {
+  const text = typeof description === 'string' ? description.trim() : '';
+  if (text.length < REASON_MIN || text.length > REASON_MAX) throw httpError(400, `A description of ${REASON_MIN} to ${REASON_MAX} characters is required.`, 'description_required');
+  const why = typeof reason === 'string' && reason.trim() ? reason.trim().slice(0, REASON_MAX) : null;
+  return prisma.$transaction(async (tx) => {
+    const request = await lockRequest(tx, numericId(requestId, 'The request'));
+    if (!request || request.reviewStatus == null) throw httpError(404, 'Request not found');
+    if (request.reviewStatus !== REQUEST_STATUS.APPROVED) throw httpError(409, 'A document request can be made only after the request is approved.', 'request_not_approved');
+    const caseRecord = await tx.case.findUnique({ where: { serviceRequestId: request.id } });
+    if (!caseRecord) throw httpError(409, 'The request has no Case.', 'case_missing');
+    const created = await tx.documentRequest.create({
+      data: { caseId: caseRecord.id, description: text, reason: why, status: 'open', requestedByType: 'admin', requestedById: String(adminId) },
+    });
+    await appendEvent(tx, { serviceRequestId: request.id, action: ACTION.DOCUMENT_REQUEST_OPENED, actorType: 'admin', actorId: adminId, detail: { documentRequestId: created.id } });
+    await appendAuditLog(tx, {
+      caseId: caseRecord.id, entityType: 'document_request', entityId: String(created.id), action: 'document_request.opened',
+      actorType: 'admin', actorId: adminId, source: 'admin_portal', reasonCode: 'document_request_opened',
+      afterData: { caseId: caseRecord.id, caseReference: caseRecord.referenceNumber, documentRequestId: created.id, status: 'open' },
+      correlationId: `request:${request.id}`, idempotencyKey: `document_request.opened:${created.id}`,
+    });
+    return { documentRequest: created };
+  });
 }
 
 // The file an Admin may open. Only a document whose scan said "clean" is ever returned: infected,
@@ -584,11 +624,22 @@ async function resolveAdminDownload({ requestId, documentId, adminId }) {
 
 // ---- admin: decisions -------------------------------------------------------------------------
 
-async function lockedOpenRequest(tx, requestId) {
+// `allowApproved`: a document that belongs to an open DOCUMENT REQUEST (asked for after the approval) may still be reviewed on an
+// approved request; the caller then refuses every other document.
+async function lockedOpenRequest(tx, requestId, { allowApproved = false } = {}) {
   const request = await lockRequest(tx, numericId(requestId, 'The request'));
   if (!request || request.reviewStatus == null) throw httpError(404, 'Request not found');
-  if (request.reviewStatus === REQUEST_STATUS.APPROVED) throw httpError(409, 'This request has already been approved.', 'request_approved');
+  if (request.reviewStatus === REQUEST_STATUS.APPROVED && !allowApproved) throw httpError(409, 'This request has already been approved.', 'request_approved');
   return request;
+}
+
+// Copies one approved request document into the Case's documents (the same copy the approval makes), and links the two.
+async function copyDocumentToCase(tx, caseRecord, d) {
+  const row = await tx.document.create({
+    data: { caseId: caseRecord.id, type: 'Medical Report', name: d.originalName, fileUrl: `/uploads/${d.storageKey}`, fileSizeBytes: d.sizeBytes },
+  });
+  await tx.requestDocument.update({ where: { id: d.id }, data: { caseDocumentId: row.id } });
+  return row;
 }
 
 // Approves or rejects one clean, current document. A rejection (reason shown to the patient) puts
@@ -599,9 +650,12 @@ async function reviewDocument({ requestId, documentId, adminId, decision, reason
   const docId = numericId(documentId, 'The document');
 
   return prisma.$transaction(async (tx) => {
-    const request = await lockedOpenRequest(tx, requestId);
+    const request = await lockedOpenRequest(tx, requestId, { allowApproved: true });
     const document = await tx.requestDocument.findFirst({ where: { id: docId, serviceRequestId: request.id } });
     if (!document) throw httpError(404, 'Document not found');
+    const afterApproval = request.reviewStatus === REQUEST_STATUS.APPROVED;
+    // After the approval only a document uploaded for an open document request can be reviewed; everything else is as before.
+    if (afterApproval && !document.documentRequestId) throw httpError(409, 'This request has already been approved.', 'request_approved');
     if (document.supersededAt) throw httpError(409, 'This document was replaced by a newer one.', 'document_superseded');
     if (document.scanStatus !== SCAN.CLEAN) {
       throw httpError(409, `Only a document whose virus scan is clean can be reviewed (scan: "${document.scanStatus}").`, 'document_not_clean');
@@ -620,7 +674,25 @@ async function reviewDocument({ requestId, documentId, adminId, decision, reason
       action: decision === REVIEW.APPROVED ? ACTION.DOCUMENT_APPROVED : ACTION.DOCUMENT_REJECTED,
       detail: { previous: document.reviewStatus, ...(text && { reason: text }) },
     });
-    if (decision === REVIEW.REJECTED && request.reviewStatus !== REQUEST_STATUS.CHANGES_REQUESTED) {
+    if (afterApproval && decision === REVIEW.APPROVED) {
+      // An approved post-Case document joins the Case (sharing it with Bitrix is a separate, explicit Admin authorization).
+      const problem = await fileProblem(document);
+      if (problem) throw httpError(STATUS_BY_PROBLEM[problem.code] || 409, problem.message, problem.code);
+      const caseRecord = await tx.case.findUnique({ where: { serviceRequestId: request.id } });
+      if (!caseRecord) throw httpError(409, 'The request has no Case.', 'case_missing');
+      await copyDocumentToCase(tx, caseRecord, document);
+      const waiting = await tx.requestDocument.count({
+        where: { documentRequestId: document.documentRequestId, supersededAt: null, id: { not: document.id }, NOT: { reviewStatus: REVIEW.APPROVED } },
+      });
+      if (!waiting) {
+        await tx.documentRequest.update({
+          where: { id: document.documentRequestId },
+          data: { status: 'fulfilled', resolvedAt: now, resolvedByType: 'admin', resolvedById: String(adminId) },
+        });
+        await appendEvent(tx, { serviceRequestId: request.id, action: ACTION.DOCUMENT_REQUEST_FULFILLED, actorType: 'admin', actorId: adminId, detail: { documentRequestId: document.documentRequestId } });
+      }
+    }
+    if (decision === REVIEW.REJECTED && !afterApproval && request.reviewStatus !== REQUEST_STATUS.CHANGES_REQUESTED) {
       await tx.serviceRequest.update({ where: { id: request.id }, data: { reviewStatus: REQUEST_STATUS.CHANGES_REQUESTED, reviewedAt: now } });
       await appendEvent(tx, {
         serviceRequestId: request.id, action: ACTION.STATUS_CHANGED, fromStatus: request.reviewStatus, toStatus: REQUEST_STATUS.CHANGES_REQUESTED,
@@ -682,12 +754,15 @@ function approvalBlockers(request, currentDocuments) {
   return blockers;
 }
 
-// Approves the request (document review complete) and copies its approved documents to its Case, in one
-// transaction. The Case already exists (it is opened when the request is submitted). A request that has NO Case is
-// an older one, made before that: it is refused with a clear error and nothing is created, because such requests
-// are reviewed by hand, one at a time. Safe to repeat: a request that is already approved returns its existing Case
-// (the Case's serviceRequestId is unique, and the request row is locked, so two approvals can never copy the
-// documents twice).
+// Approves the request. In ONE transaction (the request row is locked for all of it) this opens the operational Case
+// when the request has none, copies the approved documents to it, marks the request approved, records the approval,
+// and records the Bitrix Deal-creation link and event. If any write fails everything rolls back, so there is never an
+// approved request without its Case and Deal event. Nothing here calls Bitrix: the Deal worker sends the event later,
+// and only for approved requests.
+//
+// Idempotent: a request that is already approved returns its existing Case and writes nothing. A request that already
+// has a Case (one opened at submission by an earlier version) reuses it: the Case is unique per request, and the Deal
+// link and event are only created when they are missing (ensureDealCreation), so a Deal event can never be doubled.
 async function approveRequest({ requestId, adminId }) {
   // The timeout leaves room to re-hash every stored file while the request row is locked.
   return prisma.$transaction(async (tx) => {
@@ -697,11 +772,6 @@ async function approveRequest({ requestId, adminId }) {
     if (request.reviewStatus === REQUEST_STATUS.APPROVED) {
       const existing = await tx.case.findUnique({ where: { serviceRequestId: request.id } });
       return { request, case: existing, alreadyApproved: true };
-    }
-
-    const caseRecord = await tx.case.findUnique({ where: { serviceRequestId: request.id } });
-    if (!caseRecord) {
-      throw httpError(409, 'This request has no Case. It was made before Cases were opened at submission, so it needs manual historical review and cannot be approved here.', 'case_missing_manual_review');
     }
 
     const documents = await tx.requestDocument.findMany({ where: { serviceRequestId: request.id, supersededAt: null }, orderBy: { id: 'asc' } });
@@ -717,12 +787,17 @@ async function approveRequest({ requestId, adminId }) {
     }
     if (blockers.length) throw httpError(409, 'This request cannot be approved yet.', 'approval_blocked', { blockers });
 
-    for (const d of documents) {
-      const row = await tx.document.create({
-        data: { caseId: caseRecord.id, type: 'Medical Report', name: d.originalName, fileUrl: `/uploads/${d.storageKey}`, fileSizeBytes: d.sizeBytes },
+    let caseRecord = await tx.case.findUnique({ where: { serviceRequestId: request.id } });
+    let caseCreated = false;
+    if (!caseRecord) {
+      caseRecord = await createCaseForRequest(tx, request, {
+        actorType: 'admin', actorId: adminId, source: 'admin_portal', reasonCode: 'request_approved',
+        note: `Case opened when ${request.referenceNumber} was approved.`,
       });
-      await tx.requestDocument.update({ where: { id: d.id }, data: { caseDocumentId: row.id } });
+      caseCreated = true;
     }
+
+    for (const d of documents) await copyDocumentToCase(tx, caseRecord, d);
 
     const updated = await tx.serviceRequest.update({
       where: { id: request.id }, data: { reviewStatus: REQUEST_STATUS.APPROVED, reviewedAt: new Date(), documentsRequestReason: null },
@@ -731,12 +806,21 @@ async function approveRequest({ requestId, adminId }) {
       serviceRequestId: request.id, action: ACTION.REQUEST_APPROVED, fromStatus: request.reviewStatus, toStatus: REQUEST_STATUS.APPROVED,
       actorType: 'admin', actorId: adminId, detail: { documents: documents.length },
     });
+    if (caseCreated) {
+      await appendEvent(tx, {
+        serviceRequestId: request.id, action: ACTION.CASE_CREATED, actorType: 'admin', actorId: adminId,
+        detail: { caseId: caseRecord.id, caseReference: caseRecord.referenceNumber },
+      });
+    }
+    // The Bitrix Deal for this Case: recorded now (never sent here), sent later by the worker once it is switched on.
+    // The request is passed as the APPROVED row, which is what the Deal rules check.
+    await ensureDealCreation(tx, caseRecord, updated);
     return { request: updated, case: caseRecord, alreadyApproved: false };
   }, { timeout: 30000, maxWait: 10000 });
 }
 
 module.exports = {
   createCaseForRequest, createReviewRequest, addPatientDocument, toUploadResponse, scanRequestDocument, sweepPendingScans,
-  listReviewRequests, countReviewRequests, getReviewRequest, resolveAdminDownload, reviewDocument, requestAdditionalDocuments, approveRequest,
+  listReviewRequests, countReviewRequests, getReviewRequest, resolveAdminDownload, reviewDocument, requestAdditionalDocuments, approveRequest, openDocumentRequest,
   approvalBlockers, documentSummary, QUARANTINE_DIR,
 };

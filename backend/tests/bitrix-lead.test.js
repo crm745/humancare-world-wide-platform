@@ -86,6 +86,22 @@ describe('Bitrix lead: medical page details', () => {
     expect(fields.UF_CRM_1775637825406).toBe(380); // Transfer Urgency: Urgent
   });
 
+  it('Lead integration is unchanged by the Deal field mapping: the Lead keeps its own codes, options and one-value comment line', () => {
+    const fields = buildLeadFields(leadInputFromRequest({ ...medical, urgency: 'urgent_24h', careLevel: 'care_icu' }, user));
+    expect(fields.UF_CRM_1775637825406).toBe(380); // the Lead's Transfer Urgency list, not the Deal's Treatment Urgency field
+    expect(fields.UF_CRM_1768195253912).toBe(64); // Patient Age
+    for (const dealOnly of ['UF_CRM_1794830631', 'UF_CRM_1794830302', 'UF_CRM_1794831027', 'UF_CRM_1794832401', 'UF_CRM_1779270456180', 'UF_CRM_69EB460B79B1D']) {
+      expect(fields).not.toHaveProperty(dealOnly);
+    }
+    expect(fields.COMMENTS).toContain('Mobility: Bedridden');
+  });
+
+  it('shows a multi-select mobility in the comment as labels, and leaves an unknown value out as before', () => {
+    expect(buildLeadFields(leadInputFromRequest({ ...medical, mobility: 'bedridden,wheelchair' }, user)).COMMENTS).toContain('Mobility: Bedridden, Wheelchair');
+    expect(buildLeadFields(leadInputFromRequest({ ...medical, mobility: 'flying' }, user)).COMMENTS).not.toContain('Mobility');
+    expect(buildLeadFields(leadInputFromRequest({ ...medical, mobility: null }, user)).COMMENTS).not.toContain('Mobility');
+  });
+
   it('maps a planned request to Transfer Urgency: Planned', () => {
     expect(buildLeadFields(leadInputFromRequest({ ...medical, urgency: 'planned' }, user)).UF_CRM_1775637825406).toBe(382);
   });

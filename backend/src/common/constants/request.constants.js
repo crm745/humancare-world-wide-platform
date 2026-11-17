@@ -5,6 +5,15 @@
 const MOBILITY = ['bedridden', 'wheelchair', 'walking'];
 const MOBILITY_LABEL = { bedridden: 'Bedridden', wheelchair: 'Wheelchair', walking: 'Walking' };
 
+// Mobility is stored as one key ("walking") or, for Private Charter, several joined with commas ("bedridden,wheelchair"). How a
+// stored value reads on a screen, a PDF or a lead comment: the English labels joined with ", ". An unknown piece is left out, and
+// nothing known gives undefined, exactly as the old single-value lookup did.
+function mobilityText(value) {
+  if (typeof value !== 'string' || value === '') return undefined;
+  const labels = value.split(',').map((piece) => piece.trim()).filter((piece) => Object.prototype.hasOwnProperty.call(MOBILITY_LABEL, piece)).map((piece) => MOBILITY_LABEL[piece]);
+  return labels.length ? labels.join(', ') : undefined;
+}
+
 const URGENCY = ['critical_6h', 'urgent_24h', 'planned'];
 const URGENCY_LABEL = { critical_6h: 'Critical (within 6h)', urgent_24h: 'Urgent (24h)', planned: 'Planned' };
 // The Case (and Bitrix "Transfer Urgency") use the older three-step scale.
@@ -56,6 +65,6 @@ const CARE_LEVEL_LABEL_EN = {
 
 module.exports = {
   CARE_LEVEL_LABEL_EN,
-  MOBILITY, MOBILITY_LABEL, URGENCY, URGENCY_LABEL, URGENCY_TO_CASE, EQUIPMENT, isTransportKey,
+  MOBILITY, MOBILITY_LABEL, mobilityText, URGENCY, URGENCY_LABEL, URGENCY_TO_CASE, EQUIPMENT, isTransportKey,
   PRIVATE_CHARTER_KEY, PRIVATE_CHARTER_SERVICE_TYPE, GENDERS, CARE_LEVEL_KEYS, CARE_LEVEL_EXCLUSIVE, CARE_LEVEL_LEGACY_LABELS,
 };

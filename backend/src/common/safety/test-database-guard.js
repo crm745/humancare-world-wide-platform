@@ -80,12 +80,17 @@ async function verifyLiveDatabase(client) {
   return { database, account };
 }
 
-/** The only accepted value of UPLOAD_DIR in test mode: backend/.e2e-uploads (relative or absolute). */
+// The uploads folder of ONE scoped test run (see scoped-test-run.js): a direct child of backend/.e2e-uploads named
+// "scoped-sr" + 8 hex digits, so a run's files are kept apart and can be removed as one folder.
+const SCOPED_UPLOADS_PATTERN = /^scoped-sr[0-9a-f]{8}$/;
+
+/** The only accepted values of UPLOAD_DIR in test mode: backend/.e2e-uploads, or one scoped-run folder directly inside it. */
 function resolveTestUploadsDir(value) {
   if (typeof value !== 'string' || value.trim() === '') throw refuse('UPLOAD_DIR must be set to .e2e-uploads in the test environment.');
   const resolved = path.resolve(BACKEND_ROOT, value);
-  if (!samePath(resolved, TEST_UPLOADS_DIR)) throw refuse('UPLOAD_DIR must be backend/.e2e-uploads in the test environment.');
-  return TEST_UPLOADS_DIR;
+  if (samePath(resolved, TEST_UPLOADS_DIR)) return TEST_UPLOADS_DIR;
+  if (samePath(path.dirname(resolved), TEST_UPLOADS_DIR) && SCOPED_UPLOADS_PATTERN.test(path.basename(resolved))) return resolved;
+  throw refuse('UPLOAD_DIR must be backend/.e2e-uploads (or one scoped-run folder inside it) in the test environment.');
 }
 
 /** Everything about the process environment that could reach outside the test sandbox. */
@@ -111,6 +116,7 @@ module.exports = {
   verifyLiveDatabase,
   assertSafeTestEnvironment,
   resolveTestUploadsDir,
+  SCOPED_UPLOADS_PATTERN,
   TestDatabaseGuardError,
   TEST_DATABASE,
   TEST_USER_PREFIX,

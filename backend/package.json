@@ -16,7 +16,9 @@
     "migrate:all": "npm run migrate:dev && npm run migrate:test",
     "test:safe": "cross-env NODE_ENV=test jest --config jest.safe.config.js --runInBand",
     "integration:db": "cross-env HUMANCARE_INTEGRATION_RUN=true node scripts/integration-db.js",
-    "test:integration": "cross-env NODE_ENV=test HUMANCARE_INTEGRATION_RUN=true jest --config jest.integration.config.js --runInBand"
+    "test:scoped:request-review": "cross-env NODE_ENV=test HUMANCARE_SCOPED_RUN=true jest --config jest.scoped.config.js --runInBand",
+    "test:scoped:cleanup": "node scripts/scoped-test-cleanup.js",
+    "test:integration":"cross-env NODE_ENV=test HUMANCARE_INTEGRATION_RUN=true jest --config jest.integration.config.js --runInBand"
   },
   "keywords": [],
   "author": "",
