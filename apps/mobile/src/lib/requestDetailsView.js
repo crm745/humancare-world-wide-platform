@@ -16,8 +16,14 @@ import { TRACKING_STEPS, trackingPosition } from './requestTracking';
 import { documentHistory, reviewBanner, reviewState } from './requestDocuments';
 import { formatSize } from './documentHistoryView';
 import { serviceKeyOf, serviceTitleKey } from './myRequestsView';
+import { isNewTeleRequest, TELE_SCOPE_LABEL_KEYS, TELE_TYPE_LABEL_KEYS } from './teleConsultation';
+import { corporateFromRequest, corporateText, isNewCorporateRequest } from './corporateMedical';
 import { COLORS } from '../theme/colors';
 import { isEmptyValue } from './emptyValue';
+import { MORTAL_MODE_LABEL_KEYS, MORTAL_SCOPE_LABEL_KEYS, hasScopeAndMode, userDetailsOf } from './mortalRemains';
+import { homeCareFromRequest, parseHomeDescription } from './homeHealthcare';
+import { isNewMvtRequest, mvtFromRequest, mvtText } from './medicalValueTravel';
+import { isNewMarineRequest, marineFromRequest, marineText } from './marineMedicalSafety';
 
 export const STEP_COUNT = TRACKING_STEPS.length;
 
@@ -151,7 +157,10 @@ const EQUIPMENT = [['equipOxygen', 'equip_oxygen'], ['equipCardiacMonitor', 'equ
 export function equipmentView(request, t) {
   const values = EQUIPMENT.map(([field]) => request && request[field]);
   if (values.every((v) => v === null || v === undefined)) return null;
-  const items = EQUIPMENT.filter(([field]) => request[field] === true).map(([, key]) => t(key));
+  // Commercial Air: the saved oxygen flow rate follows Oxygen ("Oxygen (4 LPM)"); a request without one shows plain Oxygen.
+  const lpm = Number(request.equipOxygenLpm);
+  const items = EQUIPMENT.filter(([field]) => request[field] === true)
+    .map(([field, key]) => (field === 'equipOxygen' && request.equipOxygenLpm != null && Number.isFinite(lpm) && lpm > 0 ? t('equip_oxygen_lpm', { n: lpm }) : t(key)));
   return { items, none: items.length === 0 };
 }
 
@@ -207,6 +216,8 @@ const typeLabel = (type, t) => {
   const v = textOf(type);
   if (!v || v === 'Medical Report') return t('lbl_medical_report');
   if (v === 'Death Certificate') return t('lbl_death_certificate');
+  // Mortal Remains' one upload section: the app cannot tell the certificate from the other documents, so each is a neutral "Supporting document".
+  if (v === 'Supporting Document') return t('lbl_supporting_document');
   return v;
 };
 
@@ -237,15 +248,36 @@ export function documentRows(request, t) {
 
 const field = (key, label, value, full) => (textOf(value) ? { key, label, value: textOf(value), full: !!full } : null);
 const compact = (list) => list.filter(Boolean);
+// A value shown EXACTLY as stored (Home Healthcare's address and Medical History): no trimming, and no "looks empty" rule except a truly empty text.
+const exactField = (key, label, value, full = true) => (typeof value === 'string' && value !== '' ? { key, label, value, full } : null);
 
 // Everything the screen draws, in order. `t` is the app's translate function.
 export function detailsView(request, t) {
   const mortal = isMortalKey(request);
+  // A Teleconsultation made in the new format (empty destination): its address, no Trip, no urgency, its description as the consultation details.
+  // An older Teleconsultation has a destination and reads exactly as it always did.
+  const tele = isNewTeleRequest(request);
+  const teleType = tele && request && Object.hasOwn(TELE_TYPE_LABEL_KEYS, request.consultationType || '') ? request.consultationType : null;
   const transport = isTransportRequest(request);
   const travel = travelTypeKey(request);
   const transfer = transferTypeKey(request);
+  const newMortal = mortal && hasScopeAndMode(request);
+  // A NEW-format Home Healthcare request: its key is homecare and its whole description parses as the v1 format (lib/homeHealthcare.js). Anything else,
+  // an older Home Healthcare request included, keeps the legacy display below. The destination is never consulted.
+  const homeParsed = request && request.serviceKey === 'homecare' ? parseHomeDescription(request.description) : null;
+  const home = !!homeParsed && homeParsed.ok;
+  const homeCare = home ? homeCareFromRequest(request, t) : null;
+  // A NEW-format Medical Value Travel request: its key is medvalue, its transfer_scope is a real scope and its whole description parses (lib/medicalValueTravel.js).
+  // Every earlier medvalue request (no scope, free-text description) keeps the generic display below.
+  const mvt = isNewMvtRequest(request) ? mvtFromRequest(request, t) : null;
+  // A NEW-format Marine Medical Safety request: its key is marine, its transfer_scope is a real scope and its whole description parses (lib/marineMedicalSafety.js).
+  // Every earlier marine request (no scope, free-text description) keeps the generic display below.
+  const marine = isNewMarineRequest(request) ? marineFromRequest(request, t) : null;
+  // A NEW-format Corporate Medical Solutions request: its key is corporate, its company, employee count and programmes are valid and its description is empty or parses
+  // (lib/corporateMedical.js). Every earlier corporate request (free-text description, none of those columns) keeps the generic display below.
+  const corporate = isNewCorporateRequest(request) ? corporateFromRequest(request, t) : null;
   const equipment = transport ? equipmentView(request, t) : null;
-  const urgency = urgencyView(request.urgency, t);
+  const urgency = home || corporate ? null : urgencyView(request.urgency, t);
   const care = transport ? careChips(request.careLevel, t) : [];
   const mobility = transport ? mobilityLabel(request.mobility, t) : '';
   const docs = documentRows(request, t);
@@ -262,36 +294,90 @@ export function detailsView(request, t) {
     patient: {
       titleKey: mortal ? 'rd_deceased' : 'rd_patient',
       fields: compact([
-        field('name', t(mortal ? 'lbl_deceased_name' : 'lbl_name'), request.patientName, true),
+        // Medical Value Travel (new format): the Treatment Scope comes first (it is the column Mortal Remains calls Transfer Scope; each shows its own label).
+        ...(mvt ? [field('scope', mvtText(t, 'mvt_scope'), mvt.scope, true)] : []),
+        // Marine Medical Safety (new format): the Service Scope comes first.
+        ...(marine ? [field('scope', marineText(t, 'marine_scope'), marine.scope, true)] : []),
+        // Corporate Medical Solutions (new format): the Company Name and No. of Employees come first; the employee's name is its own field ("Name of Employee"). Its contact is
+        // "Patient Contact", and its country is the "Office Country" (the company office's, not the patient's), so neither takes the generic "Contact" / "Country" labels.
+        ...(corporate ? [exactField('company', corporateText(t, 'corp_company'), corporate.company), field('employees', corporateText(t, 'corp_employees'), corporate.employees, true)] : []),
+        field('name', corporate ? corporateText(t, 'corp_employee_name') : t(mortal ? 'lbl_deceased_name' : 'lbl_name'), request.patientName, true),
         field('age', t('rd_age'), request.patientAge),
         field('gender', t('field_gender'), genderLabel(request.patientGender, t)),
-        field('country', t('field_country'), countryLabel(request.country)),
-        field('contact', t('rd_contact'), phoneLabel(request.patientContact)),
+        ...(corporate ? [] : [field('country', t('field_country'), countryLabel(request.country))]),
+        field('contact', corporate ? corporateText(t, 'corp_patient_contact') : t('rd_contact'), phoneLabel(request.patientContact)),
+        // The Preferred Date, the Office Address (as stored, line breaks kept: it is NOT a route) and the Office Country: only when the request has them (a request saved before
+        // they existed shows none of them).
+        ...(corporate ? [
+          field('serviceDate', corporateText(t, 'corp_preferred_date'), formatDateOnly(request.preferredDate), true),
+          exactField('officeAddress', corporateText(t, 'corp_office_address'), corporate.officeAddress),
+          field('officeCountry', corporateText(t, 'corp_office_country'), countryLabel(corporate.officeCountry), true),
+        ] : []),
+        // A Teleconsultation saved with the consultation_type column: the type and (House Call) scope are their own fields. An older one carries them as
+        // "Consultation type:" / "Scope:" lines inside its description, which is still shown as it was.
+        ...(tele && teleType ? [field('consultType', t('field_consult_type'), t(TELE_TYPE_LABEL_KEYS[teleType]), true)] : []),
+        ...(tele && teleType && TELE_SCOPE_LABEL_KEYS[request.transferScope] ? [field('consultScope', t('field_consult_scope'), t(TELE_SCOPE_LABEL_KEYS[request.transferScope]), true)] : []),
+        ...(tele ? [field('address', t('field_current_address'), request.origin, true)] : []),
+        // Home Healthcare (new format): the exact Complete Home Address and the Service Date, both from Step 1.
+        ...(home ? [exactField('address', t('field_home_address'), homeParsed.address), field('serviceDate', t('field_service_date'), formatDateOnly(request.preferredDate), true)] : []),
         ...(mortal ? [
           field('relation', t('rd_relation'), relationLabel(request.deceasedRelation, t), true),
+          // A request made in the new format has its Transfer Scope and Transport Mode in their own fields; an older one has its scope only in
+          // the service key (shown on the Trip, below).
+          ...(newMortal ? [
+            field('scope', t('field_mortal_scope'), MORTAL_SCOPE_LABEL_KEYS[request.transferScope] ? t(MORTAL_SCOPE_LABEL_KEYS[request.transferScope]) : ''),
+            field('mode', t('field_mortal_mode'), MORTAL_MODE_LABEL_KEYS[request.transportMode] ? t(MORTAL_MODE_LABEL_KEYS[request.transportMode]) : ''),
+          ] : []),
           field('deathPlace', t('field_place_of_death'), request.placeOfDeath, true),
           field('deathDate', t('field_date_of_death'), formatDateOnly(request.dateOfDeath), true),
         ] : []),
       ]),
     },
-    trip: {
+    // Medical Value Travel (new format): the two cities; its date is a medical detail below.
+    trip: mvt || marine ? { from: textOf(request.origin), to: textOf(request.destination), rows: [] } : tele || home || corporate ? { from: '', to: '', rows: [] } : {
       from: textOf(request.origin),
       to: textOf(request.destination),
       rows: compact([
         field('date', t(mortal ? 'rd_date_transfer' : 'rd_date_service'), formatDateOnly(request.preferredDate)),
         field('travel', t('field_airline_mode'), travel ? t(travel) : ''),
-        field('transfer', t('field_mortal_transfer'), transfer ? t(transfer) : ''),
+        newMortal ? null : field('transfer', t('field_mortal_transfer'), transfer ? t(transfer) : ''),
       ]),
     },
     medical: {
       urgency,
-      conditionLabel: t(mortal ? 'req_details' : 'req_condition'),
-      condition: textOf(request.description),
+      conditionLabel: marine ? marineText(t, 'marine_history') : mvt ? mvtText(t, 'mvt_history') : tele ? t('rd_consultation_details') : home ? t('req_medical_history') : t(mortal ? 'req_details' : baseKeyOf(request) === 'ground' ? 'field_present_issue' : 'req_condition'),
+      // Mortal Remains (new format): the stored description starts with the scope and mode lines (written for Bitrix), which are shown as their own rows
+      // above; only the person's own Details are shown here. An older request's description is shown as it is.
+      // Home Healthcare (new format): the Medical History exactly as typed, read from the parsed description (the care lines are shown as rows below).
+      // Corporate Medical Solutions (new format): the description only holds the two requirements, shown as their own rows below, so there is no condition text.
+      condition: corporate ? '' : marine ? marine.history : mvt ? mvt.history : home ? homeParsed.history : textOf(mortal ? userDetailsOf(request.description) : request.description),
+      details: corporate ? compact([
+        // each programme by its own name, comma-separated (never a JSON string)
+        field('programmes', corporateText(t, 'corp_programmes'), corporate.programmes.join(', '), true),
+        exactField('anyRequirement', corporateText(t, 'corp_any'), corporate.anyRequirement, true),
+        exactField('specialRequirement', corporateText(t, 'corp_special'), corporate.specialRequirement, true),
+      ]) : marine ? compact([
+        field('serviceDate', marineText(t, 'marine_date'), formatDateOnly(request.preferredDate), true),
+        exactField('criticalLevel', marineText(t, 'marine_critical'), marine.levels, true),
+        exactField('oxygen', t('equip_oxygen'), marine.oxygen, true),
+      ]) : mvt ? compact([
+        exactField('specialty', mvtText(t, 'mvt_specialty'), mvt.specialty, true),
+        field('treatmentDate', mvtText(t, 'mvt_treatment_date'), formatDateOnly(request.preferredDate), true),
+      ]) : tele ? compact([field('visitDate', t('field_visit_date'), formatDateOnly(request.preferredDate), true)]) : home ? compact([
+        field('caretaker', t('field_caretaker'), homeCare.caretakers, true),
+        field('hours', t('field_care_requirement'), homeCare.hours, true),
+        field('careLevel', t('field_home_care_level'), homeCare.level, true),
+        field('oxygen', t('equip_oxygen'), homeCare.oxygen, true),
+      ]) : [],
       care,
       mobility,
       equipment,
     },
     documents: docs,
+    // A Teleconsultation made in the new format takes no documents, so the whole Documents area (heading, empty message, list, history, upload) is
+    // not drawn for it. An older Teleconsultation, and every other service, keeps it as it was (an older one's documents still open).
+    // A Corporate Medical Solutions request made in the new format takes no documents either.
+    showDocuments: !tele && !corporate,
     // The bottom bar (and only it) opens live tracking.
     showTrackingBar: isCaseActive(request) && request.status !== 'cancelled' && request.status !== 'completed',
   };

@@ -122,11 +122,13 @@ describe('Marine Medical Safety and Medical Value Travel are full services, with
   test('no tile on Home or All Services is a placeholder any more', () => {
     expect(HOME_SERVICES.filter((s) => s.placeholder)).toEqual([]);
   });
-  test.each(NEW)('%s has its service page: a title, a description, three figures and four things it includes', (key, title) => {
+  // Marine Medical Safety's page shows no figures: its "100+ Ports Covered", "21+ Years Experience" and "24/7 Tele-Medical Advice" were all removed because the official
+  // website does not support them (the list stays, empty, because the page draws whatever list the service has). Medical Value Travel keeps its three.
+  test.each(NEW)('%s has its service page: a title, a description, its figures and four things it includes', (key, title) => {
     const svc = services[key];
     expect(svc.title).toBe(title);
     expect(svc.desc.length).toBeGreaterThan(60);
-    expect(svc.stats).toHaveLength(3);
+    expect(svc.stats).toHaveLength(key === 'marine' ? 0 : 3);
     for (const st of svc.stats) { expect(st.value).toBeTruthy(); expect(st.label).toBeTruthy(); }
     expect(svc.features).toHaveLength(4);
   });

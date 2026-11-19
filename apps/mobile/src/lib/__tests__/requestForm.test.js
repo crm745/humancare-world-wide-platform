@@ -19,8 +19,8 @@ describe('draftForService', () => {
 
   it('keeps the patient and medical answers when the service is changed from inside the form', () => {
     const previous = { ...INITIAL, service: 'privatecharter', changingService: true, name: 'Gouri Patil', age: '64', desc: 'Post-angioplasty', urgency: 'urgent_24h', care: ['care_icu', 'care_stable'], mobility: 'bedridden', equipOxygen: true };
-    const next = draftForService(previous, 'ground', INITIAL);
-    expect(next).toMatchObject({ service: 'ground', name: 'Gouri Patil', age: '64', desc: 'Post-angioplasty', urgency: 'urgent_24h', care: ['care_icu', 'care_stable'], mobility: 'bedridden', equipOxygen: true });
+    const next = draftForService(previous, 'air', INITIAL);
+    expect(next).toMatchObject({ service: 'air', name: 'Gouri Patil', age: '64', desc: 'Post-angioplasty', urgency: 'urgent_24h', care: ['care_icu', 'care_stable'], mobility: 'bedridden', equipOxygen: true });
     expect(next.changingService).toBe(false);
   });
 

@@ -1,8 +1,9 @@
+const { Prisma } = require('@prisma/client');
 const { prisma } = require('../../db/prisma');
 const { createLead } = require('../bitrix/bitrix.service');
 const { leadInputFromRequest } = require('../bitrix/bitrix-lead');
 const { isBitrixSyncEnabled, isPrivateCharterDealRequested } = require('../bitrix/bitrix-config');
-const { URGENCY_TO_CASE, PRIVATE_CHARTER_KEY } = require('../../common/constants/request.constants');
+const { URGENCY_TO_CASE, PRIVATE_CHARTER_KEY, isCommercialAirKey, isGroundKey, usesCriticalLevelPage } = require('../../common/constants/request.constants');
 const { isRequestReviewEnabled, PATIENT_DOCUMENT_SELECT } = require('../request-review/request-review.config');
 const { createReviewRequest } = require('../request-review/request-review.service');
 const { SAFE_DOCUMENT_SELECT } = require('../documents/document-response');
@@ -40,8 +41,19 @@ async function createRequest(userId, data) {
     deceasedRelation,
     placeOfDeath,
     dateOfDeath,
+    transferScope,
+    transportMode,
+    careRequirement,
+    caretakerTypes,
+    specialty,
+    otherSpecialty,
+    consultationType,
+    companyName,
+    employeeCount,
+    selectedProgrammes,
     mobility,
     equipOxygen,
+    equipOxygenLpm,
     equipCardiacMonitor,
     equipVentilator,
     urgency,
@@ -75,16 +87,41 @@ async function createRequest(userId, data) {
       deceasedRelation: deceasedRelation || null,
       placeOfDeath: placeOfDeath || null,
       dateOfDeath: dateOfDeath ? new Date(dateOfDeath) : null,
-      mobility: mobility || null,
+      // Mortal Remains only (validated in mortal-remains.validation.js); the keys are left out for every other service so its write is unchanged.
+      ...(transferScope !== undefined && { transferScope: transferScope || null }),
+      ...(transportMode !== undefined && { transportMode: transportMode || null }),
+      // Home Healthcare only (validated in home-healthcare.validation.js); the keys are left out for every other service so its write is unchanged.
+      ...(serviceKey === 'homecare' && { careRequirement: careRequirement || null, caretakerTypes: caretakerTypes || null }),
+      // Medical Value Travel and Teleconsultation only (validated in their own validators); the keys are left out for every other service so its write is unchanged.
+      ...(specialty !== undefined && { specialty: specialty || null }),
+      ...(otherSpecialty !== undefined && { otherSpecialty: otherSpecialty || null }),
+      ...(consultationType !== undefined && { consultationType: consultationType || null }),
+      // Corporate Medical Solutions, employee-submitted (validated in corporate-medical.validation.js); the keys are left out for every other service.
+      ...(companyName !== undefined && { companyName: companyName || null }),
+      ...(employeeCount !== undefined && { employeeCount: employeeCount ?? null }),
+      ...(selectedProgrammes !== undefined && { selectedProgrammes: selectedProgrammes ?? Prisma.DbNull }),
+      // Ground Ambulance no longer asks Patient mobility: an older app build may still send it (accepted, so it is not broken), but it is never stored for a
+      // new Ground request. Requests already saved keep their value.
+      mobility: isGroundKey(serviceKey) ? null : mobility || null,
       equipOxygen: equipOxygen ?? null,
+      // Commercial Air, Ground Ambulance, Home Healthcare and structured Marine Medical Safety (validated in the controller / its own validator); the key is left out for
+      // every other service. Marine's validator always returns the field (a number only for Oxygen Yes), so only a structured Marine request has it defined: an older
+      // generic Marine request has none, and its write stays exactly as it was.
+      ...((usesCriticalLevelPage(serviceKey) || serviceKey === 'homecare' || (serviceKey === 'marine' && equipOxygenLpm !== undefined)) && { equipOxygenLpm: equipOxygen === true && equipOxygenLpm != null ? equipOxygenLpm : null }),
       equipCardiacMonitor: equipCardiacMonitor ?? null,
       equipVentilator: equipVentilator ?? null,
+      // Commercial Air has no Ventilator under Required on board (it is the care level "Ventilated"): never stored for it.
+      ...(isCommercialAirKey(serviceKey) && { equipVentilator: null }),
+      // Ground Ambulance: Required on board is Oxygen only, so neither Cardiac monitor nor Ventilator is ever stored for it.
+      ...(isGroundKey(serviceKey) && { equipCardiacMonitor: null, equipVentilator: null }),
       urgency: urgency || null,
       referenceNumber: `TEMP-${Date.now()}`,
       status: 'submitted',
     },
   });
 
+  // Every service, Corporate Medical Solutions included: REQ-<1000 + request id>, which the request's Case copies. (An earlier version of Corporate Medical Solutions
+  // used CASE-<1000 + case id>; those requests keep the reference they were saved with and are never renumbered.)
   const referenceNumber = `REQ-${1000 + created.id}`;
   const request = await prisma.serviceRequest.update({
     where: { id: created.id },

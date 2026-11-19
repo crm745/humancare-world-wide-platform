@@ -61,7 +61,7 @@ const expectNoInternalFields = (body) => {
 
 describe('the serializer', () => {
   const row = {
-    id: 5, userId: 9, referenceNumber: 'REQ-1005', status: 'in_progress', serviceType: 'Home Healthcare', serviceKey: 'homecare',
+    id: 5, userId: 9, referenceNumber: 'REQ-1005', status: 'in_progress', serviceType: 'Hospitalization Assistance', serviceKey: 'hospital',
     patientName: 'A B', patientAge: 40, origin: 'X', destination: 'Y', country: 'India', createdAt: new Date('2026-11-01T00:00:00Z'), updatedAt: new Date('2026-11-02T00:00:00Z'),
     bitrixLeadId: 1, bitrixSyncAttempts: 2, bitrixLastError: 'boom', bitrixSyncFailedAt: new Date(), originGeonameId: 1, destinationGeonameId: 2, originTimezone: 'Asia/Kolkata',
     originCityName: 'X', originCountryCode: 'IN', destinationCityName: 'Y', destinationCountryCode: 'IN', someFutureColumn: 'secret',
@@ -115,7 +115,7 @@ describe('the three endpoints, with a request that has internal data on it', () 
   async function requestWithInternalData() {
     const patient = await createPatient();
     const created = await request(app).post('/requests').set(auth(patient.token)).send({
-      serviceType: 'Home Healthcare', serviceKey: 'homecare', patientName: 'John Doe', patientAge: 40, patientGender: 'Male', patientContact: '+91 9876543210',
+      serviceType: 'Hospitalization Assistance', serviceKey: 'hospital', patientName: 'John Doe', patientAge: 40, patientGender: 'Male', patientContact: '+91 9876543210',
       origin: 'Pune, India', destination: 'Pune, India', country: 'India', preferredDate: '2099-01-01', description: 'Needs a nurse', urgency: 'planned',
     });
     expect(created.status).toBe(201);
@@ -137,7 +137,7 @@ describe('the three endpoints, with a request that has internal data on it', () 
   it('POST /requests returns the request without internal fields', async () => {
     const r = await requestWithInternalData();
     expectNoInternalFields(r.created.body);
-    expect(r.created.body.request).toMatchObject({ serviceKey: 'homecare', status: 'submitted', patientName: 'John Doe', urgency: 'planned' });
+    expect(r.created.body.request).toMatchObject({ serviceKey: 'hospital', status: 'submitted', patientName: 'John Doe', urgency: 'planned' });
     expect(r.created.body.request.referenceNumber).toMatch(/^REQ-\d+$/);
   });
 
@@ -147,7 +147,7 @@ describe('the three endpoints, with a request that has internal data on it', () 
     expect(res.status).toBe(200);
     expectNoInternalFields(res.body);
     const req = res.body.request;
-    expect(req).toMatchObject({ id: r.id, serviceType: 'Home Healthcare', serviceKey: 'homecare', patientName: 'John Doe', patientAge: 40, patientGender: 'Male', patientContact: '+91 9876543210', country: 'India', description: 'Needs a nurse', urgency: 'planned', status: 'submitted' });
+    expect(req).toMatchObject({ id: r.id, serviceType: 'Hospitalization Assistance', serviceKey: 'hospital', patientName: 'John Doe', patientAge: 40, patientGender: 'Male', patientContact: '+91 9876543210', country: 'India', description: 'Needs a nurse', urgency: 'planned', status: 'submitted' });
     expect(req.preferredDate).toBe('2099-01-01T00:00:00.000Z');
     expect(req.case).toMatchObject({ status: 'submitted', urgency: 'routine' });
     expect(Object.keys(req.case).sort()).toEqual(['createdAt', 'documents', 'id', 'referenceNumber', 'stageEvents', 'status', 'updatedAt', 'urgency']);
@@ -166,7 +166,7 @@ describe('the three endpoints, with a request that has internal data on it', () 
     expect(res.status).toBe(200);
     expect(res.body.requests).toHaveLength(1);
     expectNoInternalFields(res.body);
-    expect(res.body.requests[0]).toMatchObject({ id: r.id, serviceKey: 'homecare', status: 'submitted' });
+    expect(res.body.requests[0]).toMatchObject({ id: r.id, serviceKey: 'hospital', status: 'submitted' });
     expect('case' in res.body.requests[0]).toBe(false);
     for (const field of ['id', 'referenceNumber', 'serviceType', 'serviceKey', 'status', 'origin', 'destination', 'createdAt']) expect(res.body.requests[0][field]).toBeDefined();
   });

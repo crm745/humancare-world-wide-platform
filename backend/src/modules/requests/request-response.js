@@ -13,7 +13,8 @@ const REQUEST_FIELDS = [
   'id', 'referenceNumber', 'status', 'serviceType', 'serviceKey',
   'patientName', 'patientAge', 'patientGender', 'patientLocation', 'patientContact',
   'origin', 'destination', 'country', 'preferredDate', 'careLevel', 'description',
-  'deceasedRelation', 'placeOfDeath', 'dateOfDeath',
+  'deceasedRelation', 'placeOfDeath', 'dateOfDeath', 'transferScope', 'transportMode', 'careRequirement', 'caretakerTypes', 'specialty', 'otherSpecialty', 'consultationType',
+  'companyName', 'employeeCount', 'selectedProgrammes',
   'mobility', 'equipOxygen', 'equipCardiacMonitor', 'equipVentilator', 'urgency',
   'originCityName', 'originCountryCode', 'destinationCityName', 'destinationCountryCode',
   'reviewStatus', 'documentsRequestReason', 'submittedAt', 'reviewedAt', 'createdAt', 'updatedAt',
@@ -51,6 +52,9 @@ function toPatientCase(caseRecord) {
 function toPatientRequest(request) {
   if (!isObject(request)) return request;
   const out = pick(request, REQUEST_FIELDS);
+  // Commercial Air oxygen flow rate: present only when one was saved, so every other service (Private Charter
+  // included) returns exactly the fields it always did.
+  if (request.equipOxygenLpm != null) out.equipOxygenLpm = request.equipOxygenLpm;
   if ('case' in request) out.case = toPatientCase(request.case);
   if ('requestDocuments' in request) out.requestDocuments = pickEach(request.requestDocuments, REQUEST_DOCUMENT_FIELDS);
   return out;

@@ -1,17 +1,15 @@
 import { useState } from 'react';
-import { Linking, Pressable, Share, Text, View } from 'react-native';
+import { Linking, Pressable, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  ArrowRight, Ban, Check, ChevronLeft, CircleCheck, Download, Phone, Share2,
+  ArrowRight, Ban, Check, ChevronLeft, CircleCheck, Download, Phone,
 } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { apiGet } from '../lib/api';
 import { downloadAndShare } from '../lib/download';
 import { openDocumentPreview } from '../lib/documentPreview';
 import { goBack } from '../lib/nav';
-import { toUiStatus } from '../lib/requestShape';
-import { reviewPill } from '../lib/requestDocuments';
 import { detailsView } from '../lib/requestDetailsView';
 import { Screen, Body } from '../components/layout';
 import { AppRefreshControl } from '../components/AppRefreshControl';
@@ -58,7 +56,7 @@ function Action({ Icon, label, onPress }) {
   );
 }
 
-function Summary({ view, t, onDownload, onShare, onContact }) {
+function Summary({ view, t, onDownload, onContact }) {
   const h = view.header;
   return (
     <Card big>
@@ -79,7 +77,6 @@ function Summary({ view, t, onDownload, onShare, onContact }) {
       </View>
       <View style={{ marginTop: 16, flexDirection: 'row', gap: 8 }}>
         <Action Icon={Download} label={t('rd_download')} onPress={onDownload} />
-        <Action Icon={Share2} label={t('rd_share')} onPress={onShare} />
         <Action Icon={Phone} label={t('rd_contact_team')} onPress={onContact} />
       </View>
     </Card>
@@ -151,32 +148,12 @@ export default function RequestDetails() {
   }
 
   const view = detailsView(request, t);
-  // A workflow request's status is said the same way in the shared message as on the card.
-  const pill = reviewPill(request);
-
   const downloadSummary = async () => {
     try {
       toast('Downloading request summary…');
       await downloadAndShare(`/requests/me/${request.id}/summary`, `${request.referenceNumber}-summary.pdf`);
     } catch (err) {
       toast(err.message);
-    }
-  };
-
-  const shareRequest = async () => {
-    try {
-      await Share.share({
-        title: `HumanCare World Wide — ${request.referenceNumber}`,
-        message:
-          `HumanCare World Wide request ${request.referenceNumber}\n` +
-          `${request.serviceType} — ${request.origin} to ${request.destination}\n` +
-          `Status: ${pill ? pill.label : t('status_' + toUiStatus(request.status))}`,
-      });
-    } catch (err) {
-      // On web, browsers without the Web Share API reject here (desktop Firefox,
-      // older Chrome) — on native, cancelling the share sheet itself is not an
-      // error (it resolves normally), so this only fires for a real failure.
-      toast(err.message || 'Sharing is not supported on this browser.');
     }
   };
 
@@ -187,7 +164,7 @@ export default function RequestDetails() {
       <Header title={t('request_details_title')} backLabel={t('home_back')} isRTL={isRTL} />
       <Body contentClassName="" bottomEdge={view.showTrackingBar ? barHeight : 0} refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         <Reveal animate={gate.wasShown} style={{ paddingTop: 16, paddingHorizontal: 16, paddingBottom: 0, gap: 14 }}>
-          <Summary view={view} t={t} onDownload={downloadSummary} onShare={shareRequest} onContact={() => Linking.openURL('tel:+919699999065')} />
+          <Summary view={view} t={t} onDownload={downloadSummary} onContact={() => Linking.openURL('tel:+919699999065')} />
           <StatusCard view={view} request={request} t={t} />
 
           {view.patient.fields.length ? (
@@ -202,21 +179,25 @@ export default function RequestDetails() {
 
           <Medical medical={view.medical} t={t} />
 
-          <Section title={t('rd_documents_n', { n: docs.length })}>
-            <Card padding={0} style={{ overflow: 'hidden' }}>
-              {docs.length === 0 ? (
-                <Text style={{ padding: 16, fontFamily: FONT[400], fontSize: 13.5, lineHeight: 19, color: C.muted }}>{t('rd_no_documents')}</Text>
-              ) : docs.map((doc, i) => (
-                <DocumentRow
-                  key={doc.id} doc={doc} first={i === 0} t={t}
-                  onOpen={() => openDocumentPreview(router.push, doc)}
-                />
-              ))}
-            </Card>
-          </Section>
+          {view.showDocuments ? (
+            <>
+              <Section title={t('rd_documents_n', { n: docs.length })}>
+                <Card padding={0} style={{ overflow: 'hidden' }}>
+                  {docs.length === 0 ? (
+                    <Text style={{ padding: 16, fontFamily: FONT[400], fontSize: 13.5, lineHeight: 19, color: C.muted }}>{t('rd_no_documents')}</Text>
+                  ) : docs.map((doc, i) => (
+                    <DocumentRow
+                      key={doc.id} doc={doc} first={i === 0} t={t}
+                      onOpen={() => openDocumentPreview(router.push, doc)}
+                    />
+                  ))}
+                </Card>
+              </Section>
 
-          <DocumentHistory request={request} styled />
-          <AdditionalDocuments request={request} onUploaded={reload} />
+              <DocumentHistory request={request} styled />
+              <AdditionalDocuments request={request} onUploaded={reload} />
+            </>
+          ) : null}
         </Reveal>
       </Body>
       {view.showTrackingBar ? (

@@ -14,10 +14,19 @@ const { prisma } = require('../../db/prisma');
 const { streamRequestSummaryPdf } = require('./request-summary.pdf');
 const {
   MOBILITY, URGENCY, EQUIPMENT, isTransportKey, PRIVATE_CHARTER_KEY, PRIVATE_CHARTER_SERVICE_TYPE,
+  isCommercialAirKey, isGroundKey, usesCriticalLevelPage, oxygenLpmProblem, commercialAirCareLevelProblem,
 } = require('../../common/constants/request.constants');
 const { validatePrivateCharterRequest, isObject } = require('./private-charter.validation');
-const { resolveCityRefs } = require('../geo/geo.service');
+const { resolveCityRefs, getVerifiedCity } = require('../geo/geo.service');
+const { isTeleStructuredRequest, isStructuredTeleRow, validateTeleRequest } = require('./tele-consultation.validation');
 const { toPatientRequest, toPatientRequests } = require('./request-response');
+const { isMortalKey, isMortalRequestKey, OLD_MORTAL_KEYS, validateMortalRequest } = require('./mortal-remains.validation');
+const { isHomeKey, validateHomeRequest } = require('./home-healthcare.validation');
+const { isMvtStructuredRequest, cityRefOf, validateMvtRequest } = require('./medical-value-travel.validation');
+const { isMarineStructuredRequest, cityRefOf: marineCityRefOf, validateMarineRequest } = require('./marine-medical-safety.validation');
+const { isCorporateStructuredRequest, validateCorporateRequest, isNewCorporateFormat } = require('./corporate-medical.validation');
+const { validateGenericRequest, unknownFieldsLogLine } = require('./generic-request.validation');
+const { SIGNATURE_BYTES, contentMatchesDeclared } = require('../../common/utils/file-signature');
 
 const REQUIRED_FIELDS = ['serviceType', 'patientName', 'origin', 'destination'];
 const { REQUIRED_SERVICE_BY_KEY } = require('../bitrix/bitrix-lead');
@@ -25,21 +34,10 @@ const { REQUIRED_SERVICE_BY_KEY } = require('../bitrix/bitrix-lead');
 // since older app builds don't send one; "hospital", "marine" (Marine Medical Safety) and
 // "medvalue" (Medical Value Travel) have no Bitrix service mapped yet.
 const SERVICE_KEYS = new Set([...Object.keys(REQUIRED_SERVICE_BY_KEY), 'hospital', 'marine', 'medvalue', 'air']);
-// Mortal Remains as the app asks it now ("Within India / International"); older builds
-// sent plain "mortal" with the ordinary patient form.
-const MORTAL_KEYS = ['mortal_domestic', 'mortal_international'];
-const MORTAL_FIELDS = ['deceasedRelation', 'placeOfDeath', 'dateOfDeath'];
-
-// The deceased's details: all three given, and a date of death that isn't in the future.
-function mortalFieldsError(body) {
-  if (!MORTAL_KEYS.includes(body.serviceKey)) return null;
-  const missing = MORTAL_FIELDS.filter((field) => !body[field]);
-  if (missing.length) return `Missing required field(s): ${missing.join(', ')}`;
-  // A day's slack: "today" in the family's time zone (up to UTC+14) can be tomorrow in UTC.
-  const date = new Date(body.dateOfDeath);
-  if (Number.isNaN(date.getTime()) || date.getTime() > Date.now() + 24 * 60 * 60 * 1000) return 'Invalid dateOfDeath';
-  return null;
-}
+// Mortal Remains: the app sends the single key "mortal"; the two older keys (mortal_domestic / mortal_international) are no longer accepted for new
+// requests. Its rules live in mortal-remains.validation.js. Rows already stored with an older key are untouched and still recognised (isMortalRequestKey).
+// Uploads for a Mortal Remains request: at most this many files per request.
+const MORTAL_MAX_FILES = 10;
 
 const FIELD_ERRORS_MESSAGE = 'Please correct the highlighted fields.';
 
@@ -62,7 +60,53 @@ function medicalFieldsError(body) {
   if (present(body.urgency) && !URGENCY.includes(body.urgency)) {
     return `Invalid urgency. Use one of: ${URGENCY.join(', ')}`;
   }
-  return null;
+  return groundIssueError(body) || criticalLevelCareError(body) || onBoardEquipmentError(body) || oxygenLpmError(body);
+}
+
+// Ground Ambulance: the Present Medical Issue (the request's description) is mandatory. Enforced here whatever the app did; the text is stored as typed.
+// Every other service keeps description optional. (An older Ground app build that sends no description is refused: it is the approved rule.)
+function groundIssueError(body) {
+  if (!isGroundKey(body.serviceKey)) return null;
+  if (typeof body.description === 'string' && body.description.trim() !== '') return null;
+  return 'description (the Present Medical Issue) is required for Ground Ambulance requests';
+}
+
+// Commercial Air's Required on board is Oxygen and Cardiac monitor. The Ventilator is the care level "Ventilated", so a new Commercial Air
+// request cannot ask for it as equipment. (false is tolerated, as older app builds always sent it; it is not stored.)
+function onBoardEquipmentError(body) {
+  if (isGroundKey(body.serviceKey)) {
+    // Ground Ambulance: Required on board is Oxygen only. Cardiac monitor and Ventilator (a care level) are refused when asked for; false is tolerated
+    // (older builds always sent it) and is not stored.
+    if (body.equipCardiacMonitor === true) return 'equipCardiacMonitor is not accepted for Ground Ambulance requests (Required on board is Oxygen only)';
+    if (body.equipVentilator === true) return 'equipVentilator is not accepted for Ground Ambulance requests (Ventilated is a care level)';
+    return null;
+  }
+  if (!isCommercialAirKey(body.serviceKey)) return null;
+  return body.equipVentilator === true || (present(body.equipVentilator) && typeof body.equipVentilator !== 'boolean')
+    ? 'equipVentilator is not accepted for Commercial Air requests (Ventilated is a care level)'
+    : null;
+}
+
+// Commercial Air and Ground Ambulance have their own care levels (ICU, Ventilated, Tracheostomy, ECMO), checked on the server. Every other
+// service keeps its careLevel exactly as before; Private Charter never gets here (its own validator, above, is untouched).
+function criticalLevelCareError(body) {
+  if (!usesCriticalLevelPage(body.serviceKey) || !present(body.careLevel)) return null;
+  return commercialAirCareLevelProblem(body.careLevel);
+}
+
+// Oxygen flow rate (LPM), Commercial Air and Ground Ambulance. Checked on the server whatever the app did: required when
+// Oxygen is chosen, refused when it is not, refused for every other service, and a sensible number.
+// (Private Charter never gets here: it has its own validator above, which does not accept the field.)
+function oxygenLpmError(body) {
+  const given = present(body.equipOxygenLpm);
+  if (!usesCriticalLevelPage(body.serviceKey)) {
+    return given ? 'equipOxygenLpm is only accepted for Commercial Air and Ground Ambulance requests' : null;
+  }
+  if (body.equipOxygen === true) {
+    if (!given) return 'equipOxygenLpm is required when Oxygen is selected';
+    return oxygenLpmProblem(body.equipOxygenLpm);
+  }
+  return given ? 'equipOxygenLpm is only accepted when Oxygen is selected (equipOxygen true)' : null;
 }
 
 //the function for submitting the request
@@ -93,18 +137,92 @@ async function submitRequest(req, res, next) {
       const request = await createRequest(req.user.id, data);
       return res.status(201).json({ request: toPatientRequest(request) });
     }
+    // Teleconsultation in its structured format has its own validator (isolated in tele-consultation.validation.js): it derives the address
+    // fields and the description itself, and the stored request is saved like any other. A Teleconsultation request WITHOUT the structured
+    // fields (an older app build) is not caught here and keeps the original rules below.
+    if (isTeleStructuredRequest(req.body)) {
+      const { error, data } = validateTeleRequest(req.body);
+      if (error) return res.status(400).json({ error });
+      const request = await createRequest(req.user.id, data);
+      return res.status(201).json({ request: toPatientRequest(request) });
+    }
+    // Mortal Remains has its own validator (isolated in mortal-remains.validation.js); it derives the description, the address copy and the stored
+    // formats itself. The two older keys are refused for new requests.
+    if (OLD_MORTAL_KEYS.includes(req.body.serviceKey)) {
+      return res.status(400).json({ error: 'serviceKey must be "mortal" for Mortal Remains requests' });
+    }
+    if (isMortalKey(req.body.serviceKey)) {
+      const { error, data } = validateMortalRequest(req.body);
+      if (error) return res.status(400).json({ error });
+      const request = await createRequest(req.user.id, data);
+      return res.status(201).json({ request: toPatientRequest(request) });
+    }
+    // Home Healthcare has its own validator (isolated in home-healthcare.validation.js): it enforces the new format only (the older generic body, with
+    // Current Location, Destination and Urgency, is refused) and composes the description and the one-line address copy itself.
+    if (isHomeKey(req.body.serviceKey)) {
+      const { error, data } = validateHomeRequest(req.body);
+      if (error) return res.status(400).json({ error });
+      const request = await createRequest(req.user.id, data);
+      return res.status(201).json({ request: toPatientRequest(request) });
+    }
+    // Medical Value Travel in its structured format has its own validator (isolated in medical-value-travel.validation.js). It is chosen by the fields it
+    // carries (treatmentScope, specialty, ...): an older app build sends the generic body for "medvalue", which has none of them and keeps the generic rules
+    // below. A picked city is looked up here (the server decides its country); a typed city is kept as typed and never verified.
+    if (isMvtStructuredRequest(req.body)) {
+      const cities = {};
+      for (const field of ['currentCity', 'destinationCity']) {
+        const ref = cityRefOf(req.body[field]);
+        if (ref.id) cities[field] = await getVerifiedCity(ref.id);
+      }
+      const { error, data } = validateMvtRequest(req.body, { cities });
+      if (error) return res.status(400).json({ error });
+      const request = await createRequest(req.user.id, data);
+      return res.status(201).json({ request: toPatientRequest(request) });
+    }
+    // Marine Medical Safety in its structured format has its own validator (isolated in marine-medical-safety.validation.js), chosen by the fields it carries
+    // (serviceScope, originCity, destinationCity, medicalHistory). An older app build sends the generic body for "marine", which has none of them and keeps the
+    // generic rules below. A picked city is looked up here by the real GeoNames lookup (the server decides its country); a typed city or port is kept exactly as
+    // typed and never verified.
+    if (isMarineStructuredRequest(req.body)) {
+      const cities = {};
+      for (const field of ['originCity', 'destinationCity']) {
+        const ref = marineCityRefOf(req.body[field]);
+        if (ref.id) cities[field] = await getVerifiedCity(ref.id);
+      }
+      const { error, data } = validateMarineRequest(req.body, { cities });
+      if (error) return res.status(400).json({ error });
+      const request = await createRequest(req.user.id, data);
+      return res.status(201).json({ request: toPatientRequest(request) });
+    }
+    // Corporate Medical Solutions in its structured, patient-side format has its own validator (isolated in corporate-medical.validation.js), chosen by the fields it
+    // carries (companyName, employeeCount, programmes, ...). An older app build sends the generic body for "corporate", which has none of them and keeps the generic
+    // rules below. The request is saved through the same flow as every other one; createRequest gives it the standard REQ- reference, which its Case copies (corporateId stays NULL).
+    if (isCorporateStructuredRequest(req.body)) {
+      const { error, data } = validateCorporateRequest(req.body);
+      if (error) return res.status(400).json({ error });
+      const request = await createRequest(req.user.id, data);
+      return res.status(201).json({ request: toPatientRequest(request) });
+    }
     const missing = REQUIRED_FIELDS.filter((field) => !req.body[field]);
     if (missing.length) {
       return res.status(400).json({ error: `Missing required field(s): ${missing.join(', ')}` });
     }
+    // Commercial Air is one of two travel types: the service key says which (Stretcher or Wheelchair). Without it the request is not complete.
+    if (req.body.serviceKey === 'commercialair') {
+      return res.status(400).json({ error: 'Travel type is required: serviceKey must be commercialair_stretcher or commercialair_wheelchair' });
+    }
     if (req.body.serviceKey !== undefined && !SERVICE_KEYS.has(req.body.serviceKey)) {
       return res.status(400).json({ error: 'Unknown serviceKey' });
     }
-    const mortalError = mortalFieldsError(req.body);
-    if (mortalError) return res.status(400).json({ error: mortalError });
     const medicalError = medicalFieldsError(req.body);
     if (medicalError) return res.status(400).json({ error: medicalError });
-    const request = await createRequest(req.user.id, req.body);
+    // The generic path's own check (generic-request.validation.js): the type and size of every key it keeps, another service's own columns refused, and ONLY the kept keys passed on
+    // to createRequest (never the raw body). A problem is a 400 here, not a database error. Stage 1 of unknown keys: they are ignored as before and their NAMES (never values) are
+    // logged once, so a later stage can refuse them with the facts in hand.
+    const { error: genericError, data: genericData, unknownFields } = validateGenericRequest(req.body);
+    if (genericError) return res.status(400).json({ error: genericError });
+    if (unknownFields.length) console.info(unknownFieldsLogLine(req.body.serviceKey, unknownFields, SERVICE_KEYS));
+    const request = await createRequest(req.user.id, genericData);
     res.status(201).json({ request: toPatientRequest(request) });
   } catch (err) {
     next(err);
@@ -142,6 +260,33 @@ async function listMyDocuments(req, res, next) {
     next(err);
   }
 }
+// The type every Mortal Remains upload is stored as.
+const MORTAL_DOCUMENT_TYPE = 'Supporting Document';
+
+// Why a Mortal Remains upload must be refused, or null. (Two uploads arriving at the same instant could pass the count together and exceed the
+// cap by one: the app uploads one file at a time.)
+async function mortalUploadProblem(request, file) {
+  const stored = await prisma.document.count({ where: { caseId: request.case.id } });
+  if (stored >= MORTAL_MAX_FILES) return `A Mortal Remains request can have at most ${MORTAL_MAX_FILES} documents.`;
+  let head = Buffer.alloc(0);
+  try {
+    const handle = await fs.promises.open(file.path, 'r');
+    try {
+      const buffer = Buffer.alloc(SIGNATURE_BYTES);
+      const { bytesRead } = await handle.read(buffer, 0, SIGNATURE_BYTES, 0);
+      head = buffer.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return 'The uploaded file could not be read.';
+  }
+  if (!contentMatchesDeclared(head, file.mimetype, file.originalname)) {
+    return 'The file content does not match its type. Allowed: PDF, JPG, PNG, WEBP, DOC, DOCX.';
+  }
+  return null;
+}
+
 //
 async function uploadRequestDocument(req, res, next) {
   try {
@@ -155,6 +300,16 @@ async function uploadRequestDocument(req, res, next) {
     } catch (err) {
       await discardFile();
       throw err;
+    }
+    // Teleconsultation (structured format) takes no documents. Requests made before it keep what they have and still take uploads.
+    if (isStructuredTeleRow(request)) {
+      await discardFile();
+      return res.status(400).json({ error: 'Document uploads are not available for Teleconsultation requests.' });
+    }
+    // Corporate Medical Solutions (employee-submitted, structured format) takes no documents. Requests made before it keep what they have and still take uploads.
+    if (isNewCorporateFormat(request)) {
+      await discardFile();
+      return res.status(400).json({ error: 'Document uploads are not available for Corporate Medical Solutions requests.' });
     }
     // A request in the review workflow has no Case yet: its files are kept with the request, scanned
     // by ClamAV, and reviewed by an Admin. The same URL and form field as before; an optional
@@ -172,12 +327,20 @@ async function uploadRequestDocument(req, res, next) {
       await discardFile();
       return res.status(409).json({ error: 'This request has no case yet.' });
     }
-    // This is the request form's one upload: "Upload Medical Report", or for Mortal
-    // Remains "Upload Death Certificate". The lead has no death-certificate field, so
-    // that one stays with us (Bitrix has it on the deal; sent once deals are synced).
-    const mortal = MORTAL_KEYS.includes(request.serviceKey);
+    // Mortal Remains has one combined upload ("Death Certificate / Additional Supporting Documents"): the server cannot tell which file is the
+    // certificate, so every file is stored as a neutral "Supporting Document" (never "Death Certificate", never "Medical Report") and none is ever
+    // sent to Bitrix (only "Medical Report" documents are, by this upload and by the retry sweep). Checked first: at most 10 files, and the file's
+    // content must be what its type and name claim.
+    const mortal = isMortalRequestKey(request.serviceKey);
+    if (mortal) {
+      const problem = await mortalUploadProblem(request, req.file);
+      if (problem) {
+        await discardFile();
+        return res.status(400).json({ error: problem });
+      }
+    }
     const document = await addDocumentToCase(request.case.id, {
-      type: mortal ? 'Death Certificate' : 'Medical Report',
+      type: mortal ? MORTAL_DOCUMENT_TYPE : 'Medical Report',
       name: req.file.originalname,
       fileUrl: `/uploads/${req.file.filename}`,
       fileSizeBytes: req.file.size,

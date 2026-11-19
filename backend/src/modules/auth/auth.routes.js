@@ -31,6 +31,8 @@ const {
   resetPassword,
   changePassword,
   corporateLogout,
+  startAccountDeletion,
+  confirmAccountDeletion,
 } = require('./auth.controller');
 
 const authRouter = Router();
@@ -72,5 +74,9 @@ authRouter.patch('/me', requireAuth(['patient']), updateMe);
 authRouter.post('/me/contact', requireAuth(['patient']), patientLoginLimiter, otpSendIpLimiter, requestContactChange);
 authRouter.post('/me/contact/verify-otp', requireAuth(['patient']), otpVerifyLimiter, verifyContactChange);
 authRouter.post('/push-token', requireAuth(['patient']), savePushToken);
+// Retire the signed-in PATIENT's own account (never a corporate or admin one: the role list refuses them). Step 1 sends a code to the account's own contact
+// (no password is asked for); step 2 needs that code, the step-1 ticket and the explicit confirmation. The row is kept and anonymised, never deleted: see auth.controller.js.
+authRouter.post('/me/delete/start', requireAuth(['patient']), patientLoginLimiter, otpSendIpLimiter, startAccountDeletion);
+authRouter.post('/me/delete/confirm', requireAuth(['patient']), otpVerifyLimiter, confirmAccountDeletion);
 
 module.exports = { authRouter };

@@ -47,6 +47,10 @@ model User {
   googleId     String?  @unique @map("google_id")
   appleId      String?  @unique @map("apple_id")
   pushToken    String?  @map("push_token")
+  // Set when the patient retired their account (POST /auth/me/delete/confirm). The row is KEPT, not deleted: their requests, cases and documents
+  // still point at it (those foreign keys are Restrict on purpose). Everything that identifies or lets anyone sign in to the account is
+  // cleared at the same moment, and requireAuth refuses a token for a retired account at once. NULL for every live account.
+  deletedAt    DateTime? @map("deleted_at")
   createdAt    DateTime @default(now()) @map("created_at")
   requests     ServiceRequest[]
   consents     UserConsent[]
@@ -519,7 +523,9 @@ model ServiceRequest {
   patientGender     String?  @map("patient_gender")
   patientLocation   String?  @map("patient_location")
   patientContact    String?  @map("patient_contact")
-  origin            String
+  // VARCHAR(2000): a Corporate Medical Solutions request keeps the company's complete Office Address here (up to 2,000 characters, never cut). Every other service
+  // still stores at most 191 characters in it (its validators and forms are unchanged).
+  origin            String   @db.VarChar(2000)
   destination       String
   country           String?
   // A calendar day, no time of day (SQL DATE). Written as a "YYYY-MM-DD" date at 00:00 UTC, which
@@ -532,11 +538,32 @@ model ServiceRequest {
   deceasedRelation  String?   @map("deceased_relation")
   placeOfDeath      String?   @map("place_of_death")
   dateOfDeath       DateTime? @map("date_of_death")
+  // Mortal Remains only: two independent choices, each validated by the API (not a database enum).
+  transferScope     String?   @map("transfer_scope") @db.VarChar(16) // "domestic" | "international"
+  transportMode     String?   @map("transport_mode") @db.VarChar(32) // "private_charter" | "commercial_air_cargo" | "ground_transportation"
+  // Home Healthcare only (validated by the API, not a database enum). Both are optional answers. Oxygen, Care Level and the Service Date reuse
+  // equip_oxygen, equip_oxygen_lpm, care_level and preferred_date.
+  careRequirement   String?   @map("care_requirement") @db.VarChar(16) // "12_hours" | "24_hours"
+  caretakerTypes    String?   @map("caretaker_types") @db.VarChar(255) // comma-joined, canonical order: "nurse" | "caretaker" | "nurse,caretaker"
+  // Medical Value Travel only (validated by the API): the approved specialty label, and the typed name when the specialty is "Other". NULL on every other service
+  // and on requests made before these columns (those keep them inside the description).
+  specialty         String?   @db.VarChar(191)
+  otherSpecialty    String?   @map("other_specialty") @db.VarChar(191)
+  // Teleconsultation only (validated by the API): "online" | "house_call". A House Call's Domestic / International scope is in transfer_scope. NULL otherwise
+  // and on requests made before this column (those keep it inside the description).
+  consultationType  String?   @map("consultation_type") @db.VarChar(16)
+  // Corporate Medical Solutions, employee-submitted (patient side) only; validated by the API. The company the employee's request is for, how many employees it
+  // covers, and the programmes chosen (a JSON array of keys such as ["doctor","nurse"]). The employee's name is patient_name and the gender patient_gender; the
+  // two optional requirement texts are in the description. NULL on every other service and on requests made before these columns.
+  companyName       String?   @map("company_name") @db.VarChar(191)
+  employeeCount     Int?      @map("employee_count")
+  selectedProgrammes Json?    @map("selected_programmes")
   // The medical page of the New Request form. Mobility and the equipment flags are only set
   // for patient-transport services (null otherwise, and on requests made before the page
   // existed); urgency is null on those older requests too.
   mobility          String?   @db.VarChar(16) // "bedridden" | "wheelchair" | "walking"
   equipOxygen       Boolean?  @map("equip_oxygen")
+  equipOxygenLpm    Float?    @map("equip_oxygen_lpm") // litres per minute; Commercial Air only, and only while equipOxygen is true
   equipCardiacMonitor Boolean? @map("equip_cardiac_monitor")
   equipVentilator   Boolean?  @map("equip_ventilator")
   urgency           String?   @db.VarChar(16) // "critical_6h" | "urgent_24h" | "planned"
@@ -667,7 +694,8 @@ model Case {
   patientGender       String?   @map("patient_gender")
   patientContact      String?   @map("patient_contact")
   serviceType         String    @map("service_type")
-  origin              String
+  // VARCHAR(2000) like service_requests.origin: the Case copies its request's origin, which can now be a 2,000-character Office Address.
+  origin              String    @db.VarChar(2000)
   destination         String
   country             String?
   urgency             String?   @default("routine") // "routine" | "urgent" | "critical"

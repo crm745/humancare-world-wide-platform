@@ -121,7 +121,11 @@ describe('trackingItemFromRequest: the raw request is kept on every patient item
   test('the existing flattened properties are unchanged by keeping the raw request', () => {
     const item = trackingItemFromRequest(FULL);
     const { rawRequest, ...rest } = item;
-    expect(Object.keys(rest).sort()).toEqual(['destination', 'documents', 'mortal', 'origin', 'patientLabel', 'referenceNumber', 'request', 'reviewPill', 'serviceType', 'stageEvents', 'status', 'workflow']);
+    // plus `teleConsultation` (true only for a new-format Teleconsultation, see lib/teleConsultation.js) and `homeHealthcare` (true only for a new-format
+    // Home Healthcare request, see lib/homeHealthcare.js); everything else is as it was
+    expect(Object.keys(rest).sort()).toEqual(['corporate', 'destination', 'documents', 'homeHealthcare', 'mortal', 'origin', 'patientLabel', 'referenceNumber', 'request', 'reviewPill', 'serviceType', 'stageEvents', 'status', 'teleConsultation', 'workflow']);
+    expect(rest.teleConsultation).toBe(false);
+    expect(rest.homeHealthcare).toBe(false);
     expect(rawRequest).toBe(FULL);
   });
 });
@@ -188,7 +192,8 @@ describe('wiring (source checks)', () => {
 
   test('the request details card and the tracking chips come from the same review rules (reviewBanner / reviewPill)', () => {
     expect(fs.readFileSync(path.join(__dirname, '../requestDetailsView.js'), 'utf8')).toContain('reviewBanner(request)');
-    expect(details).toContain('const pill = reviewPill(request);');
+    // (the screen's own `const pill = reviewPill(request)` only fed the Share message, which was removed from this page; the card still takes its status from the shared review rules)
+    expect(details).not.toMatch(/Share\.share/);
     expect(details).not.toMatch(/<Pill /);
     expect(tracking.match(/<RequestStatusPill pill=\{item\.reviewPill\} status=\{item\.status\} \/>/g)).toHaveLength(2);
     expect(tracking).not.toMatch(/<Pill /);

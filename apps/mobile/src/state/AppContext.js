@@ -49,7 +49,16 @@ export const INITIAL_DRAFT = {
   care: [], // the ONE chosen care-level key, as a list of 0 or 1; only asked for air & ground ambulance (see needsCareLevel)
   airlineMode: '', // 'stretcher' | 'wheelchair'; only asked for Commercial Airlines
   // Mortal Remains only (see isMortal); `name`/`age`/`gender` are then the deceased's.
-  mortalTransfer: '', // 'domestic' | 'international'
+  mortalTransfer: '', // (older builds' single choice; no longer asked: see transferScope / transportMode)
+  transferScope: '', // Mortal Remains only: 'domestic' | 'international' (never preselected)
+  transportMode: '', // Mortal Remains only: 'private_charter' | 'commercial_air_cargo' | 'ground_transportation' (never preselected)
+  // Home Healthcare only (see lib/homeHealthcare.js). Every care selection is optional; the Medical History is `desc`, the Service Date is `date`,
+  // the flow rate is `oxygenLpm` and the reports are `files`.
+  homeAddress: '', // the Complete Home Address, exactly as typed
+  homeCaretakers: [], // 'nurse' | 'caretaker', any of them
+  homeCareHours: '', // '12_hours' | '24_hours' | ''
+  homeCareLevel: '', // 'full_icu' | 'semi_icu' | ''
+  homeOxygen: '', // 'yes' | 'no' | '' (not answered)
   relation: '', // the requester's relation to the deceased
   deathPlace: '',
   deathDate: '', // YYYY-MM-DD
@@ -62,6 +71,30 @@ export const INITIAL_DRAFT = {
   equipOxygen: false,
   equipCardiac: false,
   equipVentilator: false,
+  teleScope: '', // Teleconsultation only: 'domestic' | 'international' (never preselected)
+  teleType: '', // Teleconsultation only: 'online' | 'house_call' (never preselected)
+  // Medical Value Travel only (see lib/medicalValueTravel.js). The Medical History is `desc`, the Preferred Treatment Date is `date`, the cities are
+  // `location` / `dest` (with originCity / destCity when picked from the suggestions) and the reports are `files`.
+  treatmentScope: '', // 'domestic' | 'international' (never preselected)
+  specialty: '', // one of MVT_SPECIALTIES
+  otherSpecialty: '', // the specialty in the patient's words, only while specialty is 'Other'
+  // Marine Medical Safety only (see lib/marineMedicalSafety.js). The Medical History is `desc`, the Date of Service is `date`, the places are `location` / `dest` (with
+  // originCity / destCity when picked from the suggestions), the Oxygen flow rate is `oxygenLpm` and the reports are `files`.
+  serviceScope: '', // 'domestic' | 'international' (never preselected)
+  marineCare: [], // the Critical Level keys chosen (crit_icu, crit_ventilated, crit_tracheostomy, crit_ecmo), in the order chosen; none is valid
+  marineOxygen: '', // 'yes' | 'no' | '' (not answered yet: it must be answered before sending)
+  // Corporate Medical Solutions only (see lib/corporateMedical.js). The Name of Employee is `name` and the Gender is `gender`.
+  corpCompany: '', // Company Name
+  corpEmployees: '', // No. of Employees, digits only as typed
+  corpProgrammes: [], // the programme keys chosen (any of the seven; at least one is needed)
+  corpAny: '', // Any Requirement (optional), as typed
+  corpSpecial: '', // Special Requirement (optional), as typed
+  corpOfficeAddress: '', // Office Address (the company's complete office address), multiline, as typed; at most 2,000 characters
+  corpOfficeCountry: '', // Office Country: the country's name, for display (the COMPANY OFFICE's country, never the patient's)
+  corpOfficeCountryIso: '', // its ISO code, which is what is sent. Independent of the phone's country code (cc / phoneCountry)
+  address: '', // Teleconsultation only: the Current Address, multiline, as typed
+  allergies: '', // Teleconsultation only: Any Allergic Issue? (the Present Medical Issue is `desc`, the House Call's Preferred Visit Date is `date`)
+  oxygenLpm: '', // Commercial Air only: the oxygen flow rate (LPM), typed text; asked while equipOxygen is on (see lib/requestForm.js)
   urgency: '', // 'critical_6h' | 'urgent_24h' | 'planned'
   changingService: false, // set while the person is picking another service from the request form
 };

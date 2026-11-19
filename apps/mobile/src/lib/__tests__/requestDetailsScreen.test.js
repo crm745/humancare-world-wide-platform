@@ -39,11 +39,20 @@ describe('Request Details is drawn to the design (source checks)', () => {
     expect(screen).toContain('<Icon size={20} color={C.blueText} />');
     expect(screen).toContain("marginTop: 16, flexDirection: 'row', gap: 8");
   });
-  test('the three actions are the same as before: the summary PDF, the share text, a phone call', () => {
+  // Share was removed from this page (a deliberate product decision). The summary PDF Download and the phone call are exactly as they were; the two remaining
+  // actions share the row (each is flex: 1, so they fill it evenly); Document Preview keeps its own Share.
+  test('two actions remain, the same as before: the summary PDF and a phone call; there is no Share action, handler or import', () => {
     expect(screen).toContain("downloadAndShare(`/requests/me/${request.id}/summary`, `${request.referenceNumber}-summary.pdf`)");
-    expect(screen).toContain('Share.share(');
     expect(screen).toContain("Linking.openURL('tel:+919699999065')");
     expect(screen).toContain("toast('Downloading request summary…')");
+    expect(screen).not.toMatch(/Share\.share|Share2|rd_share|shareRequest|onShare/);
+    expect((screen.match(/<Action Icon=/g) || [])).toHaveLength(2);
+    expect(screen).toContain("<Action Icon={Download} label={t('rd_download')} onPress={onDownload} />");
+    expect(screen).toContain("<Action Icon={Phone} label={t('rd_contact_team')} onPress={onContact} />");
+  });
+  test('Document Preview keeps its own Share', () => {
+    const preview = require('fs').readFileSync(require('path').join(__dirname, '../../app/document-preview.js'), 'utf8');
+    expect(preview).toContain('Share2');
   });
   test('live tracking: a 16/22/800 title, the Case active chip, five 6-tall segments with a 4 gap, the step line and the update time', () => {
     expect(screen).toContain('fontFamily: FONT[800], fontSize: 16, lineHeight: 22');

@@ -48,6 +48,7 @@ export function RequestCard({ item, onPress, t, isRTL, isNew }) {
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={{ fontFamily: FONT[800], fontSize: L.nameSize, lineHeight: L.nameLine, color: NAVY }}>{v.name}</Text>
+          {v.person ? <Text style={{ fontFamily: FONT[600], fontSize: L.subSize, lineHeight: L.subLine, color: INK }}>{`${v.person.label}: ${v.person.name}`}</Text> : null}
           {v.sub ? <Text style={{ fontFamily: FONT[400], fontSize: L.subSize, lineHeight: L.subLine, color: MUTED }}>{v.sub}</Text> : null}
           {badgeBelow ? <View style={{ marginTop: 6 }}>{badge}</View> : null}
         </View>

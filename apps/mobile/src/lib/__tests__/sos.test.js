@@ -12,7 +12,7 @@ const shows = (pathname, extra = {}) => S.sosFabVisible({ pathname, ...ctx, ...e
 // Every route in app/, grouped as in the brief.
 const TAB_SCREENS = ['/all-services', '/my-requests', '/profile'];
 const OTHER_SIGNED_IN = [
-  '/my-documents', '/notifications', '/personal-details', '/edit-profile', '/change-contact', '/change-contact-otp',
+  '/my-documents', '/notifications', '/personal-details', '/edit-profile', '/change-contact', '/change-contact-otp', '/about', '/delete-account', '/delete-account-otp',
   '/request-details', '/request-tracking', '/tracking', '/select-service', '/service/air', '/service/marine', '/air-ambulance',
   '/help-support', '/terms', '/privacy',
 ];

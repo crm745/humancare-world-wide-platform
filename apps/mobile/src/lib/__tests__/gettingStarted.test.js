@@ -17,7 +17,10 @@ describe('Getting Started: one page', () => {
     expect(welcome).toContain("const finish = () => router.push('/login');");
   });
   test('a new person with no saved session still lands on it from the splash', () => {
-    expect(read('app/index.js')).toContain("navReplace(token ? '/home' : '/welcome');");
+    // (the splash now decides from the resolved authentication state, in lib/splash.js; the full behaviour is checked in splash.test.js)
+    expect(read('app/index.js')).toContain('splashDecision({ status: authStatus, minElapsed, timedOut, navigated: navigated.current })');
+    expect(read('lib/splash.js')).toContain("export const START_ROUTE = '/welcome'; // Getting Started");
+    expect(require('../splash').destinationFor('anon')).toBe('/welcome'); // no saved session -> no valid session -> Getting Started
   });
 });
 

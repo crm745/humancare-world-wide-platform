@@ -24,6 +24,11 @@ const EVENTS = {
   EMAIL_CHANGED: 'email_changed',
   SOCIAL_LOGIN_SUCCEEDED: 'social_login_succeeded',
   SOCIAL_LOGIN_REFUSED: 'social_login_refused',
+  // Account retirement (POST /auth/me/delete/*). Never holds a password or code.
+  ACCOUNT_DELETE_STARTED: 'account_delete_started', // re-authentication passed, a code was sent
+  ACCOUNT_DELETE_FAILED: 'account_delete_failed', // wrong password at the first step
+  ACCOUNT_DELETE_BLOCKED: 'account_delete_blocked', // refused: requests are still in progress (Operations can see these in the log)
+  ACCOUNT_DELETED: 'account_deleted', // the account was retired
 };
 
 async function recordSecurityEvent(req, event, { userId = null, identifier = null, detail = null } = {}) {

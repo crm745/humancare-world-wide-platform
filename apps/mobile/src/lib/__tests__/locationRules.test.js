@@ -193,7 +193,10 @@ describe('8. the destination keeps its OWN country and identifier (it is never g
     const body = review.slice(review.indexOf("apiPost('/requests', {"), review.indexOf('// The request is saved, so a file that fails'));
     expect(body).toContain('origin: d.location,');
     expect(body).toContain('destination: d.dest,');
-    expect(body).toContain('...(mortal ? { deceasedRelation: d.relation, placeOfDeath: d.deathPlace, dateOfDeath: d.deathDate } : {}),');
+    // Mortal Remains sends its own structured body (lib/mortalRemains.js buildMortalPayload: origin = Current Location, destination = Destination);
+    // the generic body no longer carries its deceased fields.
+    expect(review).toContain('buildMortalPayload(d)');
+    expect(body).not.toContain('deceasedRelation');
   });
 });
 

@@ -15,6 +15,9 @@ import { formatDayMonth, formatTime } from './dateFormat';
 import { trackingView } from './requestTracking';
 import { baseServiceName, statusBadge, textOf } from './requestDetailsView';
 import { serviceKeyOf } from './myRequestsView';
+import { isNewTeleRequest } from './teleConsultation';
+import { isNewHomeRequest } from './homeHealthcare';
+import { isNewCorporateRequest } from './corporateMedical';
 
 // "15 Nov, 06:45" in the language the app is showing; '' for a missing or invalid time.
 export function whenText(iso) {
@@ -107,8 +110,11 @@ export function buildTrackingDetails(request, t) {
   const total = steps.length;
   const index = currentIndexOf(steps);
   const current = steps[index];
-  const from = cityOf(request.originCityName, request.origin);
-  const to = cityOf(request.destinationCityName, request.destination);
+  // A new-format Teleconsultation has no route (its origin is an address, and it has no destination): the route is not drawn.
+  // (a new-format Home Healthcare request has a home address, not a route, either; nor does a new-format Corporate Medical Solutions request: its origin is the Office Address)
+  const tele = isNewTeleRequest(request) || isNewHomeRequest(request) || isNewCorporateRequest(request);
+  const from = tele ? '' : cityOf(request.originCityName, request.origin);
+  const to = tele ? '' : cityOf(request.destinationCityName, request.destination);
   const label = [
     from && to ? t('mr_a11y_route', { from, to }) : from || to,
     current ? t('mr_a11y_step', { n: index + 1, total }) : '',

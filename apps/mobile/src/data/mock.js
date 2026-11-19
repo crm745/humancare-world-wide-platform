@@ -62,9 +62,7 @@ export function requestService(draft, services) {
   if (needsAirlineMode(service) && draft.airlineMode) {
     return { title: `${title} — ${AIRLINE_MODE_LABELS[draft.airlineMode]}`, key: `${service}_${draft.airlineMode}` };
   }
-  if (isMortal(service) && draft.mortalTransfer) {
-    return { title: `${title} — ${MORTAL_TRANSFER_LABELS[draft.mortalTransfer]}`, key: `${service}_${draft.mortalTransfer}` };
-  }
+  // Mortal Remains is one service: the key "mortal" and the fixed name. Its Transfer Scope and Transport Mode are sent as their own fields.
   return { title, key: service };
 }
 

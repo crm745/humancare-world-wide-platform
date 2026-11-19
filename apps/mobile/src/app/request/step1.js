@@ -5,8 +5,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar, ChevronDown } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
 import {
-  AIRLINE_MODES, AIRLINE_MODE_LABELS, DECEASED_RELATIONS, MORTAL_TRANSFERS,
-  isMortal, needsAirlineMode,
+  DECEASED_RELATIONS, MORTAL_TRANSFERS,
+  isMortal,
 } from '../../data/mock';
 import { nameOf } from '../../lib/phoneCountry';
 import { apiGet } from '../../lib/api';
@@ -20,6 +20,18 @@ import CityField from '../../components/request/CityField';
 import { Anchor, RequestFrame } from '../../components/request/RequestFrame';
 import { Field, FieldLabel, Input, Text } from '../../components/ui';
 import { Select, Sheet } from '../../components/widgets';
+import { TeleStep1 } from '../../components/request/TeleStep1';
+import { isTeleService } from '../../lib/teleConsultation';
+import { MortalStep1 } from '../../components/request/MortalStep1';
+import { isMortalService } from '../../lib/mortalRemains';
+import { HomeStep1 } from '../../components/request/HomeStep1';
+import { isHomeService } from '../../lib/homeHealthcare';
+import { MvtStep1 } from '../../components/request/MvtStep1';
+import { isMvtService } from '../../lib/medicalValueTravel';
+import { MarineStep1 } from '../../components/request/MarineStep1';
+import { isMarineService } from '../../lib/marineMedicalSafety';
+import { CorporateStep1 } from '../../components/request/CorporateStep1';
+import { isCorporateService } from '../../lib/corporateMedical';
 
 // What the Mortal Remains answers READ in the app's language. Only the shown text: the value stored and sent stays the English one ("Father",
 // "domestic"), so nothing the backend compares changes.
@@ -141,7 +153,7 @@ function SectionHeading({ children, first }) {
 // Step 1 of 3: the patient and the trip. For Mortal Remains the same page asks about the
 // deceased instead, in calmer wording. What the person needs, and how to word it, comes on
 // the next page.
-export default function RequestStep1() {
+function GenericStep1() {
   const { t, draft, updateDraft, serverErrors } = useApp();
   const mortal = isMortal(draft.service);
   // Private Charter: the cities are picked from the server's verified list, and the API's own
@@ -164,7 +176,6 @@ export default function RequestStep1() {
     ['dest', locationProblems(d, charter).dest !== null],
     ['phone', !isValidMobileNumber(draft.phone, draft.cc)],
     ['date', !isValidDateString(draft.date)],
-    ...(needsAirlineMode(draft.service) ? [['airlineMode', !draft.airlineMode]] : []),
     ...(mortal ? [['mortalTransfer', !draft.mortalTransfer]] : []),
   ];
   const firstError = (patch) => problemsFor(patch ? { ...draft, ...patch } : draft).find(([, wrong]) => wrong)?.[0] || null;
@@ -293,16 +304,6 @@ export default function RequestStep1() {
           error={(attempted || draft.date) && !isValidDateString(draft.date) ? 'Enter a valid date.' : serverError('preferredDate')}
         />
       </Anchor>
-      {needsAirlineMode(draft.service) && (
-        <Anchor id="airlineMode">
-          <FieldLabel required>{t('field_airline_mode')}</FieldLabel>
-          <Select
-            value={draft.airlineMode} options={AIRLINE_MODES} labels={AIRLINE_MODE_LABELS}
-            onChange={(airlineMode) => updateDraft({ airlineMode })} title={t('field_airline_mode')} placeholder="Stretcher or wheelchair"
-          />
-          {attempted && !draft.airlineMode ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : null}
-        </Anchor>
-      )}
       {mortal && (
         <Anchor id="mortalTransfer">
           <FieldLabel required>{t('field_mortal_transfer')}</FieldLabel>
@@ -323,4 +324,16 @@ export default function RequestStep1() {
       />
     </RequestFrame>
   );
+}
+
+// Teleconsultation ("tele"), Mortal Remains ("mortal") and Home Healthcare ("homecare") have their own Step 1 (components/request/TeleStep1.js, MortalStep1.js,
+// HomeStep1.js); every other service keeps the page above, unchanged.
+export default function RequestStep1() {
+  const { draft } = useApp();
+  if (isCorporateService(draft.service)) return <CorporateStep1 />;
+  if (isHomeService(draft.service)) return <HomeStep1 />;
+  if (isMvtService(draft.service)) return <MvtStep1 />;
+  if (isMarineService(draft.service)) return <MarineStep1 />;
+  if (isMortalService(draft.service)) return <MortalStep1 />;
+  return isTeleService(draft.service) ? <TeleStep1 /> : <GenericStep1 />;
 }

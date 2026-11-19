@@ -169,9 +169,9 @@ describe('every screen with inputs uses it', () => {
       expect({ file, listener: /Keyboard\.addListener/.test(src) }).toEqual({ file, listener: false });
     });
   });
-  test('the only raw TextInputs: the shared Input, the registered description, the code boxes and the search boxes', () => {
+  test('the only raw TextInputs: the shared Input, the registered descriptions (the request form\'s multiline input too), the code boxes and the search boxes', () => {
     const raw = code.filter((f) => /<TextInput/.test(read(f))).sort();
-    expect(raw).toEqual(['app/request/step2.js', 'components/NationalityPhone.js', 'components/requests/RequestsHeader.js', 'components/ui.js', 'components/widgets.js']);
+    expect(raw).toEqual(['app/request/step2.js', 'components/NationalityPhone.js', 'components/request/MultilineInput.js', 'components/requests/RequestsHeader.js', 'components/ui.js', 'components/widgets.js']);
   });
 });
 

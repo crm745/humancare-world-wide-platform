@@ -119,6 +119,13 @@ function medicalRows(medical, t, pair) {
     rows.push(['urgency', t('rd_urgent'), <Chip key="u" bg={medical.urgency.bg} fg={medical.urgency.fg} Icon={medical.urgency.alert ? CircleAlert : null}>{medical.urgency.label}</Chip>]);
   }
   if (medical.condition) rows.push(['condition', medical.conditionLabel, <Condition key="c" text={medical.condition} t={t} />]);
+  // Teleconsultation: the allergies and the visit date, each as a labelled line after the condition.
+  (medical.details || []).forEach((row) => {
+    rows.push([row.key, row.label, <AlignedText key={row.key} style={[{ fontFamily: FONT[700], fontSize: 15, lineHeight: 21, color: C.ink }, WRAP]}>{row.value}</AlignedText>]);
+  });
+  if (medical.travel) {
+    rows.push(['travel', t('field_airline_mode'), <AlignedText key="t" style={[{ fontFamily: FONT[700], fontSize: 15, lineHeight: 21, color: C.ink }, WRAP]}>{medical.travel}</AlignedText>]);
+  }
   if (pair && (medical.care.length || medical.mobility)) {
     rows.push(['pair', null, (
       <View key="pair" style={{ flexDirection: 'row', gap: 12 }}>

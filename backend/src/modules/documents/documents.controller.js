@@ -24,6 +24,8 @@ async function downloadDocument(req, res, next) {
 
     // Every other document is a legacy one, from before the workflow: it has no scan or checksum data
     // and is served exactly as it always was. Having no such data is not a reason to refuse it.
+    // The browser must not guess a different type than the one sent (shared by every service; the workflow branch above already did this).
+    res.set('X-Content-Type-Options', 'nosniff');
     return res.download(path.join(UPLOAD_DIR, filename), document.name, { dotfiles: 'allow' });
   } catch (err) {
     next(err);

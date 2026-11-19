@@ -18,7 +18,14 @@
 //                    Telugu or Arabic.
 // A value that is not a string (null, undefined) is returned as it is.
 
-const { CARE_LEVEL_KEYS, CARE_LEVEL_LEGACY_LABELS, CARE_LEVEL_LABEL_EN } = require('../constants/request.constants');
+const {
+  CARE_LEVEL_KEYS, CARE_LEVEL_LEGACY_LABELS, CARE_LEVEL_LABEL_EN, COMMERCIAL_AIR_CARE_LEVEL_KEYS, COMMERCIAL_AIR_CARE_LEVEL_LABEL_EN,
+} = require('../constants/request.constants');
+
+// Commercial Air's own four keys (ICU, Ventilated, Tracheostomy, ECMO) read the same way as the original ones. Private Charter and
+// older requests never hold them, so what they show does not change.
+const KNOWN_KEYS = [...CARE_LEVEL_KEYS, ...COMMERCIAL_AIR_CARE_LEVEL_KEYS];
+const LABEL_EN = { ...CARE_LEVEL_LABEL_EN, ...COMMERCIAL_AIR_CARE_LEVEL_LABEL_EN };
 
 const LABEL_TO_KEY = new Map(
   Object.entries(CARE_LEVEL_LEGACY_LABELS).flatMap(([key, labels]) => labels.map((label) => [label.normalize('NFC'), key])),
@@ -26,7 +33,7 @@ const LABEL_TO_KEY = new Map(
 
 function keyOf(piece, translateLegacy) {
   const text = piece.trim().normalize('NFC');
-  if (CARE_LEVEL_KEYS.includes(text)) return text;
+  if (KNOWN_KEYS.includes(text)) return text;
   if (translateLegacy && LABEL_TO_KEY.has(text)) return LABEL_TO_KEY.get(text);
   return null;
 }
@@ -35,12 +42,12 @@ function careLevelText(value, { translateLegacy = false } = {}) {
   if (typeof value !== 'string' || value === '') return value;
   const pieces = value.split(',');
   const keys = pieces.map((piece) => keyOf(piece, translateLegacy));
-  if (keys.every(Boolean)) return keys.map((key) => CARE_LEVEL_LABEL_EN[key]).join(', ');
+  if (keys.every(Boolean)) return keys.map((key) => LABEL_EN[key]).join(', ');
   return pieces.map((piece, i) => {
     if (!keys[i]) return piece;
     const leading = piece.match(/^\s*/)[0];
     const trailing = piece.match(/\s*$/)[0];
-    return `${leading}${CARE_LEVEL_LABEL_EN[keys[i]]}${trailing}`;
+    return `${leading}${LABEL_EN[keys[i]]}${trailing}`;
   }).join(',');
 }
 

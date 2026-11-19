@@ -243,7 +243,7 @@ describe('creating a Private Charter request in the workflow', () => {
   });
 
   it('is unchanged for other services even with the workflow on', async () => {
-    const r = await newRequest({ serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground', patientName: 'John Doe', origin: 'Pune', destination: 'Mumbai' });
+    const r = await newRequest({ serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground', patientName: 'John Doe', origin: 'Pune', destination: 'Mumbai', description: 'Needs transport.' });
     expect(r.res.status).toBe(201);
     expect(r.res.body.request.reviewStatus).toBeNull();
     const made = await caseOf(r.id);

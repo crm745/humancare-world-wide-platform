@@ -3,7 +3,7 @@ import { Pressable, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import Constants from 'expo-constants';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BookOpen, Bell, Check, ChevronRight, CircleHelp, CreditCard, FileText, Globe, LogOut, ShieldCheck, User } from 'lucide-react-native';
+import { BookOpen, Bell, Check, ChevronRight, CircleHelp, CreditCard, FileText, Globe, Info, LogOut, ShieldCheck, User, UserX } from 'lucide-react-native';
 import { initialsOf, useApp } from '../state/AppContext';
 import { LANGUAGES } from '../data/mock';
 import { navReplace } from '../lib/nav';
@@ -116,6 +116,8 @@ export default function Profile() {
   const support = [
     { Icon: CircleHelp, label: t('prof_help'), onPress: () => router.push('/help-support') },
     { Icon: BookOpen, label: t('prof_terms'), onPress: () => router.push('/terms') },
+    // About HumanCare: the company, its services, its contacts and legal pages (about.js). Directly above Delete account.
+    { Icon: Info, label: t('prof_about'), onPress: () => router.push('/about') },
   ];
 
   const email = profile.email || '';
@@ -149,6 +151,23 @@ export default function Profile() {
           <Section label={t('prof_account')} rows={account} />
           <Section label={t('prof_preferences')} rows={preferences} />
           <Section label={t('prof_support')} rows={support} />
+
+          {/* Delete account: patients only (a corporate account is managed by Admin, and the server refuses it too). It opens a screen that explains what
+              happens and re-authenticates: it never deletes anything by itself. Directly above Log out. */}
+          {isCorporate ? null : (
+            <PressBox
+              accessibilityRole="button"
+              accessibilityLabel={t('prof_delete')}
+              onPress={() => router.push('/delete-account')}
+              style={({ pressed }) => ({
+                minHeight: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                backgroundColor: pressed ? '#FFF1F1' : '#FFF6F6', borderWidth: 1, borderColor: '#F3C4C4', borderRadius: 18,
+              })}
+            >
+              <UserX size={20} strokeWidth={1.9} color="#C53030" />
+              <Text className="font-inter-bold" style={{ fontSize: 15.5, color: '#C53030' }}>{t('prof_delete')}</Text>
+            </PressBox>
+          )}
 
           <PressBox
             accessibilityRole="button"

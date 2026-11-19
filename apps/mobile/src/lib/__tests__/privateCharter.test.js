@@ -281,7 +281,8 @@ describe('requestService (the service name and key a request is sent under)', ()
     expect(requestService({ service: 'hospital' }, SERVICES)).toEqual({ title: SERVICES.hospital.title, key: 'hospital' });
     expect(requestService({ service: 'commercialair', airlineMode: 'stretcher' }, SERVICES).key).toBe('commercialair_stretcher');
     expect(requestService({ service: 'commercialair', airlineMode: '' }, SERVICES).key).toBe('commercialair');
-    expect(requestService({ service: 'mortal', mortalTransfer: 'domestic' }, SERVICES).key).toBe('mortal_domestic');
-    expect(requestService({ service: 'mortal', mortalTransfer: 'international' }, SERVICES).key).toBe('mortal_international');
+    // Mortal Remains is one service now ("mortal"): its scope and mode are their own fields, not a key suffix.
+    expect(requestService({ service: 'mortal', mortalTransfer: 'domestic' }, SERVICES).key).toBe('mortal');
+    expect(requestService({ service: 'mortal', transferScope: 'international', transportMode: 'private_charter' }, SERVICES)).toEqual({ title: SERVICES.mortal.title, key: 'mortal' });
   });
 });

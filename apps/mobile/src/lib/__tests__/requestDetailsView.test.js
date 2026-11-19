@@ -26,6 +26,29 @@ const charter = {
 };
 const caseOf = (status, stages = []) => ({ id: 3, status, stageEvents: stages.map(([stage, occurredAt]) => ({ stage, occurredAt, note: null })), documents: [] });
 
+describe('Teleconsultation: the type and the House Call scope are shown from their columns', () => {
+  const tele = { ...base, serviceType: 'Tele Consultation & House Call', serviceKey: 'tele', origin: 'Flat 4B, Pune', destination: '', urgency: null, description: 'Present medical issue:\nFever' };
+  const fieldsOf = (request) => Object.fromEntries(V.detailsView(request, t).patient.fields.map((f) => [f.key, f.value]));
+  test('a request with consultation_type shows Consultation type, Scope (House Call) and the address', () => {
+    const house = fieldsOf({ ...tele, consultationType: 'house_call', transferScope: 'domestic' });
+    expect(house).toMatchObject({ consultType: t('tele_type_house_call'), consultScope: t('tele_scope_domestic'), address: 'Flat 4B, Pune' });
+    const online = fieldsOf({ ...tele, consultationType: 'online', transferScope: null });
+    expect(online.consultType).toBe(t('tele_type_online'));
+    expect(online).not.toHaveProperty('consultScope');
+  });
+  test('a request made before the column keeps its old display (the type is inside its description)', () => {
+    const old = fieldsOf({ ...tele, description: 'Scope: Domestic\nConsultation type: House Call\n\nPresent medical issue:\nFever' });
+    expect(old).not.toHaveProperty('consultType');
+    expect(old).not.toHaveProperty('consultScope');
+    expect(V.detailsView({ ...tele, description: 'Scope: Domestic\nConsultation type: House Call' }, t).medical.condition).toContain('Consultation type: House Call');
+  });
+  test('an unknown type or scope value shows nothing instead of a raw key', () => {
+    const odd = fieldsOf({ ...tele, consultationType: 'video', transferScope: 'private_charter' });
+    expect(odd).not.toHaveProperty('consultType');
+    expect(odd).not.toHaveProperty('consultScope');
+  });
+});
+
 describe('values that are empty are never shown', () => {
   test.each([null, undefined, '', '   ', 'null', 'undefined'])('%p is nothing', (v) => expect(V.textOf(v)).toBe(''));
   test('a real value is trimmed, and 0 is a value', () => {
@@ -129,8 +152,8 @@ describe('the service, its base name, and the travel and transfer type', () => {
     const mortal = { ...base, serviceKey: 'mortal_international', serviceType: 'Mortal Remains — International' };
     expect(V.baseServiceName(stretcher, t)).toBe('Commercial Airlines');
     expect(V.baseServiceName(mortal, t)).not.toMatch(/—/);
-    expect(t(V.travelTypeKey(stretcher))).toBe('Stretcher (CAS)');
-    expect(t(V.travelTypeKey(wheel))).toBe('Wheelchair (CAW)');
+    expect(t(V.travelTypeKey(stretcher))).toBe('Stretcher');
+    expect(t(V.travelTypeKey(wheel))).toBe('Wheelchair');
     expect(t(V.transferTypeKey(mortal))).toBe('International');
     expect(t(V.transferTypeKey({ ...mortal, serviceKey: 'mortal_domestic' }))).toBe('Within India');
     expect(V.travelTypeKey(base)).toBeNull();
@@ -142,8 +165,9 @@ describe('the service, its base name, and the travel and transfer type', () => {
     expect(V.baseServiceName({ serviceType: 'Home Healthcare — Something' }, t)).toBeTruthy();
   });
   test('the travel and transfer labels in i18n equal the constants the form sends (English)', () => {
-    expect(i18n.EN.rd_travel_stretcher).toBe(mock.AIRLINE_MODE_LABELS.stretcher);
-    expect(i18n.EN.rd_travel_wheelchair).toBe(mock.AIRLINE_MODE_LABELS.wheelchair);
+    // what the screens SAY is just Stretcher / Wheelchair; the service name that is sent with the request (AIRLINE_MODE_LABELS, below) keeps its codes
+    expect(i18n.EN.rd_travel_stretcher).toBe('Stretcher');
+    expect(i18n.EN.rd_travel_wheelchair).toBe('Wheelchair');
     expect(i18n.EN.rd_transfer_domestic).toBe(mock.MORTAL_TRANSFER_LABELS.domestic);
     expect(i18n.EN.rd_transfer_international).toBe(mock.MORTAL_TRANSFER_LABELS.international);
     for (const rel of mock.DECEASED_RELATIONS) expect(i18n.EN[`rd_rel_${rel.toLowerCase()}`]).toBe(rel);
@@ -250,18 +274,19 @@ describe('the whole screen model', () => {
     expect(view.medical.equipment.items).toEqual(['Oxygen']);
     expect(view.trip.rows).toEqual([{ key: 'date', label: 'Date of service', value: '14 Nov 2026', full: false }]);
   });
-  test('Mortal Remains: the deceased, the relation, the place and day of death, the transfer date and type', () => {
+  test('Mortal Remains (an older request, scope only in its key): the deceased, the relation, the place and day of death, the transfer date and type', () => {
     const mortal = { ...base, serviceKey: 'mortal_international', serviceType: 'Mortal Remains — International', deceasedRelation: 'Son', placeOfDeath: 'Dubai Hospital, Dubai', dateOfDeath: '2026-11-10T00:00:00.000Z' };
     const view = V.detailsView(mortal, t);
     expect(view.patient.titleKey).toBe('rd_deceased');
-    expect(view.patient.fields.find((f) => f.key === 'name').label).toBe('Deceased name');
+    // (relabelled "Deceased Person's Name", the approved wording, everywhere)
+    expect(view.patient.fields.find((f) => f.key === 'name').label).toBe("Deceased Person's Name");
     expect(view.patient.fields.filter((f) => ['relation', 'deathPlace', 'deathDate'].includes(f.key)).map((f) => [f.value, f.full])).toEqual([['Son', true], ['Dubai Hospital, Dubai', true], ['10 Nov 2026', true]]);
     expect(view.trip.rows.map((r) => r.label)).toEqual(['Preferred transfer date', 'Transfer type']);
     expect(view.medical.conditionLabel).toBe('Details');
   });
   test('Commercial Airlines adds the travel type to the trip', () => {
     const view = V.detailsView({ ...base, serviceKey: 'commercialair_wheelchair', serviceType: 'Commercial Airlines — Wheelchair (CAW)', mobility: 'wheelchair' }, t);
-    expect(view.trip.rows.map((r) => r.value)).toEqual(['14 Nov 2026', 'Wheelchair (CAW)']);
+    expect(view.trip.rows.map((r) => r.value)).toEqual(['14 Nov 2026', 'Wheelchair']);
   });
   test('an older request with no mobility, equipment or urgency still builds', () => {
     const view = V.detailsView({ ...charter, mobility: null, equipOxygen: null, equipCardiacMonitor: null, equipVentilator: null, urgency: null, careLevel: null, description: null }, t);

@@ -6,7 +6,7 @@ import { useApp } from '../../state/AppContext';
 import SERVICES from '../../data/services.json';
 import { IMAGES } from '../../data/images';
 import { apiGet } from '../../lib/api';
-import { isMissingLiveService } from '../../lib/serviceLookup';
+import { detailContent, isMissingLiveService, liveSlugFor } from '../../lib/serviceLookup';
 import { Body, Screen, TopBar } from '../../components/layout';
 import { Button, Card, Heading, SectionLabel, Text } from '../../components/ui';
 
@@ -19,7 +19,7 @@ export default function ServiceDetail() {
   const [live, setLive] = useState(null);
 
   useEffect(() => {
-    apiGet(`/services/${key}`)
+    apiGet(`/services/${liveSlugFor(key)}`)
       .then(({ service }) => setLive(service))
       // A 404 only means "no editable text for this service" (see lib/serviceLookup.js): the bundled
       // content is used silently. Any other failure is still shown.
@@ -27,9 +27,7 @@ export default function ServiceDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch only when the key changes
   }, [key]);
 
-  const title = live?.name || local.title;
-  const desc = live?.description || local.desc;
-  const features = live?.provides?.length ? live.provides : local.features;
+  const { title, desc, features } = detailContent(local, live, key);
 
   // Corporates submit through their own Case form (/corporate/cases), never the
   // patient-only /requests flow — that endpoint rejects non-patient tokens outright.

@@ -74,7 +74,7 @@ describe('1-2. a tap opens the preview (Request Details and My Documents use the
   test('9. and neither screen can reach the share sheet: no Sharing, no Share.share for a document, no download-and-share', () => {
     const documents = code('app/my-documents.js');
     expect(documents).not.toMatch(/Sharing|shareAsync|Share\.share|downloadDocument|downloadAndShare|openDocument\(/);
-    const details = code('app/request-details.js').replace(/const shareRequest[\s\S]*?\n {2}};\n/, ''); // the request's own "Share" action is a different feature
+    const details = code('app/request-details.js'); // (the request's own "Share" action no longer exists)
     expect(details).not.toMatch(/Sharing\.|shareAsync|downloadDocument/);
     expect(details).not.toMatch(/openDocument\(`/);
     expect(code('lib/documentPreview.js')).not.toMatch(/Sharing|shareAsync|Share\.share/);

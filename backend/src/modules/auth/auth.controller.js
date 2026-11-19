@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const disposableDomains = require("disposable-email-domains");
 const { prisma } = require("../../db/prisma");
 const { normalizeMobile, normalizeEmail, maskContact } = require("../../common/utils/phone");
@@ -485,6 +486,7 @@ const TICKET_PURPOSE = {
   login_otp: "patient_login",
   reset_otp: "patient_password_reset",
   change_contact_otp: (step) => (step.kind === "mobile" ? "patient_change_mobile" : "patient_change_email"),
+  delete_account_otp: "patient_delete_account",
 };
 const REGISTRATION_STEPS = ["register_otp"];
 
@@ -787,9 +789,9 @@ async function refreshAccessToken(req, res) {
   if (payload.role === "patient") {
     const user = await prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { tokenVersion: true, isVerified: true },
+      select: { tokenVersion: true, isVerified: true, deletedAt: true },
     });
-    if (!user || !user.isVerified || user.tokenVersion !== (payload.tv ?? 0)) {
+    if (!user || !user.isVerified || user.deletedAt || user.tokenVersion !== (payload.tv ?? 0)) {
       return res.status(401).json({ error: "Your session has ended. Please log in again." });
     }
     claims.tv = user.tokenVersion;
@@ -1064,6 +1066,93 @@ async function corporateLogout(req, res) {
   res.json({ message: "Logged out." });
 }
 
+// --- Account retirement ("Delete account") -------------------------------------------------------------------------------------------------------------
+// PATIENT accounts only (the routes are behind requireAuth(['patient'])). The account is RETIRED, not deleted: the users row stays, because the patient's
+// requests, cases and documents still point at it (those foreign keys are Restrict on purpose) and some of those records may have to be kept for
+// medical, legal or insurance reasons (see the Privacy Policy). What is cleared is everything that identifies the account or lets anyone sign in to it.
+// Nothing is deleted from the requests, cases, documents or uploaded files, and nothing is sent to or removed from Bitrix24.
+//
+// Two steps: step 1 (/me/delete/start) sends a code to the account's own verified email (or its mobile when the email was never verified); no password is asked for,
+// for any kind of account (the signed-in session plus the code sent to the account's OWN contact is the authorisation). Step 2 (/me/delete/confirm) needs that code, the
+// ticket from step 1 AND the explicit confirmation, and does the retirement in one transaction. The code's destination always comes from the account, never from the
+// request. A patient with requests still in progress is refused at both steps with a clear message: their request is being worked on and must be finished (or
+// cancelled) by Operations first.
+const ACTIVE_REQUEST_STATUSES = ["submitted", "in_progress"];
+
+function activeRequests(userId) {
+  return prisma.serviceRequest.count({ where: { userId, status: { in: ACTIVE_REQUEST_STATUSES } } });
+}
+
+async function refuseActiveRequests(req, res, user, count, step) {
+  await recordSecurityEvent(req, EVENTS.ACCOUNT_DELETE_BLOCKED, { userId: user.id, detail: { step, activeRequests: count } });
+  return res.status(409).json({
+    error: `You have ${count} request${count === 1 ? "" : "s"} in progress, so your account cannot be deleted yet. Please contact support, or try again once ${count === 1 ? "it is" : "they are"} completed or cancelled.`,
+    code: "active_requests",
+    activeRequests: count,
+  });
+}
+
+// Step 1: a code to the account's own contact. Nothing changes yet. No password is asked for (a password in the request is ignored, never checked).
+async function startAccountDeletion(req, res) {
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+  if (!user || !user.isVerified || user.deletedAt) return res.status(404).json({ error: "Account not found" });
+  // An account locked out (by failed logins) cannot start a deletion either.
+  if (user.lockedUntil && user.lockedUntil > new Date()) return lockedResponse(res, user.lockedUntil);
+
+  // Before a code is sent: a patient with requests in progress is told now, not after the second step.
+  const active = await activeRequests(user.id);
+  if (active) return refuseActiveRequests(req, res, user, active, "start");
+
+  // The code goes to the account's own verified contact: its email, or its mobile when the email was never verified (as at login).
+  const dest = user.emailVerifiedAt || !user.mobile ? user.email : user.mobile;
+  const result = await sendCode(dest, "patient_delete_account");
+  if (result.throttled) return throttledResponse(res, result);
+  await recordSecurityEvent(req, EVENTS.ACCOUNT_DELETE_STARTED, { userId: user.id, detail: { method: "code" } });
+  res.json(codeStep(signTicket({ step: "delete_account_otp", sub: user.id, dest, tv: user.tokenVersion }), dest));
+}
+
+// Step 2: the code, the explicit confirmation, and then the retirement itself. The ticket must be this signed-in account's own, from before no password
+// reset, and the account must still be live.
+async function confirmAccountDeletion(req, res) {
+  const body = req.body || {};
+  if (body.confirm !== true) {
+    return res.status(400).json({ error: "Please confirm that you want to delete your account.", code: "confirmation_required" });
+  }
+  if (!body.ticket || !hasProof(body)) return res.status(400).json({ error: "ticket and code are required" });
+
+  const step = readTicket(body.ticket, "delete_account_otp");
+  if (!step || step.sub !== req.user.id) return ticketFailure(res);
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+  if (!user || !user.isVerified || user.deletedAt || user.tokenVersion !== step.tv) return ticketFailure(res);
+
+  const result = await checkCode(step.dest, purposeFor(step), body);
+  if (!result.ok) return otpFailure(req, res, result, { userId: user.id, step: "account_deletion" });
+
+  const active = await activeRequests(user.id);
+  if (active) return refuseActiveRequests(req, res, user, active, "confirm");
+
+  // One transaction: the identity is cleared, every token dies (tokenVersion moves on and deletedAt is set: requireAuth and /auth/refresh both refuse
+  // the account from this moment), and the patient's own notification inbox and old login codes go. Requests, cases, documents, consents and the
+  // security log are NOT touched. The email becomes a placeholder nobody can receive mail at (the reserved ".invalid" domain), so the real one is
+  // free to sign up again and this row can never be mistaken for a half-finished sign-up.
+  const placeholder = `deleted-${user.id}-${crypto.randomBytes(6).toString("hex")}@deleted.invalid`;
+  const identifiers = [user.email, user.mobile].filter(Boolean);
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: user.id },
+      data: {
+        name: "Deleted account", firstName: null, lastName: null, email: placeholder, mobile: null, gender: null, nationality: null, phoneCountry: null,
+        passwordHash: null, googleId: null, appleId: null, pushToken: null, isVerified: false, emailVerifiedAt: null, failedLoginCount: 0, lockedUntil: null,
+        tokenVersion: { increment: 1 }, deletedAt: new Date(),
+      },
+    }),
+    prisma.notification.deleteMany({ where: { recipientType: "patient", recipientId: user.id } }),
+    prisma.otpCode.deleteMany({ where: { identifier: { in: identifiers } } }),
+  ]);
+  await recordSecurityEvent(req, EVENTS.ACCOUNT_DELETED, { userId: user.id, identifier: user.email });
+  res.json({ deleted: true });
+}
+
 module.exports = {
   register,
   registerVerifyOtp,
@@ -1088,4 +1177,6 @@ module.exports = {
   resetPassword,
   changePassword,
   corporateLogout,
+  startAccountDeletion,
+  confirmAccountDeletion,
 };
