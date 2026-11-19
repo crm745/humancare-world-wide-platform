@@ -5,6 +5,7 @@ import { useApp } from '../state/AppContext';
 import { LOGO, SPLASH_BG } from '../data/images';
 import { navReplace } from '../lib/nav';
 import { getAccessToken } from '../lib/session';
+import { COLORS } from '../theme/colors';
 
 const MIN_SPLASH_MS = 5000; // kept at 5 s for now
 // If reading the saved session ever hangs, give up and land on Getting Started rather than
@@ -15,7 +16,7 @@ const NATIVE = Platform.OS !== 'web';
 
 // Sampled from the logo itself, so the loading line matches it.
 const LOGO_RED = '#B41C2D';
-const LOGO_BLUE = '#2F3A8D';
+const LOGO_BLUE = COLORS.primary;
 // The logo is 62% of the screen width, at most 320. Its height is worked out here instead of left
 // to aspectRatio, which the browser preview ignores (the box came out as tall as the picture).
 const LOGO_RATIO = 2440 / 1405;

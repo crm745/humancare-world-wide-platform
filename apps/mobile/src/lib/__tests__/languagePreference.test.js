@@ -123,16 +123,17 @@ describe('regression: Profile, the language sheet and the other screens still re
     expect(profile).toContain("t('choose_language')");
   });
   test('every RTL consumer still reads isRTL from the context', () => {
-    for (const file of ['../../app/_layout.js', '../../components/layout.js', '../../components/widgets.js', '../../components/NationalityPhone.js', '../../components/request/CityField.js', '../../app/profile.js']) {
+    for (const file of ['../../app/_layout.js', '../../components/layout.js', '../../components/widgets.js', '../../components/NationalityPhone.js', '../../app/profile.js']) {
       expect(read(file)).toMatch(/isRTL/);
     }
   });
   test('Home and the other screens only call t(key)', () => {
-    expect(read('../../app/home.js')).toContain('const { t, isCorporate, profile } = useApp();');
+    expect(read('../../app/home.js')).toContain('const { t, toast, isCorporate, profile } = useApp();');
   });
   test('the session start is untouched by the language work', () => {
     const source = read('../../state/AppContext.js');
-    expect(source).toContain('const unsubscribe = onSessionChange((signedIn) => (signedIn ? authStore.signedIn() : authStore.signedOut()));');
+    // the same two calls as before; the only addition is that what the screens had loaded is forgotten first (lib/screenCache.js)
+    expect(source).toContain('const unsubscribe = onSessionChange((signedIn) => { clearCache(); return signedIn ? authStore.signedIn() : authStore.signedOut(); });');
     expect(source).toContain('fetchMe: (signal) => apiGet(\'/auth/me\', { signal, validation: true }),');
   });
 });

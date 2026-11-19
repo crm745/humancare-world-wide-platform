@@ -91,24 +91,16 @@ describe('createDownloadGuard: one download at a time for each document', () => 
   });
 });
 
-describe('the screen uses the guard, not a state value', () => {
+describe('the screen opens the preview, once per tap (the guard is lib/documentPreview.js)', () => {
   const screen = codeOf(screenSource);
-  test('a useRef holds one guard and every download goes through it', () => {
-    expect(screen).toContain("import { useCallback, useEffect, useRef, useState } from 'react';");
-    expect(screen).toContain('const guard = useRef(createDownloadGuard());');
-    expect(screen).toContain('guard.current.run(doc.id, async () => {');
+  test('only one place opens a document, and it is the preview (no download and no share sheet from the list)', () => {
+    expect(screen.split('openDocumentPreview(').length - 1).toBe(1);
+    expect(screen).not.toMatch(/downloadDocument|openDocument\(|Sharing|shareAsync|Share\.share/);
   });
-  test('the old guard that read the state (which is stale for a second tap) is gone', () => {
-    expect(screen).not.toContain("downloads[doc.id].status === 'downloading') return");
-  });
-  test('only one place starts a download, and it is inside the guard', () => {
-    expect(screen.split('downloadDocument(').length - 1).toBe(1);
-    const start = screen.indexOf('guard.current.run(');
-    expect(screen.indexOf('downloadDocument(')).toBeGreaterThan(start);
-  });
-  test('the failure message is always one of ours', () => {
-    expect(screen).toContain('const message = t(downloadErrorInfo(err).key);');
-    expect(screen).not.toContain('serverMessage');
+  test('the failure message is always one of ours (the preview screen maps the error with downloadErrorInfo)', () => {
+    const preview = codeOf(read('../../app/document-preview.js'));
+    expect(preview).toContain('t(downloadErrorInfo(file.error).key)');
+    expect(preview).not.toContain('serverMessage');
   });
 });
 

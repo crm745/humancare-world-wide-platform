@@ -10,15 +10,20 @@ const tracking = read('../../app/tracking.js');
 const component = read('../../components/tracking/PrivateCharterTracking.js');
 
 describe('request-tracking.js (patient)', () => {
-  test('uses the model only for Private Charter, built from the raw request', () => {
-    expect(requestTracking).toMatch(/isPrivateCharterTracking\(request\) \? buildPrivateCharterTracking\(request\) : null/);
-    expect(requestTracking).toMatch(/if \(model\) \{\s+return \(\s+<Screen bg="bg-white">/);
+  const adapter = read('../trackingDetailsView.js');
+
+  test('uses the Private Charter model only for Private Charter, built from the raw request', () => {
+    expect(requestTracking).toMatch(/const details = useMemo\(\(\) => buildTrackingDetails\(request, t\), \[request, t\]\);/);
+    expect(adapter).toMatch(/const charter = isPrivateCharterTracking\(request\);/);
+    expect(adapter).toMatch(/const model = charter \? buildPrivateCharterTracking\(request\) : null;/);
+    expect(adapter).toMatch(/const steps = charter \? charterSteps\(model, t\) : genericSteps\(request, t\);/);
   });
 
-  test('keeps the generic tracking for every other service', () => {
-    expect(requestTracking).toMatch(/const view = trackingView\(request\);/);
-    expect(requestTracking).toMatch(/<RouteCard/);
-    expect(requestTracking).toMatch(/view\.steps\.map/);
+  test('keeps the generic tracking for every other service, and draws whatever steps the model returns', () => {
+    expect(adapter).toMatch(/const view = trackingView\(request\);/);
+    expect(adapter).toMatch(/view\.steps\.map\(/);
+    expect(adapter).toMatch(/model\.milestones\.filter\(/);
+    expect(read('../../components/tracking/TrackingDetails.js')).toMatch(/d\.steps\.map\(/);
   });
 
   test('loads on focus, with no mount effect that could fetch a second time', () => {
@@ -29,15 +34,16 @@ describe('request-tracking.js (patient)', () => {
   });
 
   test('ignores a response that arrives after blur, keeps shown data, and uses the failed state only before the first load', () => {
-    expect(requestTracking).toMatch(/let active = true;/);
-    expect(requestTracking).toMatch(/return \(\) => \{ active = false; \};/);
-    expect(requestTracking.match(/if \(!active\) return;/g)).toHaveLength(2);
-    expect(requestTracking).toMatch(/if \(!loaded\.current\) setFailed\(true\);/);
-    expect(requestTracking).toMatch(/loaded\.current = true;/);
+    // the rules now live in lib/useResource.js: an answer for another key is dropped, a failed refresh keeps what is shown,
+    // and only a first load with nothing to show goes to the error state
+    const hook = read('../useResource.js');
+    expect(hook).toContain('if (keyRef.current !== forKey) return undefined;');
+    expect(hook).toContain('dataRef.current === undefined) setError(err)');
+    expect(requestTracking).toContain('(error && !request)');
   });
 
   test('every hook runs before the early return', () => {
-    const early = requestTracking.indexOf('if (model) {');
+    const early = requestTracking.indexOf('if (!details) {');
     const after = requestTracking.slice(early);
     expect(after).not.toMatch(/\buse(State|Effect|Memo|Callback|Ref|FocusEffect|App|WindowDimensions|SafeAreaInsets|LocalSearchParams)\(/);
   });
@@ -88,15 +94,17 @@ describe('PrivateCharterTracking component', () => {
 });
 
 describe('request id changes (both screens)', () => {
-  test('request-tracking shows only a request that belongs to the route id', () => {
-    expect(requestTracking).toMatch(/const request = isRequestFor\(loadedRequest, id\) \? loadedRequest : null;/);
-    expect(requestTracking).toMatch(/setLoadedRequest\(data\.request\)/);
+  test('request-tracking keeps one cache entry per request id, so another request is never shown as this one', () => {
+    expect(requestTracking).toContain('key: `tracking:${id}`');
+    expect(requestTracking).toContain('enabled: Boolean(id)');
+    expect(requestTracking).toContain('const request = data ?? null;');
     expect(requestTracking).not.toMatch(/setRequest\(/);
   });
 
-  test('request-tracking starts over for a new id but keeps its data for the same id', () => {
-    expect(requestTracking).toMatch(/if \(loadedForId\.current !== String\(id\)\) \{\s+loadedForId\.current = String\(id\);\s+loaded\.current = false;\s+setFailed\(false\);\s+\}/);
-    expect(requestTracking).toMatch(/\}, \[id\]\),/);
+  test('request-tracking starts over for a new id (useResource resets from the cache of the new key) with one fetch', () => {
+    const hook = read('../useResource.js');
+    expect(hook).toContain('}, [key, enabled, reload]);');
+    expect(hook).toContain('keyRef.current = key;');
     expect(requestTracking.match(/apiGet\(/g)).toHaveLength(1);
   });
 
@@ -110,14 +118,16 @@ describe('request id changes (both screens)', () => {
   test('tracking starts over for a new id but keeps its data for the same id, with one patient fetch', () => {
     expect(tracking).toMatch(/if \(loadedForId\.current !== String\(params\.id\)\) \{\s+loadedForId\.current = String\(params\.id\);\s+loaded\.current = false;\s+setFailed\(false\);\s+\}/);
     expect(tracking).toMatch(/\}, \[params\.id, isCase\]\),/);
-    expect(tracking.match(/apiGet\(/g)).toHaveLength(2); // one corporate, one patient
+    // the first load (corporate), the focus load (patient), and the pull-to-refresh and "Try again" calls (each either kind)
+    expect(tracking.match(/apiGet\(/g)).toHaveLength(4);
+    expect(tracking.match(/apiGet\(`\/requests\/me\/\$\{params\.id\}`\)/g)).toHaveLength(1); // the patient focus load is still the only one of its kind
   });
 
   test('a response that arrives after the id changed is ignored (the old effect is cleaned up first)', () => {
-    [requestTracking, tracking].forEach((source) => {
-      expect(source).toMatch(/return \(\) => \{ active = false; \};/);
-      expect(source.match(/if \(!active\) return;/g)).toHaveLength(2);
-    });
+    expect(tracking).toMatch(/return \(\) => \{ active = false; \};/);
+    expect(tracking.match(/if \(!active\) return;/g)).toHaveLength(2);
+    // request-tracking: the same rule, in lib/useResource.js
+    expect(read('../useResource.js')).toContain('if (keyRef.current !== forKey) return undefined;');
   });
 });
 
@@ -190,7 +200,8 @@ describe('service eligibility: only the canonical privatecharter key uses the ne
   });
 
   test('the screens decide only through isPrivateCharterTracking, with no alias of their own', () => {
-    [requestTracking, tracking].forEach((source) => {
+    // Tracking Details decides inside its adapter (lib/trackingDetailsView.js); the Tracking tabs decide in the screen itself.
+    [read('../trackingDetailsView.js'), tracking].forEach((source) => {
       expect(source).toMatch(/isPrivateCharterTracking\(/);
       expect(source).not.toMatch(/normalizeServiceKey|'air'|"air"/);
     });

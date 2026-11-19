@@ -27,8 +27,10 @@ const expectNoStoragePath = (body) => {
   const text = JSON.stringify(body);
   for (const secret of ['fileUrl', '/uploads/', 'storageKey', 'sha256']) expect(text).not.toContain(secret);
 };
-const expectSafeDocument = (doc) => {
-  expect(Object.keys(doc).sort()).toEqual(SAFE_FIELDS);
+// The patient's own request lists a Case document without its caseId (the app never reads it); every other response keeps it.
+const PATIENT_REQUEST_FIELDS = SAFE_FIELDS.filter((field) => field !== 'caseId');
+const expectSafeDocument = (doc, fields = SAFE_FIELDS) => {
+  expect(Object.keys(doc).sort()).toEqual(fields);
   expect(doc.name).toBe('report.pdf');
   expect(typeof doc.id).toBe('number');
 };
@@ -61,7 +63,7 @@ describe('patient endpoints', () => {
     expect(res.status).toBe(200);
     expectNoStoragePath(res.body);
     expect(res.body.request.case.documents).toHaveLength(1);
-    expectSafeDocument(res.body.request.case.documents[0]);
+    expectSafeDocument(res.body.request.case.documents[0], PATIENT_REQUEST_FIELDS);
     expect(res.body.request.case.stageEvents.length).toBeGreaterThan(0); // the rest of the structure is intact
   });
 

@@ -9,8 +9,12 @@ import { LANGUAGES } from '../data/mock';
 import { navReplace } from '../lib/nav';
 import { clearTokens } from '../lib/session';
 import { BottomNav, Screen, TopBar, useScrollToTopOnTabTap } from '../components/layout';
+import { useFabScrollPad } from '../components/sos/hooks';
 import { SectionLabel, Text } from '../components/ui';
 import { Sheet } from '../components/widgets';
+import { COLORS } from '../theme/colors';
+import { PressBox } from '../components/PressBox';
+import { AppRefreshControl } from '../components/AppRefreshControl';
 
 const TAB_BAR = 64;
 const MAX_WIDTH = 720;
@@ -30,7 +34,7 @@ function LanguageSheet({ visible, onClose }) {
           return (
             <Pressable key={l.code} onPress={() => choose(l)} className={`flex-row items-center justify-between rounded-xl border-[1.5px] px-3.5 py-[13px] ${on ? 'border-primary bg-primary-soft' : 'border-line bg-white'}`}>
               <Text className="font-inter-bold text-[14px] text-navy">{l.name}</Text>
-              {on && <Check size={18} color="#1A73E8" strokeWidth={2.5} />}
+              {on && <Check size={18} color={COLORS.primary} strokeWidth={2.5} />}
             </Pressable>
           );
         })}
@@ -43,7 +47,7 @@ function LanguageSheet({ visible, onClose }) {
 function Row({ Icon, label, onPress, first }) {
   const { isRTL } = useApp();
   return (
-    <Pressable
+    <PressBox
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
@@ -53,13 +57,13 @@ function Row({ Icon, label, onPress, first }) {
       })}
     >
       <View style={{ width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#EEF3FB' }}>
-        <Icon size={20} strokeWidth={1.8} color="#1A5FC4" />
+        <Icon size={20} strokeWidth={1.8} color={COLORS.primary} />
       </View>
       <Text className="font-inter-semibold" style={{ flex: 1, fontSize: 15.5, lineHeight: 21, color: '#17233D' }}>{label}</Text>
       <View style={isRTL ? { transform: [{ scaleX: -1 }] } : null}>
         <ChevronRight size={18} strokeWidth={2} color="#8A97AB" />
       </View>
-    </Pressable>
+    </PressBox>
   );
 }
 
@@ -75,8 +79,11 @@ function Section({ label, rows }) {
 }
 
 export default function Profile() {
-  const { t, isCorporate, profile, toast } = useApp();
+  const { t, isCorporate, profile, toast, refreshProfile } = useApp();
+  const [refreshing, setRefreshing] = useState(false);
   const insets = useSafeAreaInsets();
+  // The scroll area ends above the tab bar; its bottom padding is its own (24) or the room the floating SOS button needs, whichever is more.
+  const { paddingBottom, scrollProps } = useFabScrollPad({ ownPad: 24, edge: TAB_BAR + insets.bottom });
   const [langSheet, setLangSheet] = useState(false);
   const scrollRef = useRef(null);
   useScrollToTopOnTabTap(scrollRef);
@@ -84,8 +91,16 @@ export default function Profile() {
   // Signed-out people already have an account, so they land on their login screen.
   // The destination is shown first, then the tokens are cleared: clearing them while this screen is still open
   // would let the auth gate send the person to Login before Getting Started opens.
-  const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/welcome'); await clearTokens(); };
+  const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/login'); await clearTokens(); };
   const soon = () => toast(t('prof_soon'));
+
+  // Pull-to-refresh: the account details come from the server (GET /auth/me). The profile stays on screen while it loads (no skeleton: it
+  // is already here); a failed pull keeps it and says so. A corporate account has no such call, so it is not pulled.
+  const onRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try { await refreshProfile(); } catch { toast(t('sk_refresh_failed')); } finally { setRefreshing(false); }
+  };
 
   const account = [
     // Personal details opens the patient's own account; a corporate account has no such screen yet.
@@ -110,16 +125,20 @@ export default function Profile() {
   return (
     <Screen>
       <TopBar title={t('prof_title')} />
+      {/* The scroll area ends above the tab bar. The margin is on this wrapper, not the ScrollView: with a refresh control the web build applies a ScrollView's own margin twice (an empty band above the tab bar). */}
+      <View style={{ flex: 1, marginBottom: TAB_BAR + insets.bottom }}>
       <ScrollView
         ref={scrollRef}
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: TAB_BAR + insets.bottom + 24 }}
+        contentContainerStyle={{ paddingBottom }}
+        {...scrollProps}
         showsVerticalScrollIndicator={false}
+        refreshControl={isCorporate ? undefined : <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', paddingHorizontal: 18, paddingTop: 16, gap: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <View style={{ width: 68, height: 68, borderRadius: 20, backgroundColor: '#E7F0FE', alignItems: 'center', justifyContent: 'center' }}>
-              <Text className="font-inter-black" style={{ fontSize: 24, color: '#1A5FC4' }}>{initialsOf(profile.name || '')}</Text>
+            <View style={{ width: 68, height: 68, borderRadius: 20, backgroundColor: COLORS.primarySoft, alignItems: 'center', justifyContent: 'center' }}>
+              <Text className="font-inter-black" style={{ fontSize: 24, color: COLORS.primary }}>{initialsOf(profile.name || '')}</Text>
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text className="font-inter-black" style={{ fontSize: 21, lineHeight: 26, color: '#0D2340' }}>{profile.name}</Text>
@@ -131,7 +150,7 @@ export default function Profile() {
           <Section label={t('prof_preferences')} rows={preferences} />
           <Section label={t('prof_support')} rows={support} />
 
-          <Pressable
+          <PressBox
             accessibilityRole="button"
             accessibilityLabel={t('prof_logout')}
             onPress={signOut}
@@ -142,11 +161,12 @@ export default function Profile() {
           >
             <LogOut size={20} strokeWidth={1.9} color="#C53030" />
             <Text className="font-inter-bold" style={{ fontSize: 15.5, color: '#C53030' }}>{t('prof_logout')}</Text>
-          </Pressable>
+          </PressBox>
 
           <Text style={{ fontSize: 12, lineHeight: 16, color: '#5B6B84', textAlign: 'center' }}>{t('prof_footer').replace('{v}', version)}</Text>
         </View>
       </ScrollView>
+      </View>
       <BottomNav />
       <LanguageSheet visible={langSheet} onClose={() => setLangSheet(false)} />
     </Screen>

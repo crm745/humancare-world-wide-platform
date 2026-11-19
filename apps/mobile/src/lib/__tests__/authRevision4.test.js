@@ -239,9 +239,13 @@ describe('3. stale sign-in attempts cannot restore a session', () => {
     expect(password.indexOf('beginSignIn()')).toBeLessThan(password.indexOf("apiPost('/auth/password/set'"));
     expect(password).toContain("err.code === 'stale_sign_in'");
     const social = read('../useSocialAuth.js');
-    expect(social.match(/beginSignIn\(\)/g)).toHaveLength(2); // Google and Apple
-    expect(social.indexOf('const attempt = beginSignIn()')).toBeLessThan(social.indexOf('google.signIn()'));
-    expect(social).toContain('afterSocialLogin(await apiPost(\'/auth/google\', { idToken }), attempt)');
+    // Apple numbers its attempt in the screen; Google's attempt is numbered by runGoogleLogin (lib/googleLogin.js), given beginSignIn
+    expect(social.match(/beginSignIn\(\)/g)).toHaveLength(1);
+    expect(social).toContain('begin: beginSignIn,');
+    const google = read('../googleLogin.js');
+    expect(google.indexOf('const attempt = begin();')).toBeLessThan(google.indexOf('await getIdToken()'));
+    expect(google).toContain('await afterLogin(await postToken(idToken), attempt);');
+    expect(social).toContain("postToken: (idToken) => apiPost('/auth/google', { idToken }),");
     expect(social).toContain('afterSocialLogin(data, attempt)');
     expect(read('../../app/login.js')).toContain('{ signIn: true, attempt }');
   });

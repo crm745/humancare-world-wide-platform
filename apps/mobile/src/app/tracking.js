@@ -9,7 +9,10 @@ import { formatDisplayDate } from '../lib/requestShape';
 import { isRequestFor, trackingItemFromCase, trackingItemFromRequest } from '../lib/trackingItem';
 import { Body, Screen, TopBar } from '../components/layout';
 import { Card, InfoRow, Spacer, Text } from '../components/ui';
-import { LoadError, LoadingState } from '../components/LoadingState';
+import { AppRefreshControl } from '../components/AppRefreshControl';
+import { LoadFailure } from '../components/LoadFailure';
+import { useSkeletonGate } from '../components/skeleton/hooks';
+import { TrackingSkeleton } from '../components/skeleton/screens';
 import { DocRow } from '../components/widgets';
 import DocumentHistory from '../components/request/DocumentHistory';
 import RequestStatusPill from '../components/request/RequestStatusPill';
@@ -67,6 +70,7 @@ export default function Tracking() {
   const [tab, setTab] = useState(params.tab || 'overview');
   const [loadedItem, setLoadedItem] = useState(null);
   const [failed, setFailed] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // A patient item is shown only while it belongs to the id on the route: if the id changes while this screen
   // stays mounted, the previous request is not displayed as the new one. A corporate Case is as before.
@@ -121,11 +125,35 @@ export default function Tracking() {
     [isCase, item],
   );
 
+  // Pull-to-refresh: the same request as the first load; the screen stays on screen, and a failed pull keeps it and says so.
+  const onRefresh = async () => {
+    if (refreshing || !params.id) return;
+    setRefreshing(true);
+    try {
+      const data = await apiGet(isCase ? `/corporate/cases/${params.id}` : `/requests/me/${params.id}`);
+      setLoadedItem(isCase ? trackingItemFromCase(data.case) : trackingItemFromRequest(data.request));
+    } catch {
+      toast(t('sk_refresh_failed'));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  // "Try again" after a failed first load.
+  const retry = () => {
+    setFailed(false);
+    apiGet(isCase ? `/corporate/cases/${params.id}` : `/requests/me/${params.id}`)
+      .then((data) => setLoadedItem(isCase ? trackingItemFromCase(data.case) : trackingItemFromRequest(data.request)))
+      .catch(() => setFailed(true));
+  };
+  const gate = useSkeletonGate(!item && !failed && Boolean(params.id));
+  const refreshControl = <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />;
+
   if (!item) {
     return (
       <Screen>
         <TopBar title={t('tracking_details_title')} />
-        {failed || !params.id ? <LoadError message="Couldn't load tracking details. Please go back and try again." /> : <LoadingState />}
+        {failed || !params.id ? <LoadFailure message={t('trk_load_failed')} onRetry={params.id ? retry : undefined} /> : null}
+        {!failed && params.id && gate.visible ? <TrackingSkeleton label={t('sk_loading_tracking')} /> : null}
       </Screen>
     );
   }
@@ -146,7 +174,7 @@ export default function Tracking() {
       </View>
 
       {tab === 'overview' && (
-        <Body contentClassName="p-[18px]">
+        <Body contentClassName="p-[18px]" refreshControl={refreshControl}>
           <Card className="p-[18px]">
             <InfoRow className="py-[13px]" label={t('lbl_status')} valueNode={privateCharter ? <PrivateCharterStatusChip model={privateCharter} compact /> : <RequestStatusPill pill={item.reviewPill} status={item.status} />} />
             <InfoRow className="py-[13px]" label={t('lbl_service')} value={item.serviceType} />
@@ -158,12 +186,12 @@ export default function Tracking() {
         </Body>
       )}
       {tab === 'timeline' && (
-        <Body contentClassName="px-[18px] py-6">
+        <Body contentClassName="px-[18px] py-6" refreshControl={refreshControl}>
           {privateCharter ? <PrivateCharterTimelineSection model={privateCharter} /> : <Timeline rows={stageEventsToTimeline(item.stageEvents, item.status)} />}
         </Body>
       )}
       {tab === 'docs' && (
-        <Body contentClassName="p-[18px]">
+        <Body contentClassName="p-[18px]" refreshControl={refreshControl}>
           {item.workflow ? (
             // A request in the review workflow lists its own documents (every version, with how each stands).
             // Display only: these are not opened or downloaded from here.

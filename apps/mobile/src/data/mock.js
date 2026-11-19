@@ -16,6 +16,28 @@ export const SERVICE_TILES = [
   { key: 'homecare', img: 'IMG_HOMECARE', title: 'svc_homecare', sub: 'svc_homecare_sub' },
   { key: 'tele', img: 'IMG_TELE', title: 'svc_tele', sub: 'svc_tele_sub' },
   { key: 'corporate', img: 'IMG_CORPORATE', title: 'svc_corporate', sub: 'svc_corporate_sub' },
+  // Marine Medical Safety and Medical Value Travel: the standard patient request form, like Hospitalization.
+  { key: 'marine', img: 'IMG_AIR', title: 'svc_marine', sub: 'svc_marine_sub' },
+  { key: 'medvalue', img: 'IMG_HOSPITAL', title: 'svc_medvalue', sub: 'svc_medvalue_sub' },
+];
+
+// Home and All Services show the same eight top-level services, in the order management approved. Nothing is defined
+// twice: the existing tiles are picked from SERVICE_TILES by key.
+//   - Air Ambulance is one tile that opens a choice (AIR_OPTIONS: the Private Charter and Commercial Airlines services,
+//     each with its own existing flow), instead of two tiles of its own.
+//   - A tile with `placeholder: true` would only be shown (no press, no route, no request). None is a placeholder now:
+//     every tile opens its service page and request flow, Marine Medical Safety and Medical Value Travel included.
+const tile = (key) => SERVICE_TILES.find((s) => s.key === key);
+export const AIR_OPTIONS = [tile('privatecharter'), tile('commercialair')];
+export const HOME_SERVICES = [
+  { key: 'air', route: '/air-ambulance', title: 'svc_air', sub: 'svc_air_sub' },
+  tile('tele'),
+  tile('homecare'),
+  tile('ground'),
+  tile('mortal'),
+  tile('corporate'),
+  tile('marine'),
+  tile('medvalue'),
 ];
 
 // Commercial Airlines is booked either way; each is its own service in Bitrix
@@ -56,6 +78,8 @@ export const SERVICE_LABELS = {
   homecare: 'filter_svc_homecare',
   tele: 'svc_tele',
   corporate: 'filter_svc_corporate',
+  marine: 'svc_marine',
+  medvalue: 'svc_medvalue',
 };
 
 export const NOTIFICATIONS = [

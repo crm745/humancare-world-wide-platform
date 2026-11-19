@@ -7,14 +7,20 @@ import { useApp } from '../state/AppContext';
 import { IMAGES } from '../data/images';
 import { IconButton } from './layout';
 import { FieldLabel, Input, Text } from './ui';
+import { COLORS, primaryAlpha } from '../theme/colors';
+import { FormFocusProvider, KEYBOARD_DISMISS_MODE, KeyboardModalView, MODAL_EDGE_PROPS, useKeyboard, useListMaxHeight } from './keyboard';
 
 // Bottom sheet with a dimmed backdrop (filter, language and select sheets).
-export function Sheet({ visible, onClose, title, children }) {
+// `fit`: a form that should not scroll (the filters): the content gets all the room the screen has left under the sheet's own header
+// and padding, so it only scrolls on a screen too short to show it at all. Without it, long lists keep the old 70% limit.
+// With the keyboard open the sheet rises above it (KeyboardModalView) and its scroll area gets only the room left above the keyboard.
+export function Sheet({ visible, onClose, title, children, fit }) {
   const insets = useSafeAreaInsets();
   const { isRTL } = useApp();
+  const { height: keyboardHeight } = useKeyboard(visible);
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
-      <View className="flex-1 justify-end" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} {...MODAL_EDGE_PROPS}>
+      <KeyboardModalView className="justify-end" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
         <Pressable onPress={onClose} className="absolute inset-0 bg-navy/45" />
         <View className="rounded-t-[20px] bg-white px-5 pt-5" style={{ paddingBottom: 24 + insets.bottom }}>
           <View className="mb-[18px] flex-row items-center justify-between">
@@ -26,11 +32,16 @@ export function Sheet({ visible, onClose, title, children }) {
               A fixed pixel maxHeight, not a percentage — this wrapper is auto-height (sized
               to its content, bottom-anchored), and a percentage has no sized ancestor to
               resolve against, which collapses to 0 on web instead of falling back sanely. */}
-          <ScrollView style={{ maxHeight: Dimensions.get('window').height * 0.7 }} showsVerticalScrollIndicator={false}>
-            {children}
+          <ScrollView
+            style={{ maxHeight: Math.max(120, (fit ? Math.max(200, Dimensions.get('window').height - insets.top - insets.bottom - 20 - 48 - 24 - 16) : Dimensions.get('window').height * 0.7) - keyboardHeight) }}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={KEYBOARD_DISMISS_MODE}
+          >
+            <FormFocusProvider rtl={isRTL}>{children}</FormFocusProvider>
           </ScrollView>
         </View>
-      </View>
+      </KeyboardModalView>
     </Modal>
   );
 }
@@ -41,8 +52,11 @@ export function Sheet({ visible, onClose, title, children }) {
 // does, however many options there are.
 function Dropdown({ visible, onClose, title, header, children }) {
   const { isRTL } = useApp();
+  // The list gets what is left above the keyboard (the search box is in `header`), at most half the screen.
+  const listMax = useListMaxHeight({ reserved: 190, min: 100, max: Dimensions.get('window').height * 0.5 });
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} {...MODAL_EDGE_PROPS}>
+      <KeyboardModalView>
       <Pressable onPress={onClose} className="flex-1 items-center justify-center bg-navy/45 p-6" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
         <Pressable className="w-full max-w-[320px] rounded-2xl bg-white p-4" onPress={(e) => e.stopPropagation()}>
           <View className="mb-2.5 flex-row items-center justify-between">
@@ -50,11 +64,12 @@ function Dropdown({ visible, onClose, title, header, children }) {
             <IconButton onPress={onClose} className="h-[28px] w-[28px]"><X size={14} color="#45526B" /></IconButton>
           </View>
           {header}
-          <ScrollView style={{ maxHeight: Dimensions.get('window').height * 0.5 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <ScrollView style={{ maxHeight: listMax }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {children}
           </ScrollView>
         </Pressable>
       </Pressable>
+      </KeyboardModalView>
     </Modal>
   );
 }
@@ -109,7 +124,7 @@ export function Select({ value, options, onChange, title, large, bare, labels, p
               className={`flex-row items-center justify-between rounded-lg border-[1.5px] px-3 py-2.5 ${o === value ? 'border-primary bg-primary-soft' : 'border-line bg-white'}`}
             >
               <Text className="font-inter-bold text-[13.5px] text-navy">{show(o)}</Text>
-              {o === value && <Check size={16} color="#1A73E8" strokeWidth={2.5} />}
+              {o === value && <Check size={16} color={COLORS.primary} strokeWidth={2.5} />}
             </Pressable>
           ))}
         </View>
@@ -211,7 +226,7 @@ export function PhotoCard({ img, height, onPress, children, className = '' }) {
     <Pressable onPress={onPress} className={`overflow-hidden rounded-2xl active:opacity-90 ${className}`} style={{ height }}>
       <ImageBackground source={IMAGES[img]} resizeMode="cover" style={{ flex: 1 }}>
         <LinearGradient
-          colors={['rgba(13,35,64,0.1)', 'rgba(13,35,64,0.3)', 'rgba(13,35,64,0.85)']}
+          colors={[primaryAlpha(0.1), primaryAlpha(0.3), primaryAlpha(0.85)]}
           locations={[0, 0.5, 1]}
           style={{ flex: 1, justifyContent: 'flex-end', padding: 16 }}
         >
@@ -232,7 +247,7 @@ export function DocRow({ label, meta, onPress, className = '' }) {
         <Text className="font-inter-bold text-[13.5px]">{label}</Text>
         <Text className="text-[11.5px] text-faint">{meta}</Text>
       </View>
-      <Download size={15} color="#1A73E8" />
+      <Download size={15} color={COLORS.primary} />
     </Pressable>
   );
 }

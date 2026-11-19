@@ -12,7 +12,9 @@ import { Body, Screen, TopBar } from '../components/layout';
 import { Button, Card, Field, FieldLabel, InfoRow, Text } from '../components/ui';
 import { Select } from '../components/widgets';
 import { CountryPicker } from '../components/NationalityPhone';
-import { LoadingState } from '../components/LoadingState';
+import { useSkeletonGate } from '../components/skeleton/hooks';
+import { FormSkeleton } from '../components/skeleton/screens';
+import { COLORS } from '../theme/colors';
 
 // Personal details (Profile → Personal details): the patient's own account, from GET /auth/me, in four sections:
 // Personal Information (editable: name, gender, nationality, through PATCH /auth/me), Contact Information (email and
@@ -31,7 +33,7 @@ function SectionCard({ Icon, title, action, children }) {
   return (
     <Card className="mb-5 p-[18px]">
       <View className="mb-1.5 flex-row items-center gap-2.5">
-        <View className="h-8 w-8 items-center justify-center rounded-[10px] bg-primary-soft"><Icon size={16} color="#1A5FC4" /></View>
+        <View className="h-8 w-8 items-center justify-center rounded-[10px] bg-primary-soft"><Icon size={16} color={COLORS.primary} /></View>
         <Text accessibilityRole="header" className="flex-1 font-inter-black text-[14.5px] text-navy">{title}</Text>
         {action}
       </View>
@@ -40,7 +42,8 @@ function SectionCard({ Icon, title, action, children }) {
   );
 }
 
-// One contact detail with its Change action: the label, the value, and Change on the right (a 44-point target).
+// One contact detail with its action: the label, the value, and on the right "Change" (or "Add" when there is no value
+// yet), a 44-point target.
 function ContactRow({ label, value, onChange, last, t }) {
   return (
     <View className={`flex-row items-center gap-3 py-2.5 ${last ? '' : 'border-b border-divider'}`}>
@@ -48,8 +51,8 @@ function ContactRow({ label, value, onChange, last, t }) {
         <Text className="text-[12.5px] text-faint">{label}</Text>
         <Text className="mt-0.5 font-inter-bold text-[14px] text-ink" selectable>{value || '—'}</Text>
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel={`${t('cta_change')} ${label}`} onPress={onChange} className="min-h-[44px] justify-center pl-3">
-        <Text className="font-inter-bold text-[13.5px] text-primary">{t('cta_change')}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={`${t(value ? 'cta_change' : 'cta_add')} ${label}`} onPress={onChange} className="min-h-[44px] justify-center pl-3">
+        <Text className="font-inter-bold text-[13.5px] text-primary">{t(value ? 'cta_change' : 'cta_add')}</Text>
       </Pressable>
     </View>
   );
@@ -59,6 +62,8 @@ export default function PersonalDetails() {
   const { t, toast, isCorporate, setProfile } = useApp();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // The form is not pulled to refresh (an edit in progress must never be lost); it loads with a skeleton and offers Try again.
+  const gate = useSkeletonGate(loading);
   const [failed, setFailed] = useState(false);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
@@ -146,7 +151,7 @@ export default function PersonalDetails() {
     <Screen>
       <TopBar title={t('prof_personal')} />
       <Body contentClassName="px-[18px] py-4">
-        {loading ? <LoadingState /> : null}
+        {loading && gate.visible ? <FormSkeleton label={t('sk_loading_profile')} fields={6} /> : null}
 
         {!loading && failed ? (
           <View className="items-center px-5 py-[50px]">

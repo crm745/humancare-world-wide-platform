@@ -5,6 +5,7 @@ import { Camera, FileText, Upload, X } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
 import { MAX_REPORT_BYTES, MAX_REPORT_FILES } from '../../data/mock';
 import { Text } from '../ui';
+import { COLORS } from '../../theme/colors';
 
 // Label row for a field on the medical page: the name on the left, a hint or link on the right.
 export function FieldHeader({ title, hint, required, right }) {
@@ -43,7 +44,7 @@ export function ChoiceChips({ label, options, value, onChange, clearable, multip
     const on = chosen.includes(v);
     const box = on ? (danger ? 'border-danger bg-danger-soft' : 'border-primary bg-primary-soft') : 'border-field bg-white';
     const tone = on ? (danger ? 'text-danger-dark' : 'text-primary-dark') : 'text-slate';
-    const iconColor = on ? (danger ? '#B02A2A' : '#1A5FC4') : '#5B6B84';
+    const iconColor = on ? (danger ? '#B02A2A' : COLORS.primary) : '#5B6B84';
     return (
       <Pressable
         key={v} onPress={() => choose(option)}
@@ -89,7 +90,7 @@ export function SwitchRow({ label, value, onChange, last }) {
     >
       <Text className="flex-1 text-[14.5px] text-navy">{label}</Text>
       <View pointerEvents="none" accessible={false} importantForAccessibility="no-hide-descendants">
-        <Switch value={value} trackColor={{ false: '#E1E7F0', true: '#0D2340' }} thumbColor="#FFFFFF" ios_backgroundColor="#E1E7F0" />
+        <Switch value={value} trackColor={{ false: '#E1E7F0', true: COLORS.primary }} thumbColor="#FFFFFF" ios_backgroundColor="#E1E7F0" />
       </View>
     </Pressable>
   );
@@ -161,7 +162,7 @@ export function ReportTiles({ files, onChange, title, maxFiles = MAX_REPORT_FILE
         title={title}
         right={Platform.OS === 'web' ? null : (
           <Pressable onPress={takePhoto} accessibilityRole="button" accessibilityLabel={t('req_camera')} className="min-h-[44px] flex-row items-center gap-1.5 px-1 active:opacity-70">
-            <Camera size={16} color="#1A73E8" strokeWidth={2.2} />
+            <Camera size={16} color={COLORS.primary} strokeWidth={2.2} />
             <Text className="font-inter-bold text-[13.5px] text-primary">{t('req_camera')}</Text>
           </Pressable>
         )}
@@ -169,7 +170,7 @@ export function ReportTiles({ files, onChange, title, maxFiles = MAX_REPORT_FILE
       <View className="flex-row flex-wrap gap-2.5">
         {files.map((file) => (
           <View key={file.uri} className="h-[104px] w-[104px] justify-between rounded-2xl border border-line bg-primary-soft p-2.5">
-            <FileText size={20} color="#1A5FC4" />
+            <FileText size={20} color={COLORS.primary} />
             <View>
               <Text className="font-inter-bold text-[11.5px] text-navy" numberOfLines={2}>{file.name}</Text>
               <Text className="mt-0.5 text-[10.5px] text-muted">{formatFileSize(file.size)}</Text>
@@ -187,7 +188,7 @@ export function ReportTiles({ files, onChange, title, maxFiles = MAX_REPORT_FILE
           onPress={pickFiles} accessibilityRole="button" accessibilityLabel={t('req_add_file')}
           className="h-[104px] w-[104px] items-center justify-center gap-1.5 rounded-2xl border-[1.5px] border-dashed border-[#C7D3E5] bg-input active:opacity-80"
         >
-          <Upload size={20} color="#1A73E8" />
+          <Upload size={20} color={COLORS.primary} />
           <Text className="font-inter-bold text-[12px] text-muted">{t('req_add_file')}</Text>
         </Pressable>
       </View>

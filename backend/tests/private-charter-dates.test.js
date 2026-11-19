@@ -66,12 +66,9 @@ describe('a valid Private Charter request', () => {
       serviceType: 'Private Charter Air Ambulance Service',
       serviceKey: 'privatecharter',
       origin: 'Mumbai, Maharashtra, India',
-      originGeonameId: IDS.MUMBAI,
       originCityName: 'Mumbai',
       originCountryCode: 'IN',
-      originTimezone: 'Asia/Kolkata',
       destination: 'Dubai, United Arab Emirates',
-      destinationGeonameId: IDS.DUBAI,
       destinationCityName: 'Dubai',
       destinationCountryCode: 'AE',
       country: 'AE',
@@ -214,7 +211,9 @@ describe('other services keep their behaviour', () => {
   it('still takes plain-text cities and stores no city metadata', async () => {
     const res = await post(ground({ preferredDate: inDays(4) }));
     expect(res.status).toBe(201);
-    expect(res.body.request).toMatchObject({ origin: 'Pune', destination: 'Mumbai', originGeonameId: null, originCityName: null, originCountryCode: null, originTimezone: null, destinationGeonameId: null });
+    expect(res.body.request).toMatchObject({ origin: 'Pune', destination: 'Mumbai', originCityName: null, originCountryCode: null });
+    const stored = await prisma.serviceRequest.findUnique({ where: { id: res.body.request.id } });
+    expect(stored).toMatchObject({ originGeonameId: null, originCityName: null, originCountryCode: null, originTimezone: null, destinationGeonameId: null });
   });
 
   it('stores a plain YYYY-MM-DD preferred date as that day and returns the same ISO form as before', async () => {

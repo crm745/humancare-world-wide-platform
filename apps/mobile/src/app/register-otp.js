@@ -21,5 +21,5 @@ export default function RegisterOtp() {
     return { token: data.token, refreshToken: data.refreshToken, profile: profileFromUser(data.user) };
   };
 
-  return <OtpScreen titleKey="register_otp_title" contact={contact} session="patient" onVerify={onVerify} onResend={resend} />;
+  return <OtpScreen titleKey="register_otp_title" contact={contact} session="patient" onVerify={onVerify} onResend={resend} recaptcha />;
 }

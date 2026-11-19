@@ -202,10 +202,11 @@ async function verifyAppleIdToken(idToken) {
   return { providerId: payload.sub, email: payload.email, emailVerified: String(payload.email_verified) === 'true' };
 }
 
-// Shared by the Google and Apple login controllers. Google/Apple only LOG IN to an
-// account that already exists — matched by provider id, or by email the first time
-// (which then links the provider to it). They never create one here: someone new gets a
-// sign-up ticket instead and finishes in socialRegister (mobile + OTP + consents).
+// Shared by the Google and Apple login controllers. This only LOGS IN to an account that
+// already exists — matched by provider id, or by email the first time (which then links the
+// provider to it). It never creates one: for someone new the controller either signs a Google
+// user up directly (createGoogleUser) or, for Apple, hands back a sign-up ticket that finishes
+// in socialRegister (mobile + OTP + consents).
 //
 // Linking by email needs BOTH sides to have verified that email; otherwise whoever
 // registered the address first (possibly not its owner) would share an account with
