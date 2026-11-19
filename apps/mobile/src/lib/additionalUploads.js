@@ -7,6 +7,7 @@
 // Neither creates a request or a Case: the request id is the one the screen is already showing.
 import { MAX_DOCUMENTS_PER_REQUEST } from './requestDocuments';
 import { runSubmission } from './requestUploads';
+import { documentRequestFields } from './documentRequests';
 
 export const uploadPath = (requestId) => `/requests/me/${requestId}/documents`;
 
@@ -30,20 +31,22 @@ export function filesToSend(target, files) {
 // The extra multipart fields for one file: only a replacement has any.
 export const fieldsFor = (file) => (file && file.replacesDocumentId != null && file.replacesDocumentId !== '' ? { replacesDocumentId: file.replacesDocumentId } : undefined);
 
+const mergeFields = (a, b) => (a || b ? { ...a, ...b } : undefined);
+
 // Uploads the files not yet accepted, one at a time, to the existing request. A failed file never stops
 // the others, a file already accepted is never sent again, and the request is never created or changed.
 // Resolves { sentRequest, uploaded, uploadErrors }, the same shape as runSubmission, so a retry is
 // another call with those values.
 //   send(path, file, onProgress, fields) -> resolves when the server has the file, throws when it has not
 //   onProgress({ index, total, progress })
-export function sendAdditionalDocuments({ requestId, target, files, uploaded, uploadErrors, send, onProgress }) {
+export function sendAdditionalDocuments({ requestId, target, documentRequest, files, uploaded, uploadErrors, send, onProgress }) {
   if (requestId === undefined || requestId === null || requestId === '') throw new Error('No request to add documents to.');
   return runSubmission({
     sentRequest: { id: requestId },
     uploaded,
     uploadErrors,
     files: filesToSend(target, files),
-    upload: (file, report, sent) => send(uploadPath(sent.id), file, report, fieldsFor(file)),
+    upload: (file, report, sent) => send(uploadPath(sent.id), file, report, mergeFields(fieldsFor(file), documentRequestFields(documentRequest))),
     onProgress,
   });
 }

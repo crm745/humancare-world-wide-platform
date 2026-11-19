@@ -19,6 +19,12 @@ const ALLOWED_DATA_KEYS = new Set([
   'bitrixStageId', 'inboxEventId', // inbound Deal-stage synchronization
   'eventId', 'newEventId', // integration_outbox ids (Deal failure alerts and manual recovery)
   'shareId', 'requestDocumentId', 'documentRequestId', 'bitrixFileId', // Bitrix Deal document sharing (identifiers only)
+  'paymentId', 'invoiceId', 'razorpayOrderId', 'amount', 'currency', 'mode', // Razorpay order creation (identifiers, an exact decimal text, a code)
+  // Razorpay webhook results (identifiers, exact decimal texts, an event name and yes/no flags; never a body, signature, error text or personal data)
+  'razorpayPaymentId', 'razorpayRefundId', 'existingRazorpayPaymentId', 'eventType', 'expectedAmount', 'receivedAmount', 'receivedCurrency',
+  // Quotation synchronization (identifiers, a version number, a state name and a short code; never a file name, URL or amount text)
+  'quotationId', 'versionNumber', 'previousQuotationId', 'supersededById', 'scanStatus', 'validationError', 'sizeBytes',
+  'lateCapture', 'duplicateCapture', 'overpayment', 'refundInconsistency', 'reconciliationRequired',
 ]);
 const MAX_TEXT = 200;
 const CODE = /^[a-z0-9_.:-]{1,64}$/;

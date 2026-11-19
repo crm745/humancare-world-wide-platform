@@ -47,6 +47,7 @@ const {
 } = require('../request-review/request-review.controller');
 
 const { postDealRecovery } = require('../bitrix/deal-recovery.controller');
+const quotations = require('../quotations/quotations.controller');
 const { getShares, postShare, postRevokeShare, postRetryShare, postDocumentRequest } = require('../bitrix/deal-document.controller');
 
 const adminRouter = Router();
@@ -118,6 +119,21 @@ adminRouter.post('/requests/:id/document-requests', postDocumentRequest);
 
 adminRouter.get('/cases', getCases);
 adminRouter.get('/cases/:id', getCase);
+// Operations quotation management (Private Charter): any Admin or Superadmin session may view, confirm, publish and withdraw a quotation version.
+// Confirm and publish are separate actions; every state change is audited, runs under the Case row lock and names the revision the Admin looked at.
+// See modules/quotations/quotations.service.js.
+adminRouter.get('/cases/:id/quotations', quotations.getCaseQuotations);
+adminRouter.get('/quotations/:id', quotations.getQuotation);
+adminRouter.get('/quotations/:id/file', quotations.downloadQuotationFile);
+adminRouter.post('/quotations/:id/confirm', quotations.postConfirm);
+adminRouter.post('/quotations/:id/publish', quotations.postPublish);
+adminRouter.post('/quotations/:id/withdraw', quotations.postWithdraw);
+adminRouter.post('/quotations/:id/new-version', quotations.postNewVersion);
+// Invoice of an accepted quotation (Phase 4): accepted quotations still without an invoice, a manual retry, and the partial-payment authorization.
+// See modules/quotations/quotation-invoice.service.js.
+adminRouter.get('/invoices/awaiting', quotations.getAwaitingInvoice);
+adminRouter.post('/quotations/:id/invoice', quotations.postEnsureInvoice);
+adminRouter.post('/invoices/:id/partial-payment', quotations.postPartialPayment);
 adminRouter.patch('/cases/:id/assign', patchCaseAssign);
 adminRouter.patch('/cases/:id/stage', patchCaseStage);
 // Safe manual recovery of a Private Charter Bitrix Deal event that failed or needs manual review. Superadmin only:

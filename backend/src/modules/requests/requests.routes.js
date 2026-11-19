@@ -9,6 +9,7 @@ const {
   uploadRequestDocument,
   downloadRequestSummary,
 } = require('./requests.controller');
+const { getMyRequestQuotation } = require('../quotations/patient-quotations.controller');
 
 const requestsRouter = Router();
 
@@ -18,6 +19,8 @@ requestsRouter.get('/me', requireAuth(['patient']), listMyRequests);
 requestsRouter.get('/me/documents', requireAuth(['patient']), listMyDocuments);
 requestsRouter.get('/me/:id', requireAuth(['patient']), getMyRequestById);
 requestsRouter.get('/me/:id/summary', requireAuth(['patient']), downloadRequestSummary);
+// The ONE active published quotation of the patient's own request (null when there is none).
+requestsRouter.get('/me/:id/quotation', requireAuth(['patient']), getMyRequestQuotation);
 requestsRouter.post('/me/:id/documents', requireAuth(['patient']), upload.single('file'), uploadRequestDocument);
 // No unauthenticated "guest" lookup by reference + mobile — every case view requires
 // a logged-in session now, removed per product decision (no access without login).

@@ -10,6 +10,8 @@ const { toSafeDocument } = require('../documents/document-response');
 const { addPatientDocument, scanRequestDocument, toUploadResponse } = require('../request-review/request-review.service');
 const { sendMedicalReportToBitrix } = require('../bitrix/bitrix.service');
 const { leadInputFromRequest, commentWithReports } = require('../bitrix/bitrix-lead');
+const { listInvoicesForRequest } = require('../payments/patient-invoices.service');
+const { isInvoicePending } = require('../quotations/quotation-invoice.service');
 const { prisma } = require('../../db/prisma');
 const { streamRequestSummaryPdf } = require('./request-summary.pdf');
 const {
@@ -126,7 +128,11 @@ async function listMyRequests(req, res, next) {
 async function getMyRequestById(req, res, next) {
   try {
     const request = await getRequestForUser(req.user.id, req.params.id);
-    res.json({ request });
+    // The patient's own invoices for this request (summary only, see payments/patient-invoices.service.js); [] when there is none.
+    const invoices = await listInvoicesForRequest({ userId: Number(req.user.id), requestId: request.id });
+    // invoicePending: the patient accepted a quotation and its invoice is not there yet (the app shows a pending state and retries).
+    const pending = await isInvoicePending({ userId: Number(req.user.id), requestId: request.id });
+    res.json({ request: { ...request, invoices, invoicePending: Boolean(pending), ...(pending ? { invoicePendingQuotationId: pending.quotationId } : {}) } });
   } catch (err) {
     next(err);
   }

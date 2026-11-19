@@ -50,6 +50,8 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   requests     ServiceRequest[]
   consents     UserConsent[]
+  // Phase 2: quotations this patient accepted or rejected (the decision evidence lives on the quotation row).
+  quotationDecisions CaseQuotation[] @relation("QuotationDecider")
 
   @@map("users")
 }
@@ -151,6 +153,11 @@ model AdminUser {
   recoveryTargets   AdminRecoveryRequest[]  @relation("RecoveryTarget")
   recoveryRequested AdminRecoveryRequest[]  @relation("RecoveryRequester")
   recoveryApprovals AdminRecoveryApproval[] @relation("RecoveryApprover")
+  // Phase 2 quotation workflow. Real foreign keys (RESTRICT): Admins are soft-disabled, never deleted.
+  quotationsConfirmed       CaseQuotation[] @relation("QuotationConfirmer")
+  quotationsPublished       CaseQuotation[] @relation("QuotationPublisher")
+  quotationsWithdrawn       CaseQuotation[] @relation("QuotationWithdrawer")
+  invoicesPartialAuthorized Invoice[]       @relation("InvoicePartialAuthorizer")
 
   @@index([status])
   @@map("admin_users")
@@ -715,6 +722,7 @@ model Case {
   bitrixDealLink      BitrixDealLink?
   outboxEvents        IntegrationOutbox[]
   invoices            Invoice[]
+  quotations          CaseQuotation[] @relation("CaseToQuotation")
 
   @@index([corporateId, status])
   @@map("cases")
@@ -918,7 +926,10 @@ model BitrixDealLink {
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
   documentShares     BitrixDealDocument[]
+  quotations         CaseQuotation[]
 
+  // Phase 2: lets case_quotations reference (id, case_id), so a quotation's Deal link must belong to the quotation's own Case.
+  @@unique([id, caseId])
   @@index([syncStatus, lastAttemptAt])
   @@map("bitrix_deal_links")
 }
@@ -1256,6 +1267,20 @@ model Invoice {
   updatedAt      DateTime  @updatedAt @map("updated_at")
   payments       Payment[]
 
+  // Phase 2 (quotation workflow). Added by migration 20261118100000; legacy rows keep source "manual", quotation_id NULL.
+  // source "quotation" REQUIRES quotationId (CHECK). One invoice per quotation version, permanently, even if voided
+  // (UNIQUE quotation_id). The composite foreign key makes the database refuse an invoice whose Case, currency or amount differs
+  // from its quotation; MySQL skips it while quotation_id is NULL, so legacy invoices are not checked. Prisma sees it as one-to-many
+  // (the single-column unique is the real one-to-one guard) - use findFirst on CaseQuotation.invoices.
+  source         String    @default("manual") @db.VarChar(16) // "manual" | "quotation"
+  quotationId    Int?      @unique @map("quotation_id")
+  quotation      CaseQuotation? @relation(fields: [quotationId, caseId, currency, amount], references: [id, caseId, currency, amount], onDelete: Restrict, onUpdate: Restrict)
+  // Full payment is the default. Partial payment only when Operations authorized it: the Admin and the time are required together (CHECK).
+  allowPartialPayment               Boolean   @default(false) @map("allow_partial_payment")
+  partialPaymentAuthorizedByAdminId Int?      @map("partial_payment_authorized_by_admin_id")
+  partialPaymentAuthorizedBy        AdminUser? @relation("InvoicePartialAuthorizer", fields: [partialPaymentAuthorizedByAdminId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  partialPaymentAuthorizedAt        DateTime? @map("partial_payment_authorized_at")
+
   @@unique([id, caseId, currency])
   @@unique([caseId, idempotencyKey])
   @@index([caseId, status])
@@ -1325,6 +1350,11 @@ model Payment {
   externalReference String?   @db.VarChar(191) @map("external_reference")
   transactedAt      DateTime? @map("transacted_at")
   idempotencyKey    String?   @db.VarChar(191) @map("idempotency_key")
+  // Razorpay order (migration 20261119100000). NULL for every refund and for every manual / legacy payment; MySQL allows many NULLs
+  // in the unique index. One Razorpay order = one payment row. Case-sensitive (utf8mb4_bin in the migration). CHECKs in the migration:
+  // the form "order_<alphanumeric>", NULL on a refund, and a completed Razorpay payment must carry its gateway payment id in
+  // externalReference. Set once when the order is created and never changed by the service.
+  razorpayOrderId   String?   @unique @db.VarChar(64) @map("razorpay_order_id")
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
@@ -1336,6 +1366,114 @@ model Payment {
   @@index([invoiceId, status])
   @@index([caseId])
   @@map("payments")
+}
+
+// PRIVATE CHARTER ONLY (Phase 2). One row per quotation VERSION of a Case: the PDF Operations upload to the Bitrix24 Deal
+// (UF_CRM_1794985313) plus the Final Quotation Amount and Currency (UF_CRM_6A3399F56ECFF, UF_CRM_6A23F4E86AA45). The future service
+// MUST, in the transaction that creates a row, lock the Case (SELECT ... FOR UPDATE) and refuse unless the Case is a Private Charter
+// Case (serviceRequestId set and serviceKey = PRIVATE_CHARTER_KEY) with a synced Deal that is not Won or Lost. The database cannot tell.
+// The file is stored OUTSIDE MySQL (storageKey is an opaque unique key, storageProvider says where); the Bitrix signed download URL is
+// never stored. Every file has its own storageKey and an existing file is never overwritten.
+//
+// Statuses: draft -> confirmed -> published -> accepted | rejected | withdrawn | superseded. (Expired is COMPUTED from validUntil,
+// never stored.) draft/confirmed may also go to withdrawn; confirmed returns to draft when its content changes. rejected, withdrawn and
+// superseded are final. accepted never changes status; when a newer version is published only supersededAt / supersededById (set once)
+// and liveSlot change. A superseded published quotation gets status "superseded" (CHECK-enforced).
+//
+// Slots (no triggers, no generated column): workingSlot is 1 exactly while status is draft|confirmed and liveSlot is 1 exactly while
+// status is published|accepted AND supersededAt is NULL; otherwise both are NULL (CHECKs). UNIQUE (caseId, workingSlot) and
+// (caseId, liveSlot) therefore give at most one unpublished working version and at most one live version per Case, because MySQL
+// unique indexes ignore NULLs.
+//
+// Versions: UNIQUE (caseId, versionNumber). bitrixFileId is deliberately NOT unique (one file can legitimately carry several versions,
+// for example after an amount change). Duplicate-fetch detection compares contentFingerprint (SHA-256 of pdf sha256 + canonical amount
+// + currency) with the head version (highest versionNumber) under the Case row lock. Bitrix values are kept raw
+// (bitrixAmountRaw / bitrixCurrencyRaw); amount/currency are the parsed form, NULL until valid, and are NEVER rounded: the database
+// would round a 4th decimal silently (verified), so the service MUST validate precision first (DECIMAL(14,3), ISO 4217 digits 0/2/3).
+//
+// Immutability (enforced by the single writer module, row locking, revision compare-and-set, the CHECKs below, audit_logs and file
+// hash verification, NOT by triggers): after publication the content, money, file, validUntil, confirmation and publication fields are
+// frozen; after acceptance the decision is frozen too. Acceptance evidence is the patient's user id, this exact version, the decision
+// time and (for a rejection) the mandatory reason; no IP address or device data is collected. The CHECKs in the migration
+// (case_quotations_*_chk) are not visible to Prisma.
+model CaseQuotation {
+  id                 Int       @id @default(autoincrement())
+  caseId             Int       @map("case_id")
+  case               Case      @relation("CaseToQuotation", fields: [caseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  dealLinkId         Int       @map("deal_link_id")
+  dealLink           BitrixDealLink @relation(fields: [dealLinkId, caseId], references: [id, caseId], onDelete: Restrict, onUpdate: Restrict)
+  bitrixDealId       String    @db.VarChar(32) @map("bitrix_deal_id") // snapshot, exactly as Bitrix returned it (utf8mb4_bin in the migration)
+  versionNumber      Int       @map("version_number")
+
+  // Bitrix source values, preserved raw for audit.
+  bitrixFileId       String    @db.VarChar(32) @map("bitrix_file_id") // not unique, see above (utf8mb4_bin)
+  bitrixAmountRaw    String?   @db.VarChar(64) @map("bitrix_amount_raw")
+  bitrixCurrencyRaw  String?   @db.VarChar(32) @map("bitrix_currency_raw")
+  bitrixDealStageId  String?   @db.VarChar(64) @map("bitrix_deal_stage_id")
+  contentFingerprint String    @db.Char(64) @map("content_fingerprint")
+
+  // The PDF, outside MySQL.
+  storageProvider    String    @default("local") @db.VarChar(16) @map("storage_provider") // "local" | "s3"
+  storageKey         String    @unique @db.VarChar(191) @map("storage_key") // opaque, unique per file (utf8mb4_bin)
+  sizeBytes          Int       @map("size_bytes")
+  sha256             String    @db.Char(64)
+  scanStatus         String    @default("pending") @db.VarChar(16) @map("scan_status") // "pending" | "clean" | "infected" | "error"
+  scanEngine         String?   @db.VarChar(40) @map("scan_engine")
+  scanDetail         String?   @db.VarChar(255) @map("scan_detail")
+  scannedAt          DateTime? @map("scanned_at")
+  scanAttempts       Int       @default(0) @map("scan_attempts")
+  scanNextAttemptAt  DateTime? @map("scan_next_attempt_at")
+
+  // Money: DECIMAL(14,3) in major units, ISO 4217 form (three uppercase letters, utf8mb4_bin). Both NULL until valid.
+  amount             Decimal?  @db.Decimal(14, 3)
+  currency           String?   @db.VarChar(3)
+  validationError    String?   @db.VarChar(64) @map("validation_error") // short code, never raw values
+  validUntil         DateTime? @map("valid_until")
+
+  // Lifecycle.
+  status             String    @default("draft") @db.VarChar(16)
+  workingSlot        Int?      @map("working_slot")
+  liveSlot           Int?      @map("live_slot")
+  revision           Int       @default(0) // compare-and-set token, +1 on every write
+  lastSeenAt         DateTime? @map("last_seen_at") // last time Bitrix returned identical content (throttled)
+
+  confirmedByAdminId Int?      @map("confirmed_by_admin_id")
+  confirmedBy        AdminUser? @relation("QuotationConfirmer", fields: [confirmedByAdminId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  confirmedAt        DateTime? @map("confirmed_at")
+  publishedByAdminId Int?      @map("published_by_admin_id")
+  publishedBy        AdminUser? @relation("QuotationPublisher", fields: [publishedByAdminId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  publishedAt        DateTime? @map("published_at")
+  withdrawnByAdminId Int?      @map("withdrawn_by_admin_id")
+  withdrawnBy        AdminUser? @relation("QuotationWithdrawer", fields: [withdrawnByAdminId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  withdrawnAt        DateTime? @map("withdrawn_at")
+  withdrawReason     String?   @db.VarChar(1000) @map("withdraw_reason")
+
+  // Patient decision (acceptance evidence).
+  decidedByUserId    Int?      @map("decided_by_user_id")
+  decidedBy          User?     @relation("QuotationDecider", fields: [decidedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  decidedAt          DateTime? @map("decided_at")
+  rejectionReason    String?   @db.Text @map("rejection_reason")
+
+  // Supersession: the only thing that may change on an accepted row (set once). The successor must be in the same Case.
+  supersededAt       DateTime? @map("superseded_at")
+  supersededById     Int?      @map("superseded_by_id")
+  supersededBy       CaseQuotation?  @relation("QuotationSuccession", fields: [supersededById, caseId], references: [id, caseId], onDelete: Restrict, onUpdate: Restrict)
+  supersedes         CaseQuotation[] @relation("QuotationSuccession")
+
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  invoices           Invoice[]
+
+  @@unique([caseId, versionNumber])
+  @@unique([caseId, workingSlot])
+  @@unique([caseId, liveSlot])
+  @@unique([id, caseId])
+  @@unique([id, caseId, currency, amount], map: "case_quotations_id_case_currency_amount_key")
+  @@index([caseId, status])
+  @@index([dealLinkId, caseId])
+  @@index([status, validUntil])
+  @@index([scanStatus, scanNextAttemptAt])
+  @@map("case_quotations")
 }
 
 model Document {

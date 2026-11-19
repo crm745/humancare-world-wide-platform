@@ -6,6 +6,8 @@ import { navReplace } from './nav';
 import { ensureAuthenticated, getCurrentPath, isPublicApiPath, loginRouteFor } from './authGuard';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+// The configured backend address, for the few places that must build an absolute URL (hosted Checkout).
+export const API_BASE_URL = API_URL;
 
 // ---- how a failed renewal is told apart ---------------------------------------------------------------------
 // Only a refusal the server has confirmed ends the session. A network failure, a timeout, a 5xx or any other
@@ -181,8 +183,11 @@ export function apiGet(path, options) {
   return apiFetch(path, options);
 }
 
-export function apiPost(path, body) {
-  return apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
+// `headers` (optional) adds extra request headers on top of the defaults — e.g. a payment order's Idempotency-Key.
+// `signal` (optional) lets the caller give up waiting (a timeout); the request may still have reached the server.
+// Every existing call that omits them (the overwhelming majority) is unchanged.
+export function apiPost(path, body, { headers, signal } = {}) {
+  return apiFetch(path, { method: 'POST', body: JSON.stringify(body), ...(headers ? { headers } : {}), ...(signal ? { signal } : {}) });
 }
 
 export function apiPatch(path, body) {

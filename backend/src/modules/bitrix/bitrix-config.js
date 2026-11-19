@@ -38,6 +38,17 @@ function isPrivateCharterDealWorkerActive(env = process.env) {
   return isPrivateCharterDealEnabled(env) && env.PRIVATE_CHARTER_REVIEW_WORKFLOW === 'true';
 }
 
+// Quotation synchronization (Phase 1). A THIRD switch, OFF unless it says exactly BITRIX_QUOTATION_SYNC_ENABLED=true.
+// It only ever READS from Bitrix24 and stores the Deal's Quotation PDF as an unpublished draft; it needs everything the Deal
+// worker needs. While it is off, nothing is detected, queued, fetched or scanned.
+function isQuotationSyncRequested(env = process.env) {
+  return env.BITRIX_QUOTATION_SYNC_ENABLED === 'true';
+}
+
+function isQuotationSyncActive(env = process.env) {
+  return isQuotationSyncRequested(env) && isPrivateCharterDealWorkerActive(env);
+}
+
 // ---- which Bitrix24 portal may be contacted ----------------------------------------------------------------------------
 // BITRIX_ALLOWED_PORTAL_HOST is a bare host name (no scheme, path or wildcard), for example "sandbox.example.bitrix24.in".
 // The host of BITRIX24_WEBHOOK_URL must equal it EXACTLY, or nothing is sent. In a test environment (NODE_ENV=test) the
@@ -82,6 +93,9 @@ function bitrixConfigurationProblems(env = process.env) {
       problems.push('BITRIX_PRIVATE_CHARTER_DEAL_ENABLED=true needs PRIVATE_CHARTER_REVIEW_WORKFLOW=true.');
     }
   }
+  if (isQuotationSyncRequested(env) && !isPrivateCharterDealRequested(env)) {
+    problems.push('BITRIX_QUOTATION_SYNC_ENABLED=true needs BITRIX_PRIVATE_CHARTER_DEAL_ENABLED=true (and so BITRIX_SYNC_ENABLED=true and PRIVATE_CHARTER_REVIEW_WORKFLOW=true).');
+  }
   return problems;
 }
 
@@ -97,6 +111,8 @@ module.exports = {
   isPrivateCharterDealRequested,
   isPrivateCharterDealEnabled,
   isPrivateCharterDealWorkerActive,
+  isQuotationSyncRequested,
+  isQuotationSyncActive,
   bitrixConfigurationProblems,
   assertBitrixConfiguration,
   webhookHost,

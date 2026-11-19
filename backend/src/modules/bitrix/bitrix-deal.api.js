@@ -10,6 +10,7 @@
 //
 // Nothing here logs or returns the webhook URL, a token, a phone number or patient data: errors carry a short
 // code and, for Bitrix API errors, Bitrix's own error code and a sanitised, truncated description.
+const crypto = require('crypto');
 const { isPrivateCharterDealEnabled, bitrixHostProblem } = require('./bitrix-config');
 const { DEAL, FIELD, DOCUMENTS_FIELD } = require('./bitrix-deal');
 
@@ -226,7 +227,163 @@ async function updateDealFiles(dealId, entries, options = {}) {
   return { ok: true };
 }
 
+// ---- a SINGLE-file field and its download (the Quotation PDF, UF_CRM_1794985313) -----------------------------------------------------
+// Verified read-only against the Test Pipeline portal: the field is type "file", NOT multiple, and crm.item.get (useOriginalUfNames "Y")
+// returns it as ONE object { id (number), url, urlMachine }, or null when empty. fileIdsOf() above is for LIST fields and is not used.
+// The object has no file name and no size: those come from the download itself. `urlMachine` is the download link and it carries its
+// own authorisation, so it is treated like a credential: it is never logged, stored, put in an error, or sent to a client.
+const FILE_FIELD_NAME = /^UF_CRM_[A-Za-z0-9_]{1,60}$/;
+const DOWNLOAD_TIMEOUT_MS = 30000; // the whole download, body included (a 10 MB file does not fit the 15 s API timeout)
+const MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024; // the same cap as every other upload
+
+// Reads ONE single-file field of a Deal (crm.item.get). Resolves { status, file }:
+//   "ok"         file is null (the field is empty) or { id (exact text), urlMachine }. urlMachine is NOT enumerable, so logging,
+//                JSON.stringify and spreading the object cannot leak it; downloadBitrixFile reads it directly.
+//   "not_found"  Bitrix says there is no such Deal
+//   "uncertain"  anything else (switch off, timeout, error, a different Deal, the field absent from the answer, an object that is not a
+//                usable file): nothing is guessed, try again later
+async function getDealFileField(dealId, fieldName, options) {
+  if (!/^[1-9]\d*$/.test(String(dealId)) || !Number.isSafeInteger(Number(dealId))) return { status: 'uncertain', reason: 'deal_id_invalid' };
+  if (typeof fieldName !== 'string' || !FILE_FIELD_NAME.test(fieldName)) return { status: 'uncertain', reason: 'field_name_invalid' };
+  let data;
+  try {
+    data = await post('crm.item.get', { entityTypeId: DEAL_ENTITY_TYPE_ID, id: Number(dealId), useOriginalUfNames: 'Y' }, options);
+  } catch (err) {
+    if (err instanceof BitrixDealCallError && err.outcome === 'definitive' && /NOT_FOUND/i.test(err.message)) return { status: 'not_found' };
+    return { status: 'uncertain', reason: (err && err.code) || 'lookup_failed' };
+  }
+  const item = data.result && typeof data.result === 'object' && !Array.isArray(data.result) ? data.result.item : null;
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return { status: 'uncertain', reason: 'unexpected_shape' };
+  if (String(item.id) !== String(dealId)) return { status: 'uncertain', reason: 'wrong_deal' };
+  // Bitrix returns an empty field as an explicit null. A key that is not in the answer at all is not "empty": it may be a wrong
+  // field name or a permission problem, so it is not read as "no file".
+  if (!Object.prototype.hasOwnProperty.call(item, fieldName)) return { status: 'uncertain', reason: 'field_not_in_answer' };
+  const value = item[fieldName];
+  if (value === null || value === false || value === '' || (Array.isArray(value) && value.length === 0)) return { status: 'ok', file: null };
+  if (typeof value !== 'object' || Array.isArray(value)) return { status: 'uncertain', reason: 'unexpected_file_shape' };
+  const id = exactDealId(value.id);
+  if (id === null || typeof value.urlMachine !== 'string' || value.urlMachine === '') return { status: 'uncertain', reason: 'unexpected_file_shape' };
+  const file = { id };
+  Object.defineProperty(file, 'urlMachine', { value: value.urlMachine, enumerable: false });
+  return { status: 'ok', file };
+}
+
+// The download URL's problem as a short code, or null when it may be fetched. Nothing from the URL is put in the code.
+//   https only; the host must EQUAL the configured portal's host (the webhook's, which must itself pass bitrixHostProblem);
+//   no user name or password; no port other than the default 443; absolute URLs only.
+function downloadUrlProblem(rawUrl, portalHost) {
+  if (typeof rawUrl !== 'string' || rawUrl === '' || rawUrl !== rawUrl.trim()) return 'download_url_invalid';
+  let url;
+  try { url = new URL(rawUrl); } catch { return 'download_url_invalid'; }
+  if (url.protocol !== 'https:') return 'download_not_https';
+  if (url.username || url.password) return 'download_userinfo_rejected';
+  if (url.port !== '') return 'download_port_rejected'; // the WHATWG parser drops an explicit :443, so any remaining port is not 443
+  if (url.hostname.toLowerCase() !== portalHost) return 'download_host_not_allowed';
+  return null;
+}
+
+// A structural check of PDF bytes, beyond the type the server claimed. It is NOT a full parser and it never renders or executes the file;
+// the virus scan and the later review still apply. Checks: the header "%PDF-1.x" / "%PDF-2.x" at byte 0; "%%EOF" in the last KiB; a
+// "startxref <offset>" in the tail whose offset lies inside the file and points at a classic table ("xref") or an object ("n g obj",
+// which is how a cross-reference STREAM starts). Resolves { ok: true } or { ok: false, code }.
+function validatePdf(bytes) {
+  if (!Buffer.isBuffer(bytes) || bytes.length === 0) return { ok: false, code: 'empty_file' };
+  if (!/^%PDF-[12]\.\d/.test(bytes.subarray(0, 8).toString('latin1'))) return { ok: false, code: 'not_pdf_header' };
+  const tail = bytes.subarray(Math.max(0, bytes.length - 1024)).toString('latin1');
+  if (!tail.includes('%%EOF')) return { ok: false, code: 'missing_eof_marker' };
+  const marks = [...tail.matchAll(/startxref\s+(\d{1,12})\s*(?:\r?\n|\r|\s)*%%EOF/g)];
+  if (marks.length === 0) return { ok: false, code: 'missing_startxref' };
+  const offset = Number(marks[marks.length - 1][1]);
+  if (!Number.isSafeInteger(offset) || offset <= 0 || offset >= bytes.length) return { ok: false, code: 'startxref_out_of_range' };
+  const at = bytes.subarray(offset, offset + 40).toString('latin1');
+  if (!/^(?:xref|\d+\s+\d+\s+obj)/.test(at)) return { ok: false, code: 'startxref_target_invalid' };
+  return { ok: true };
+}
+
+const redirectRejection = (err) => /redirect/i.test(String(err && err.message)) || /redirect/i.test(String(err && err.cause && err.cause.message));
+
+// Downloads the file of a Deal's single-file field (the object getDealFileField returned) and resolves
+// { bytes (Buffer), contentType, byteCount, sha256 }. The bytes are held in memory only; nothing is written anywhere. Rejects with a
+// BitrixDealCallError whose code is short and never contains the URL or anything from the response body. "definitive": the file was
+// refused and retrying cannot help (bad URL, host, port, redirect, too large, not a PDF, a 4xx answer); "ambiguous": a timeout, a lost
+// connection or a 5xx, so a later retry may succeed. A download changes nothing in Bitrix, so repeating one is always safe.
+// SAFETY: it uses urlMachine ONLY, sends no credentials of its own, rejects every redirect (a redirect target is never followed), and
+// is bound to the same switches and portal allowlist as every other call in this file.
+async function downloadBitrixFile(fileObject, { env = process.env, fetchImpl = (...args) => fetch(...args), timeoutMs = DOWNLOAD_TIMEOUT_MS, maxBytes = MAX_DOWNLOAD_BYTES } = {}) {
+  if (!isPrivateCharterDealEnabled(env)) throw new BitrixDealCallError('definitive', 'switch_off', 'a Bitrix switch is off');
+  const base = env.BITRIX24_WEBHOOK_URL;
+  if (!base) throw new BitrixDealCallError('definitive', 'webhook_not_configured');
+  const hostProblem = bitrixHostProblem(env, base);
+  if (hostProblem) throw new BitrixDealCallError('definitive', 'host_not_allowed', hostProblem);
+  const portalHost = new URL(base).hostname.toLowerCase();
+
+  if (!fileObject || typeof fileObject !== 'object' || Array.isArray(fileObject) || exactDealId(fileObject.id) === null) {
+    throw new BitrixDealCallError('definitive', 'file_object_invalid');
+  }
+  const urlProblem = downloadUrlProblem(fileObject.urlMachine, portalHost);
+  if (urlProblem) throw new BitrixDealCallError('definitive', urlProblem);
+
+  const controller = new AbortController();
+  let timer;
+  const deadline = new Promise((_, reject) => { // rejects when the whole download has taken too long, a stalled body included
+    timer = setTimeout(() => { controller.abort(); reject(new BitrixDealCallError('ambiguous', 'timeout', `download timed out after ${timeoutMs / 1000}s`)); }, timeoutMs);
+  });
+  deadline.catch(() => {}); // never an unhandled rejection when the download finishes first
+  let reader = null;
+  try {
+    let res;
+    try {
+      res = await Promise.race([fetchImpl(fileObject.urlMachine, { method: 'GET', redirect: 'error', signal: controller.signal }), deadline]);
+    } catch (err) {
+      if (err instanceof BitrixDealCallError) throw err;
+      if (err && err.name === 'AbortError') throw new BitrixDealCallError('ambiguous', 'timeout', `download timed out after ${timeoutMs / 1000}s`);
+      if (redirectRejection(err)) throw new BitrixDealCallError('definitive', 'redirect_rejected');
+      const code = err && (err.code || (err.cause && err.cause.code));
+      throw new BitrixDealCallError('ambiguous', 'network_error', typeof code === 'string' ? code : ''); // never err.message: it could name the URL
+    }
+
+    if (!res || res.redirected === true || res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) throw new BitrixDealCallError('definitive', 'redirect_rejected');
+    if (res.status >= 500 || res.status === 408 || res.status === 429) throw new BitrixDealCallError('ambiguous', 'server_error', `HTTP ${res.status}`);
+    if (res.status !== 200) throw new BitrixDealCallError('definitive', 'http_error', `HTTP ${res.status}`);
+
+    const declared = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-length') : null;
+    if (declared !== null && declared !== undefined && /^\d+$/.test(String(declared)) && Number(declared) > maxBytes) {
+      throw new BitrixDealCallError('definitive', 'file_too_large', `declared length above ${maxBytes} bytes`);
+    }
+
+    const chunks = [];
+    let total = 0;
+    if (res.body && typeof res.body.getReader === 'function') {
+      reader = res.body.getReader();
+      for (;;) {
+        const { done, value } = await Promise.race([reader.read(), deadline]);
+        if (done) break;
+        total += value.length;
+        if (total > maxBytes) throw new BitrixDealCallError('definitive', 'file_too_large', `body above ${maxBytes} bytes`); // stops reading at once
+        chunks.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+      }
+    } else if (res.body) {
+      throw new BitrixDealCallError('ambiguous', 'unreadable_response'); // no stream to read: never buffer an unbounded body
+    }
+
+    const bytes = Buffer.concat(chunks, total);
+    const verdict = validatePdf(bytes);
+    if (!verdict.ok) throw new BitrixDealCallError('definitive', 'invalid_pdf', verdict.code);
+    const type = res.headers && typeof res.headers.get === 'function' ? res.headers.get('content-type') : null;
+    return {
+      bytes,
+      contentType: typeof type === 'string' ? safeDetail(type).slice(0, 100) : null, // recorded, never trusted: the bytes decided
+      byteCount: bytes.length,
+      sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+    };
+  } finally {
+    clearTimeout(timer);
+    if (reader) reader.cancel().catch(() => {}); // a no-op after a complete read; stops the transfer after an abort or an overrun
+  }
+}
+
 module.exports = {
   createDeal, findDealsByReference, getDeal, getDealFiles, updateDealFiles, fileIdsOf, BitrixDealCallError, exactDealId, REQUEST_TIMEOUT_MS,
   DEAL_ENTITY_TYPE_ID, DOCUMENTS_ITEM_KEY,
+  getDealFileField, downloadBitrixFile, validatePdf, downloadUrlProblem, DOWNLOAD_TIMEOUT_MS, MAX_DOWNLOAD_BYTES,
 };

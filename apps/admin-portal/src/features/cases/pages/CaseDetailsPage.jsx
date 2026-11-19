@@ -13,6 +13,7 @@ import { capitalise, careLevelLabel, formatBytes } from '../../requests/requestD
 import { useDocumentActions } from '../../requests/useDocumentActions';
 import { useRequestDetails } from '../../requests/useRequestDetails';
 import { caseSource, caseStatusLabel, caseStatusTone, caseUrgencyLabel, documentView, linkedRequest, sortStageEvents, sourceDocumentFor, validCaseId } from '../caseView.mjs';
+import QuotationSection from '../../quotations/components/QuotationSection';
 import { useCaseDetails } from '../useCaseDetails';
 
 // One operational Case (GET /admin/cases/:id), read-only. Case documents can be downloaded only through the
@@ -101,6 +102,9 @@ export default function CaseDetailsPage() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
+          {/* Private Charter Cases only: the section hides itself when the server says this Case has no quotations. */}
+          {request && <QuotationSection caseId={c.id} caseReference={c.referenceNumber} />}
+
           <DetailSection title="Service">
             <FieldList>
               <Field label="Service type" value={c.serviceType} />

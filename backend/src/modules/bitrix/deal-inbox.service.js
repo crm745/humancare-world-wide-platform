@@ -23,8 +23,9 @@
 const os = require('os');
 const crypto = require('crypto');
 const { prisma: defaultPrisma } = require('../../db/prisma');
-const { isPrivateCharterDealWorkerActive } = require('./bitrix-config');
+const { isPrivateCharterDealWorkerActive, isQuotationSyncActive } = require('./bitrix-config');
 const { assertDealEligible } = require('./deal-outbox');
+const { detectAndEnqueueQuotationSync } = require('./quotation-outbox');
 const { DEAL, FIELD } = require('./bitrix-deal');
 const bitrixDealApi = require('./bitrix-deal.api');
 const defaultStore = require('./deal-inbox.store');
@@ -231,6 +232,19 @@ async function processInboxEvent(ctx, claim) {
   if (String(deal.ID) !== claim.dealId) return quarantine(ctx, claim, 'deal_id_mismatch', caseRecord);
   if (String(deal.CATEGORY_ID) !== String(DEAL.CATEGORY_ID)) return quarantine(ctx, claim, 'category_mismatch', caseRecord);
   if (deal[FIELD.REFERENCE] !== caseRecord.referenceNumber) return quarantine(ctx, claim, 'reference_mismatch', caseRecord);
+
+  // Quotation synchronization (off unless BITRIX_QUOTATION_SYNC_ENABLED=true): the Deal was just verified as this Case's Deal, so
+  // the Quotation PDF / amount / currency it carries are compared with the stored head version and, if they differ, ONE idempotent
+  // "bitrix.quotation.sync" event is queued. Independent of the stage (an unknown stage is quarantined below, the quotation is
+  // still noticed). If recording the event fails the whole inbox event is retried: a lost trigger would not come back by itself.
+  if (isQuotationSyncActive(ctx.env)) {
+    try {
+      await detectAndEnqueueQuotationSync(ctx.prisma, caseRecord, deal);
+    } catch (err) {
+      ctx.log.warn(`[deal-inbox] event ${claim.id}: quotation event not recorded (${err && err.name ? err.name : 'error'}).`);
+      return retryLater(ctx, claim, 'quotation_enqueue_failed', caseRecord);
+    }
+  }
 
   const stage = lookupStage(deal.STAGE_ID, deal, { lostReasonField: ctx.lostReasonField });
   if (!stage.ok) return quarantine(ctx, claim, stage.code, caseRecord);

@@ -45,7 +45,7 @@ export const INITIAL_DRAFT = {
   phoneCountry: 'IN', // the country picked for the contact number's code (+1 and +7 are shared)
   ccEdited: false, // true once the person has changed the code by hand
   phone: '',
-  care: [], // the ONE chosen care-level key, as a list of 0 or 1; only asked for air & ground ambulance (see needsCareLevel)
+  care: [], // the chosen care-level keys: one or more for Private Charter ('care_na' only on its own), at most one for the other transport services (see needsCareLevel)
   airlineMode: '', // 'stretcher' | 'wheelchair'; only asked for Commercial Airlines
   // Mortal Remains only (see isMortal); `name`/`age`/`gender` are then the deceased's.
   mortalTransfer: '', // 'domestic' | 'international'
@@ -57,7 +57,7 @@ export const INITIAL_DRAFT = {
   date: '',
   files: [], // medical reports: [{ uri, name, mimeType, size }], from the file picker or the camera
   // Medical page (patient transport only: see needsCareLevel). Urgency is asked for every service.
-  mobility: '', // 'bedridden' | 'wheelchair' | 'walking'
+  mobility: [], // chosen keys of 'bedridden' | 'wheelchair' | 'walking': one or more for Private Charter, at most one for the other transport services
   equipOxygen: false,
   equipCardiac: false,
   equipVentilator: false,

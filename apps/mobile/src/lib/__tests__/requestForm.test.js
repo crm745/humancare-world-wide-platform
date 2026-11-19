@@ -3,7 +3,7 @@ const { draftForService, needsCareLevel } = require('../requestForm');
 
 const INITIAL = {
   service: 'air', name: '', age: '', care: [], airlineMode: '', mortalTransfer: '', relation: '', deathPlace: '', deathDate: '',
-  mobility: '', equipOxygen: false, equipCardiac: false, equipVentilator: false, urgency: '', desc: '', files: [], changingService: false,
+  mobility: [], equipOxygen: false, equipCardiac: false, equipVentilator: false, urgency: '', desc: '', files: [], changingService: false,
 };
 
 describe('needsCareLevel (patient transport)', () => {
@@ -18,9 +18,9 @@ describe('draftForService', () => {
   });
 
   it('keeps the patient and medical answers when the service is changed from inside the form', () => {
-    const previous = { ...INITIAL, service: 'privatecharter', changingService: true, name: 'Gouri Patil', age: '64', desc: 'Post-angioplasty', urgency: 'urgent_24h', care: ['care_icu', 'care_stable'], mobility: 'bedridden', equipOxygen: true };
+    const previous = { ...INITIAL, service: 'privatecharter', changingService: true, name: 'Gouri Patil', age: '64', desc: 'Post-angioplasty', urgency: 'urgent_24h', care: ['care_icu', 'care_stable'], mobility: ['bedridden'], equipOxygen: true };
     const next = draftForService(previous, 'ground', INITIAL);
-    expect(next).toMatchObject({ service: 'ground', name: 'Gouri Patil', age: '64', desc: 'Post-angioplasty', urgency: 'urgent_24h', care: ['care_icu', 'care_stable'], mobility: 'bedridden', equipOxygen: true });
+    expect(next).toMatchObject({ service: 'ground', name: 'Gouri Patil', age: '64', desc: 'Post-angioplasty', urgency: 'urgent_24h', care: ['care_icu', 'care_stable'], mobility: ['bedridden'], equipOxygen: true });
     expect(next.changingService).toBe(false);
   });
 
@@ -32,9 +32,9 @@ describe('draftForService', () => {
   });
 
   it('drops care level, mobility and equipment when the new service is not patient transport', () => {
-    const previous = { ...INITIAL, service: 'privatecharter', changingService: true, care: ['care_icu'], mobility: 'wheelchair', equipOxygen: true, equipCardiac: true, equipVentilator: true, urgency: 'planned' };
+    const previous = { ...INITIAL, service: 'privatecharter', changingService: true, care: ['care_icu'], mobility: ['wheelchair'], equipOxygen: true, equipCardiac: true, equipVentilator: true, urgency: 'planned' };
     const next = draftForService(previous, 'hospital', INITIAL);
-    expect(next).toMatchObject({ care: [], mobility: '', equipOxygen: false, equipCardiac: false, equipVentilator: false });
+    expect(next).toMatchObject({ care: [], mobility: [], equipOxygen: false, equipCardiac: false, equipVentilator: false });
     expect(next.urgency).toBe('planned'); // urgency is asked for every service
   });
 });

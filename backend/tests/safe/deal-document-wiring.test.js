@@ -107,10 +107,21 @@ describe('the schema and the prepared migration agree (not applied)', () => {
     expect(sql).toMatch(/NOT applied/);
   });
 
-  test('it comes after the earlier prepared migration and is the newest one', () => {
+  // The migration history is append-only, so this migration is not (and was never meant to stay) the newest. What matters is its place
+  // in the order: after the migrations it builds on, before the ones that were added later.
+  test('it exists and sits in the right place in the migration history: after what it builds on, before the later Phase 2 and Razorpay migrations', () => {
     const names = fs.readdirSync(path.join(BACKEND, 'prisma', 'migrations')).filter((n) => /^\d{14}_/.test(n)).sort();
-    expect(names[names.length - 1]).toBe(folder);
-    expect(names).toContain('20261116100000_widen_service_request_mobility');
+    const earlier = ['20261113000300_private_charter_m4_document_request', '20261113000400_private_charter_m5_bitrix_deal_link', '20261116100000_widen_service_request_mobility'];
+    const later = ['20261118100000_phase2_case_quotations', '20261119100000_payments_razorpay_order_id'];
+
+    expect(names).toContain(folder);
+    for (const name of [...earlier, ...later]) expect(names).toContain(name); // every migration it is ordered against really exists
+    const at = (name) => names.indexOf(name);
+    for (const name of earlier) expect(at(name)).toBeLessThan(at(folder)); // it needs request_documents / document_requests and bitrix_deal_links
+    for (const name of later) expect(at(name)).toBeGreaterThan(at(folder)); // Phase 2 and the Razorpay order id come after it
+    expect(at(later[0])).toBeLessThan(at(later[1])); // and Phase 2 before the Razorpay order id
+    expect(names.slice(0, at(folder) + 1)).toEqual(expect.arrayContaining(earlier)); // nothing it depends on is missing before it
+    expect(names.slice(at(folder) + 1)).toEqual(expect.arrayContaining(later));
   });
 });
 

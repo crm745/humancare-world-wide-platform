@@ -43,9 +43,15 @@ export const isPrivateCharterAge = (value) => {
   return /^\d{1,3}$/.test(text) && Number(text) >= 1 && Number(text) <= PRIVATE_CHARTER_MAX_AGE;
 };
 
+// Mobility is a list of keys (several for Private Charter). An older draft, or a caller, may still hold one key as text.
+export const mobilityList = (value) => (Array.isArray(value) ? value : value ? [value] : []);
+
+// Care level and mobility on a request that is not Private Charter allow ONE choice: the single key, or '' when none or several.
+export const singleChoice = (list) => (list.length === 1 ? list[0] : '');
+
 // The request body for POST /requests, in the formats the backend stores: gender in lower case,
 // the contact number in E.164, the country as an ISO code, each city as { geonameId } only, the
-// care level as a list holding the ONE chosen key (a draft that somehow holds several is sent as it is, so the server refuses it), the date as YYYY-MM-DD. There is no patientLocation, and no
+// care level and mobility as lists of the chosen keys (one or more; the server refuses 'care_na' combined with another and any repeat), the equipment as booleans, the date as YYYY-MM-DD. There is no patientLocation, and no
 // deceased fields. Optional values the person left empty are left out.
 export function buildPrivateCharterPayload(draft) {
   const contact = contactE164(draft.cc, draft.phone);
@@ -62,7 +68,7 @@ export function buildPrivateCharterPayload(draft) {
     preferredDate: draft.date || undefined,
     careLevel: draft.care && draft.care.length ? [...draft.care] : undefined,
     description: draft.desc || undefined,
-    mobility: draft.mobility || undefined,
+    mobility: mobilityList(draft.mobility).length ? [...mobilityList(draft.mobility)] : undefined,
     equipOxygen: !!draft.equipOxygen,
     equipCardiacMonitor: !!draft.equipCardiac,
     equipVentilator: !!draft.equipVentilator,

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, Share, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Check, Download, Phone, Share2 } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { apiGet } from '../lib/api';
@@ -11,6 +11,8 @@ import { Button, Card, InfoRow, Spacer, Text } from '../components/ui';
 import { LoadError, LoadingState } from '../components/LoadingState';
 import AdditionalDocuments from '../components/request/AdditionalDocuments';
 import DocumentHistory from '../components/request/DocumentHistory';
+import InvoicesSection from '../components/request/InvoicesSection';
+import QuotationSection from '../components/request/QuotationSection';
 import ReviewBanner from '../components/request/ReviewBanner';
 import RequestStatusPill from '../components/request/RequestStatusPill';
 import { documentsSummary } from '../lib/documentHistoryView';
@@ -82,6 +84,14 @@ export default function RequestDetails() {
     .then(({ request: r }) => setRequest(r))
     .catch((err) => toast(err.message));
 
+  // Coming back to this screen (from the payment page, from the payment-return link, from another screen) refreshes the
+  // request, so the invoices show what the backend now says. The first focus is the initial load above.
+  const firstFocus = useRef(true);
+  useFocusEffect(useCallback(() => {
+    if (firstFocus.current) { firstFocus.current = false; return; }
+    if (id) apiGet(`/requests/me/${id}`).then(({ request: r }) => setRequest(r)).catch(() => undefined);
+  }, [id]));
+
   if (!request) {
     return (
       <Screen>
@@ -151,6 +161,9 @@ export default function RequestDetails() {
           <Text className="mb-[22px] font-inter-black text-[14.5px] text-navy">{t('lbl_tracking_status')}</Text>
           <StatusTracker status={request.status} />
         </Card>
+        {/* The patient's quotation (Private Charter): view the PDF, accept or reject. Hides itself when the server says there is none. */}
+        {request.serviceKey === 'privatecharter' && <QuotationSection request={request} onChanged={reload} />}
+        <InvoicesSection request={request} onChanged={reload} />
         <DocumentHistory request={request} />
         <AdditionalDocuments request={request} onUploaded={reload} />
         <Spacer />

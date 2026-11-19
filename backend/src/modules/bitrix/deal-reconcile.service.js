@@ -19,6 +19,10 @@
 //
 // The "last checked" marker is BitrixDealLink.last_attempt_at (no schema change), updated for every link looked at,
 // so one failing Deal cannot starve the others.
+//
+// SCOPE (test tooling only; the scheduled job never passes it): `scope = { dealId, ignoreRecheck? }` narrows the pass to the ONE link with that
+// Deal id (one read at most). Every other rule above still applies unchanged. `ignoreRecheck` skips only the 15-minute "recently checked" window,
+// because an operator asked for exactly this Deal.
 const crypto = require('crypto');
 const { prisma: defaultPrisma } = require('../../db/prisma');
 const { isPrivateCharterDealWorkerActive } = require('./bitrix-config');
@@ -39,16 +43,18 @@ async function reconcileDeals(overrides = {}) {
   const ctx = { prisma: defaultPrisma, api: bitrixDealApi, env: process.env, log: console, now: () => Date.now(), ...overrides };
   if (!isPrivateCharterDealWorkerActive(ctx.env)) return { active: false, checked: 0, queued: 0 };
 
+  const scope = ctx.scope || null;
+  if (scope && !/^[1-9]\d{0,17}$/.test(String(scope.dealId))) return { active: true, checked: 0, queued: 0 }; // a malformed scope matches nothing
   const cutoff = new Date(ctx.now() - MIN_RECHECK_MINUTES * 60 * 1000);
   const links = await ctx.prisma.bitrixDealLink.findMany({
     where: {
-      bitrixDealId: { not: null },
-      OR: [{ lastAttemptAt: null }, { lastAttemptAt: { lt: cutoff } }],
+      bitrixDealId: scope ? String(scope.dealId) : { not: null },
+      ...(scope && scope.ignoreRecheck ? {} : { OR: [{ lastAttemptAt: null }, { lastAttemptAt: { lt: cutoff } }] }),
       case: { is: { status: { notIn: OPEN_ONLY }, serviceRequest: { is: { serviceKey: PRIVATE_CHARTER_KEY, reviewStatus: { not: null }, bitrixLeadId: null } } } },
     },
     include: { case: { include: { serviceRequest: true } } },
     orderBy: { lastAttemptAt: 'asc' },
-    take: BATCH_SIZE,
+    take: scope ? 1 : BATCH_SIZE,
   });
 
   let checked = 0; let queued = 0; let failures = 0;

@@ -175,7 +175,7 @@ test.describe('sending the request', () => {
     await reasonBox(page).fill('Please send the certificate.');
     await send(page).click();
     await expect(page.getByRole('status').filter({ hasText: 'Additional documents were requested.' })).toBeVisible();
-    await expect(page.locator('section').filter({ has: page.getByRole('heading', { name: 'Linked Case' }) })).toContainText('No Case yet');
+    await expect(page.locator('section').filter({ has: page.getByRole('heading', { name: 'Linked Case' }) })).toContainText('The Case is created when you approve this request.');
     await expect(page.getByRole('button', { name: 'Approve request' })).toBeDisabled(); // waiting for the patient
     await expect(page.getByRole('button', { name: /create case/i })).toHaveCount(0);
   });

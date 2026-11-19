@@ -21,7 +21,14 @@ export function careLevelLabel(value) {
     .join(', ');
 }
 
-export const mobilityLabel = (value) => (has(value) ? MOBILITY_LABEL[value] ?? String(value) : null);
+/** "walking" -> "Walking"; Private Charter may hold several: "bedridden,wheelchair" -> "Bedridden, Wheelchair". Anything else is shown as stored. */
+export function mobilityLabel(value) {
+  if (!has(value)) return null;
+  return String(value)
+    .split(',')
+    .map((piece) => (Object.hasOwn(MOBILITY_LABEL, piece.trim()) ? MOBILITY_LABEL[piece.trim()] : piece.trim()))
+    .join(', ');
+}
 
 export function capitalise(value) {
   return has(value) ? String(value).charAt(0).toUpperCase() + String(value).slice(1) : null;

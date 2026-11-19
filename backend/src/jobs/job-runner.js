@@ -7,6 +7,14 @@
 //
 // A job is { name, intervalMs, runOnStart, run }; `run` is the existing service function.
 
+// A short, identifier-shaped description of a failure for the log: the error's `code` (for example a Prisma "P2002" or a system "ECONNRESET"),
+// else its class name, else "Error". A value that does not look like an identifier is never used, so text cannot be smuggled into the line.
+const SAFE_IDENTIFIER = /^[A-Za-z0-9_.-]{1,64}$/;
+function safeErrorCode(err) {
+  const pick = (value) => (typeof value === 'string' && SAFE_IDENTIFIER.test(value) ? value : null);
+  return (err && (pick(err.publicCode) || pick(err.code) || pick(err.name))) || 'Error';
+}
+
 function validateJobs(jobs) {
   if (!Array.isArray(jobs) || jobs.length === 0) throw new Error('createJobRunner needs at least one job');
   const names = new Set();
@@ -41,7 +49,9 @@ function createJobRunner(jobs, { logger = console } = {}) {
       try {
         await state.job.run();
       } catch (err) {
-        logger.error(`[jobs] "${state.job.name}" failed: ${err.message}`);
+        // The job's name and a short error CODE only, never the exception's message: a database error's message can quote the query and its
+        // values (payment, patient or credential data). The job is simply run again on its next tick.
+        logger.error(`[jobs] "${state.job.name}" failed: ${safeErrorCode(err)}`);
       } finally {
         state.active = false;
       }
@@ -75,4 +85,4 @@ function createJobRunner(jobs, { logger = console } = {}) {
   return { start, stop };
 }
 
-module.exports = { createJobRunner };
+module.exports = { createJobRunner, safeErrorCode };

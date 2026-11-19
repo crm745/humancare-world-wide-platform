@@ -202,7 +202,7 @@ test.describe('details page content', () => {
   test('without a Case, says so', async ({ page, context }) => {
     await installMockApi(context, { authed: true, details });
     await page.goto('/requests/501');
-    await expect(section(page, 'Linked Case')).toContainText('No Case yet');
+    await expect(section(page, 'Linked Case')).toContainText('The Case is created when you approve this request.');
   });
 
   test('missing optional fields: shown as "Not provided" or left out, nothing invented', async ({ page, context }) => {

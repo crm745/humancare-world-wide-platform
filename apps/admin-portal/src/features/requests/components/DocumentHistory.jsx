@@ -1,10 +1,11 @@
-import { Check, Download, FileText, ShieldAlert, TriangleAlert, X } from 'lucide-react';
+import { Check, Download, FileText, RotateCw, Share2, ShieldAlert, ShieldOff, TriangleAlert, X } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { cn } from '@/utils/cn';
 import { documentActions } from '../documentActions.mjs';
 import { documentView } from '../requestDetails.mjs';
+import { canAuthorize, shareView, sharingApplies } from '../shares.mjs';
 import { formatDateTime } from '../format';
 
 // Read-only. Every version is listed, including replaced ones; severity is shown by the card's
@@ -26,11 +27,17 @@ function Row({ label, children }) {
   );
 }
 
-// `actions` (optional): { request, downloadingId, onDownload, onApprove, onReject }. What each card
-// offers comes from documentActions(); the backend enforces the same rules again.
+// `actions` (optional): { request, shares, downloadingId, shareBusyId, onDownload, onApprove, onReject, onAuthorize, onRevoke, onRetry }.
+// `shares` is { [requestDocumentId]: newest share }. What each card offers comes from documentActions() and shares.mjs; the backend enforces the same rules again.
 function DocumentCard({ doc, view, actions }) {
   const allowed = actions ? documentActions(doc, actions.request) : null;
   const downloading = actions?.downloadingId === doc.id;
+  const share = actions?.shares?.[doc.id] ?? null;
+  const shareInfo = share ? shareView(share) : null;
+  const authorize = actions && !view.superseded ? canAuthorize(doc, actions.request, share) : { allowed: false, reason: null };
+  const showSharing = actions && !view.superseded && (shareInfo || sharingApplies(actions.request));
+  const shareBusy = actions?.shareBusyId != null;
+  const sharing = actions?.shareBusyId === doc.id;
   return (
     <li
       data-severity={view.severity}
@@ -100,6 +107,50 @@ function DocumentCard({ doc, view, actions }) {
         </dl>
         {allowed?.note && <p className="text-xs text-slate-500">{allowed.note}</p>}
       </div>
+
+      {showSharing && (
+        <div data-share-status={shareInfo?.status ?? 'not_shared'} className="mt-3 space-y-1.5 rounded-md border border-slate-200 bg-slate-50/70 p-3 text-sm" aria-label={`Bitrix sharing for ${view.name}`}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Share2 className="h-4 w-4 text-slate-400" aria-hidden="true" />
+            <span className="font-medium text-slate-700">Bitrix Deal</span>
+            {shareInfo ? <Badge tone={shareInfo.tone} prominent={shareInfo.failed}>{shareInfo.label}</Badge> : <Badge tone="neutral">Not shared</Badge>}
+          </div>
+          {shareInfo?.attention && (
+            <p className="flex items-start gap-2 font-medium text-red-800">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              {shareInfo.status === 'ambiguous'
+                ? 'The outcome of the last attempt is not certain. Check the Deal in Bitrix24 before doing anything else.'
+                : shareInfo.status === 'revoke_failed' ? 'Removing this document from the Deal failed. Retry, or remove it in Bitrix24.' : 'Attaching this document to the Deal failed. Retry to try again.'}
+            </p>
+          )}
+          {shareInfo?.tryText && <p className="text-xs text-slate-500">{shareInfo.tryText}</p>}
+          {shareInfo?.error && <p className="text-xs text-red-700">Last error: <span className="font-mono">{shareInfo.error}</span></p>}
+          {shareInfo?.detail && <p className="text-xs text-slate-500">{shareInfo.detail}</p>}
+          {!shareInfo && authorize.reason && <p className="text-xs text-slate-500">{authorize.reason}</p>}
+          {(authorize.allowed || shareInfo?.canRevoke || shareInfo?.canRetry) && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {authorize.allowed && (
+                <Button size="sm" aria-label={`Authorize sharing of ${view.name}`} loading={sharing} disabled={shareBusy} onClick={() => actions.onAuthorize(doc)}>
+                  {!sharing && <Share2 className="h-4 w-4" />}
+                  Authorize
+                </Button>
+              )}
+              {shareInfo?.canRetry && (
+                <Button size="sm" aria-label={`Retry sharing of ${view.name}`} loading={sharing} disabled={shareBusy} onClick={() => actions.onRetry(share, doc)}>
+                  {!sharing && <RotateCw className="h-4 w-4" />}
+                  Retry
+                </Button>
+              )}
+              {shareInfo?.canRevoke && (
+                <Button variant="secondary" size="sm" className="!border-red-200 !text-red-700 hover:!bg-red-50" aria-label={`Revoke sharing of ${view.name}`} disabled={shareBusy} onClick={() => actions.onRevoke(share, doc)}>
+                  <ShieldOff className="h-4 w-4" />
+                  Revoke
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {allowed && (allowed.download || allowed.approve || allowed.reject) && (
         <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-200/70 pt-3">

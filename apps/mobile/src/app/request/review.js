@@ -8,7 +8,7 @@ import { navReplace } from '../../lib/nav';
 import { apiPost, apiUpload } from '../../lib/api';
 import { runSubmission } from '../../lib/requestUploads';
 import {
-  buildPrivateCharterPayload, fieldErrorsFromError, firstErrorLocation, isPrivateCharter, needsDocument, unplacedMessages,
+  buildPrivateCharterPayload, fieldErrorsFromError, firstErrorLocation, isPrivateCharter, mobilityList, needsDocument, singleChoice, unplacedMessages,
 } from '../../lib/privateCharter';
 import { goToStep, RequestFrame } from '../../components/request/RequestFrame';
 import { InfoRow, SectionLabel, Text } from '../../components/ui';
@@ -92,7 +92,7 @@ export default function RequestReview() {
         description: d.desc || undefined, // "Condition & diagnosis" (or the Mortal Remains details)
         // Only patient transport has these; the server refuses them for any other service.
         ...(transport ? {
-          mobility: d.mobility,
+          mobility: singleChoice(mobilityList(d.mobility)) || undefined,
           equipOxygen: d.equipOxygen,
           equipCardiacMonitor: d.equipCardiac,
           equipVentilator: d.equipVentilator,
@@ -169,7 +169,7 @@ export default function RequestReview() {
           [t(mortal ? 'req_details' : 'req_condition'), d.desc],
           ...(transport ? [
             [t('field_care_level'), d.care.map(t).join(', ')],
-            [t('req_mobility'), d.mobility ? t(`mobility_${d.mobility}`) : ''],
+            [t('req_mobility'), mobilityList(d.mobility).map((key) => t(`mobility_${key}`)).join(', ')],
             [t('req_on_board'), onBoard || t('req_none')],
           ] : []),
           [t('req_urgency'), d.urgency ? t(`urgency_${d.urgency}`) : ''],

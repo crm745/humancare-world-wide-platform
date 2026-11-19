@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { Accessibility, Activity, BedDouble, PersonStanding } from 'lucide-react-native';
 import { needsCareLevel, useApp } from '../../state/AppContext';
 import { EQUIPMENT_OPTIONS, MOBILITY_OPTIONS, URGENCY_OPTIONS, isMortal } from '../../data/mock';
-import { firstAnchorOnStep, isPrivateCharter, needsDocument } from '../../lib/privateCharter';
+import { firstAnchorOnStep, isPrivateCharter, mobilityList, needsDocument, singleChoice } from '../../lib/privateCharter';
 import { Anchor, RequestFrame } from '../../components/request/RequestFrame';
 import { ChoiceChips, FieldError, FieldHeader, ReportTiles, SwitchRow } from '../../components/request/fields';
 import { CARE_LEVELS } from '../../components/ui';
@@ -20,14 +20,16 @@ export default function RequestStep2() {
   const transport = needsCareLevel(draft.service);
   // The API's message for a field, shown under it until the person changes the field.
   const serverError = (field) => (serverErrors ? serverErrors[field] : undefined);
-  // Private Charter needs exactly one care level (the other transport services leave it optional).
+  // Private Charter needs at least one care level and lets several be chosen (Not Applicable only on its own); the other transport
+  // services keep the single choice and leave it optional.
   const charter = isPrivateCharter(draft.service);
+  const mobility = mobilityList(draft.mobility);
   const mortal = isMortal(draft.service);
   const [attempted, setAttempted] = useState(false);
 
   const problems = [
-    ['care', charter && draft.care.length !== 1],
-    ['mobility', transport && !draft.mobility],
+    ['care', charter && !draft.care.length],
+    ['mobility', transport && !(charter ? mobility.length : singleChoice(mobility))],
     ['files', needsDocument(draft)],
     ['urgency', !draft.urgency],
   ];
@@ -55,12 +57,20 @@ export default function RequestStep2() {
       {transport && (
         <Anchor id="care">
           <FieldHeader title={t('field_care_level')} required={charter} />
-          <ChoiceChips
-            columns={2} label={t('field_care_level')}
-            value={draft.care.length === 1 ? draft.care[0] : ''} onChange={(key) => updateDraft({ care: key ? [key] : [] })}
-            options={CARE_LEVELS.map((key) => ({ value: key, label: t(key) }))}
-          />
-          <FieldError>{charter && attempted && draft.care.length !== 1 ? t('req_required') : serverError('careLevel')}</FieldError>
+          {charter ? (
+            <ChoiceChips
+              multiple columns={2} label={t('field_care_level')}
+              value={draft.care} onChange={(care) => updateDraft({ care })}
+              options={CARE_LEVELS.map((key) => ({ value: key, label: t(key), exclusive: key === 'care_na' }))}
+            />
+          ) : (
+            <ChoiceChips
+              columns={2} label={t('field_care_level')}
+              value={singleChoice(draft.care)} onChange={(key) => updateDraft({ care: key ? [key] : [] })}
+              options={CARE_LEVELS.map((key) => ({ value: key, label: t(key) }))}
+            />
+          )}
+          <FieldError>{charter && attempted && !draft.care.length ? t('req_required') : serverError('careLevel')}</FieldError>
         </Anchor>
       )}
 
@@ -68,10 +78,11 @@ export default function RequestStep2() {
         <Anchor id="mobility">
           <FieldHeader title={t('req_mobility')} required />
           <ChoiceChips
-            columns={3} label={t('req_mobility')} value={draft.mobility} onChange={(mobility) => updateDraft({ mobility })}
+            columns={3} label={t('req_mobility')} multiple={charter}
+            value={charter ? mobility : singleChoice(mobility)} onChange={(next) => updateDraft({ mobility: charter ? next : next ? [next] : [] })}
             options={MOBILITY_OPTIONS.map((key) => ({ value: key, label: t(`mobility_${key}`), Icon: MOBILITY_ICONS[key] }))}
           />
-          <FieldError>{attempted && !draft.mobility ? t('req_required') : serverError('mobility')}</FieldError>
+          <FieldError>{attempted && !(charter ? mobility.length : singleChoice(mobility)) ? t('req_required') : serverError('mobility')}</FieldError>
         </Anchor>
       )}
 

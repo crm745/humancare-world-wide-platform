@@ -9,13 +9,16 @@ import { PageLoader } from '@/components/ui/Loading';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { DetailSection, Field, FieldList } from '../components/DetailSection';
 import { DocumentHistory } from '../components/DocumentHistory';
+import { DocumentRequests } from '../components/DocumentRequests';
 import { DocumentReviewDialogs } from '../components/DocumentReviewDialogs';
 import { RequestDocumentsDialog } from '../components/RequestDocumentsDialog';
 import { RequestTimeline } from '../components/RequestTimeline';
+import { DocumentRequestDialog, RevokeShareDialog } from '../components/ShareDialogs';
 import { approvalEligibility, caseDetailsPath } from '../approval.mjs';
 import { canRequestDocuments } from '../documentActions.mjs';
 import { formatCalendarDay, formatDateTime } from '../format';
 import { backLabel, backTarget, capitalise, careLevelLabel, equipmentList, mobilityLabel } from '../requestDetails.mjs';
+import { latestShares, sharesNeedingAttention, sharingApplies } from '../shares.mjs';
 import { REVIEW_STATUS_LABEL, URGENCY_LABEL, documentBadges, statusTone } from '../requestStatus.mjs';
 import { useDocumentActions } from '../useDocumentActions';
 import { useRequestDetails } from '../useRequestDetails';
@@ -74,6 +77,9 @@ export default function SubmissionDetailsPage() {
   const approval = approvalEligibility(request);
   const showApprove = !isDraft && !approval.approved;
   const linkedCase = request.case ?? null;
+  // Bitrix sharing of the Case's documents (the newest share of each document) and the ones that need a person.
+  const shares = latestShares(request.documentShares);
+  const failedShares = sharesNeedingAttention(request.documentShares);
   const caseLink = caseDetailsPath(linkedCase);
 
   return (
@@ -127,6 +133,12 @@ export default function SubmissionDetailsPage() {
           </Alert>
         )}
         {error && <Alert tone="error" className="mt-4">{error}</Alert>}
+        {failedShares.length > 0 && (
+          <Alert tone="error" className="mt-4">
+            <span className="font-semibold">{failedShares.length === 1 ? '1 document needs attention' : `${failedShares.length} documents need attention`} in the Bitrix Deal.</span>{' '}
+            See the sharing status on each document below; failed shares can be retried.
+          </Alert>
+        )}
         {showApprove && !approval.allowed && (
           <Alert tone="warning" className="mt-4">
             <span className="font-semibold">This request cannot be approved yet:</span>
@@ -192,9 +204,17 @@ export default function SubmissionDetailsPage() {
           <DetailSection title={`Document history (${documents.length})`}>
             <DocumentHistory
               documents={documents}
-              actions={{ request, downloadingId: docs.downloadingId, onDownload: docs.download, onApprove: (d) => docs.openDialog('approve', d), onReject: (d) => docs.openDialog('reject', d) }}
+              actions={{ request, downloadingId: docs.downloadingId, onDownload: docs.download, onApprove: (d) => docs.openDialog('approve', d), onReject: (d) => docs.openDialog('reject', d),
+                shares, shareBusyId: docs.shareBusyId, onAuthorize: docs.authorize, onRetry: docs.retry, onRevoke: docs.openRevokeDialog,
+              }}
             />
           </DetailSection>
+
+          {sharingApplies(request) && (
+            <DetailSection title="Documents requested after approval">
+              <DocumentRequests request={request} busy={docs.busy} onOpen={docs.openDocRequestDialog} />
+            </DetailSection>
+          )}
 
           <DetailSection title="Request timeline">
             <RequestTimeline events={request.requestEvents} documents={documents} user={user} />
@@ -229,7 +249,7 @@ export default function SubmissionDetailsPage() {
                 {caseLink && <Link to={caseLink} className="text-sm font-semibold text-brand-700 hover:underline">Open Case</Link>}
               </div>
             ) : (
-              <p className="text-sm text-slate-500">No Case yet. This request was made before Cases were opened at submission and needs manual historical review; it cannot be approved here.</p>
+              <p className="text-sm text-slate-500">The Case is created when you approve this request.</p>
             )}
           </DetailSection>
         </div>
@@ -245,10 +265,16 @@ export default function SubmissionDetailsPage() {
         onCancel={docs.closeApproveDialog}
       >
         <p className="text-sm text-slate-600">
-          Approving completes the document review and copies the approved documents to this request's Case (which already exists). The request will be locked: documents can no longer be reviewed
+          Approving completes the document review and copies the approved documents to this request&apos;s Case (which already exists). The request will be locked: documents can no longer be reviewed
           and no further documents can be requested. This cannot be undone from this page.
         </p>
       </ConfirmDialog>
+      {docs.revokeDialog && (
+        <RevokeShareDialog key={docs.revokeDialog.share.id} doc={docs.revokeDialog.doc} busy={docs.busy} error={docs.error} onConfirm={docs.submitRevoke} onCancel={docs.closeRevokeDialog} />
+      )}
+      {docs.docRequestDialog && (
+        <DocumentRequestDialog referenceNumber={request.referenceNumber} busy={docs.busy} error={docs.error} onConfirm={docs.submitDocumentRequest} onCancel={docs.closeDocRequestDialog} />
+      )}
       <DocumentReviewDialogs dialog={docs.dialog} busy={docs.busy} error={docs.error} onConfirm={docs.submitReview} onCancel={docs.closeDialog} />
       {docs.requestDialog && (
         <RequestDocumentsDialog

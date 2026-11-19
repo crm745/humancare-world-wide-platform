@@ -72,7 +72,11 @@ describe('the environment of a scoped run', () => {
 });
 
 describe('the cleanup plan', () => {
-  const ids = { userIds: [11, 12], adminIds: [21], identifiers: ['a@example.com', '+911234567890'], requestIds: [31], caseIds: [41], fixtureGeonameIds: [900000001] };
+  // Case 41 holds a three-version succession chain (51 -> 52 -> 53: 51 was superseded by 52, 52 by 53) and an independent quotation (54).
+  const quotations = [
+    { id: 51, caseId: 41, supersededById: 52 }, { id: 52, caseId: 41, supersededById: 53 }, { id: 53, caseId: 41, supersededById: null }, { id: 54, caseId: 41, supersededById: null },
+  ];
+  const ids = { userIds: [11, 12], adminIds: [21], identifiers: ['a@example.com', '+911234567890'], requestIds: [31], caseIds: [41], quotations, fixtureGeonameIds: [900000001] };
   const order = (steps) => steps.map((s) => s.table);
 
   test('with nothing created by the run there is nothing to delete (no unconditional statement exists)', () => {
@@ -94,6 +98,14 @@ describe('the cleanup plan', () => {
     before('notification_delivery_attempts', 'notification_deliveries');
     before('notification_deliveries', 'notifications');
     before('payments', 'invoices');
+    // case_quotations is several steps (one per dependency level): ALL of them come after invoices and before bitrix_deal_links and cases.
+    const firstQuotation = tables.indexOf('case_quotations');
+    const lastQuotation = tables.lastIndexOf('case_quotations');
+    expect(firstQuotation).toBeGreaterThan(tables.indexOf('invoices')); // an invoice references its quotation
+    expect(tables.indexOf('invoices')).toBeGreaterThan(tables.indexOf('payments'));
+    expect(lastQuotation).toBeLessThan(tables.indexOf('bitrix_deal_links')); // a quotation references its Deal link (RESTRICT)
+    expect(lastQuotation).toBeLessThan(tables.indexOf('cases')); // and its Case (RESTRICT)
+    expect(tables.slice(firstQuotation, lastQuotation + 1).every((t) => t === 'case_quotations')).toBe(true); // contiguous: nothing interleaves
     for (const child of ['integration_outbox', 'bitrix_deal_links', 'audit_logs', 'case_stage_events', 'documents', 'document_requests', 'request_documents', 'request_events']) before(child, 'cases');
     before('request_documents', 'document_requests');
     before('cases', 'service_requests');
@@ -105,7 +117,7 @@ describe('the cleanup plan', () => {
     before('admin_recovery_approvals', 'admin_recovery_requests');
     before('admin_recovery_requests', 'admin_users');
     const allowed = new Set([
-      'notification_delivery_attempts', 'notification_deliveries', 'notifications', 'payments', 'invoices', 'integration_outbox', 'bitrix_deal_links', 'audit_logs',
+      'notification_delivery_attempts', 'notification_deliveries', 'notifications', 'payments', 'invoices', 'case_quotations', 'integration_outbox', 'bitrix_deal_links', 'audit_logs',
       'case_stage_events', 'case_communications', 'request_documents', 'document_requests', 'request_events', 'documents', 'cases', 'service_requests', 'otp_codes',
       'security_events', 'user_consents', 'users', 'admin_webauthn_challenges', 'admin_refresh_tokens', 'admin_sessions', 'admin_passkeys', 'admin_invitations',
       'admin_recovery_approvals', 'admin_recovery_requests', 'admin_users', 'geonames_cities',
@@ -121,8 +133,107 @@ describe('the cleanup plan', () => {
   });
 });
 
-// An in-memory database that records every statement.
-function fakeDb({ users = [], admins = [], requests = [], cases = [] } = {}) {
+// case_quotations.superseded_by_id -> case_quotations.id is a RESTRICT foreign key that InnoDB checks row by row. The plan must therefore
+// delete a superseded (referencing) quotation BEFORE its successor, worked out from the references alone: never from the id, the version
+// number, the insertion order or the order MySQL happens to return rows in.
+describe('quotation cleanup ordering', () => {
+  const base = { userIds: [11], adminIds: [], identifiers: [], requestIds: [31], caseIds: [41] };
+  const plan = (quotations, caseIds = [41]) => scoped.planCleanup({ ...base, caseIds, quotations }).filter((s) => s.table === 'case_quotations');
+  // The quotation ids each statement deletes, in statement order (the trailing parameters are the Case ids).
+  const idLevels = (quotations, caseIds = [41]) => plan(quotations, caseIds).map((s) => s.params.slice(0, s.params.length - caseIds.length));
+  const q = (id, supersededById = null, caseId = 41) => ({ id, caseId, supersededById });
+
+  test('a superseded quotation is deleted before its successor', () => {
+    expect(idLevels([q(1, 2), q(2)])).toEqual([[1], [2]]);
+  });
+
+  test('the order comes from the references, not from the ids: a successor with a LOWER id still goes last', () => {
+    expect(idLevels([q(90, 10), q(10)])).toEqual([[90], [10]]);
+    expect(idLevels([q(10), q(90, 10)])).toEqual([[90], [10]]); // the order the rows were listed in does not matter either
+  });
+
+  test('a multi-level succession chain is deleted from the oldest to the newest, whatever order it is listed or numbered in', () => {
+    expect(idLevels([q(51, 52), q(52, 53), q(53, 54), q(54)])).toEqual([[51], [52], [53], [54]]);
+    expect(idLevels([q(54), q(53, 54), q(52, 53), q(51, 52)])).toEqual([[51], [52], [53], [54]]); // listed newest first
+    expect(idLevels([q(7, 3), q(3, 9), q(9, 1), q(1)])).toEqual([[7], [3], [9], [1]]); // ids that are not in version order at all
+  });
+
+  test('several versions that point at one successor are deleted together, before it', () => {
+    expect(idLevels([q(51, 53), q(52, 53), q(53)])).toEqual([[51, 52], [53]]);
+  });
+
+  test('independent quotations are deleted with the first level, never blocked by a chain', () => {
+    expect(idLevels([q(51, 52), q(52), q(60), q(61)])).toEqual([[51, 60, 61], [52]]);
+    expect(idLevels([q(60), q(61)])).toEqual([[60, 61]]);
+  });
+
+  test('several chains in one Case are levelled together', () => {
+    expect(idLevels([q(1, 2), q(2, 3), q(3), q(10, 11), q(11)])).toEqual([[1, 10], [2, 11], [3]]);
+  });
+
+  test('no row is ever deleted while another still-present row points at it', () => {
+    const rows = [q(5, 8), q(8, 2), q(2, 6), q(6), q(9, 6), q(4)];
+    const deleted = new Set();
+    for (const level of idLevels(rows)) {
+      for (const id of level) {
+        const referrers = rows.filter((r) => r.supersededById === id && !deleted.has(r.id));
+        expect(referrers).toEqual([]); // the referencing rows are already gone
+      }
+      level.forEach((id) => deleted.add(id));
+    }
+    expect(deleted.size).toBe(rows.length); // and every row was planned exactly once
+  });
+
+  test('every statement names explicit quotation ids AND is bound to the run\'s Case ids', () => {
+    const steps = plan([q(51, 52), q(52), q(60)], [41, 42]);
+    expect(steps).toHaveLength(2);
+    for (const step of steps) {
+      expect(step.where).toMatch(/^id IN \(\?(,\?)*\) AND case_id IN \(\?,\?\)$/);
+      expect((step.where.match(/\?/g) || []).length).toBe(step.params.length);
+      expect(step.params.slice(-2)).toEqual([41, 42]);
+    }
+  });
+
+  test('a quotation of an unrelated Case is never deleted: even if one were passed in, its statement is still bound to this run\'s Cases', () => {
+    const steps = plan([q(51, 52), q(52), q(900, null, 99)], [41]);
+    for (const step of steps) {
+      expect(step.where).toContain('case_id IN (?)');
+      expect(step.params[step.params.length - 1]).toBe(41); // case 99 can never match
+    }
+  });
+
+  test('a long level is split into several statements, all before the next level', () => {
+    const many = Array.from({ length: 1000 }, (_, i) => q(1000 + i, 5000));
+    const steps = plan([...many, q(5000)]);
+    expect(steps.length).toBeGreaterThan(2);
+    const lastReferrer = steps.map((s) => s.params.slice(0, -1)).findLastIndex((ids) => ids.some((id) => id >= 1000 && id < 2000));
+    const successor = steps.findIndex((s) => s.params.includes(5000));
+    expect(successor).toBeGreaterThan(lastReferrer);
+    for (const step of steps) expect(step.params.length).toBeLessThanOrEqual(401);
+  });
+
+  test('with no quotations there is no quotation statement at all (nothing unconditional is added)', () => {
+    expect(plan([])).toEqual([]);
+    expect(scoped.planCleanup({ ...base, quotations: undefined }).some((s) => s.table === 'case_quotations')).toBe(false);
+  });
+
+  test('a cycle cannot be deleted in any order and is refused instead of being guessed at', () => {
+    expect(() => scoped.quotationDeletionLevels([q(1, 2), q(2, 1)])).toThrow(/cycle/);
+    expect(() => scoped.planCleanup({ ...base, quotations: [q(1, 2), q(2, 3), q(3, 1)] })).toThrow(/cycle/);
+  });
+
+  test('the plan does not depend on id or version order: shuffling the input never changes the levels', () => {
+    const rows = [q(10, 20), q(20, 30), q(30, 40), q(40), q(11, 30), q(12)];
+    const expected = idLevels(rows);
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const shuffled = [...rows].sort((a, b) => ((a.id * seed * 7919) % 101) - ((b.id * seed * 7919) % 101));
+      expect(idLevels(shuffled)).toEqual(expected);
+    }
+  });
+});
+
+// An in-memory database that records every statement. `quotations` are rows in the database's own shape (case_id, superseded_by_id).
+function fakeDb({ users = [], admins = [], requests = [], cases = [], quotations = [] } = {}) {
   const log = [];
   const db = {
     log,
@@ -132,6 +243,7 @@ function fakeDb({ users = [], admins = [], requests = [], cases = [] } = {}) {
       if (/FROM admin_users WHERE email LIKE/.test(sql)) return admins;
       if (/FROM service_requests WHERE user_id IN/.test(sql)) return requests;
       if (/FROM cases WHERE service_request_id IN/.test(sql)) return cases;
+      if (/FROM case_quotations WHERE case_id IN/.test(sql)) return quotations.filter((row) => params.includes(row.case_id)); // only the asked-for Cases
       if (/SELECT COUNT\(\*\) AS n/.test(sql)) return [{ n: 2n }];
       return [];
     }),
@@ -178,6 +290,70 @@ describe('running the cleanup', () => {
     expect(result.counts.cases).toBe(3);
     // Nothing is ever deleted from the protected tables of other work.
     expect(deletes.some(([sql]) => /integration_inbox/.test(sql))).toBe(false);
+  });
+
+  describe('quotations in a real cleanup', () => {
+    // Case 41 is this run's: chain 51 -> 52 -> 53 plus the independent 54. Case 99 belongs to somebody else.
+    const row = (id, caseId, superseded) => ({ id, case_id: caseId, superseded_by_id: superseded });
+    const withQuotations = { ...rows, quotations: [row(53, 41, null), row(52, 41, 53), row(51, 41, 52), row(54, 41, null), row(900, 99, 901), row(901, 99, null)] };
+    const quotationDeletes = (db) => db.$executeRawUnsafe.mock.calls.filter(([sql]) => /DELETE FROM `case_quotations`/.test(sql)).map(([sql, ...params]) => ({ sql, params }));
+
+    test('the quotations are looked up only for this run\'s Cases', async () => {
+      const db = fakeDb(withQuotations);
+      await scoped.runCleanup(db, RUN, { startedAt: started, dryRun: true });
+      const lookup = db.log.find((entry) => /FROM case_quotations WHERE case_id IN/.test(entry.sql));
+      expect(lookup.params).toEqual([41]);
+    });
+
+    test('a superseded quotation is deleted before its successor, level by level, inside the one transaction', async () => {
+      const db = fakeDb(withQuotations);
+      await scoped.runCleanup(db, RUN, { startedAt: started });
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+      const steps = quotationDeletes(db);
+      expect(steps.map((s) => s.params.slice(0, -1))).toEqual([[51, 54], [52], [53]]); // 51 before 52 before 53; the independent 54 with the first level
+      for (const s of steps) {
+        expect(s.sql).toMatch(/^DELETE FROM `case_quotations` WHERE id IN \(\?(,\?)*\) AND case_id IN \(\?\)$/);
+        expect(s.params[s.params.length - 1]).toBe(41);
+      }
+    });
+
+    test('quotations of an unrelated Case are never deleted', async () => {
+      const db = fakeDb(withQuotations);
+      await scoped.runCleanup(db, RUN, { startedAt: started });
+      const everyId = quotationDeletes(db).flatMap((s) => s.params);
+      expect(everyId).not.toContain(900);
+      expect(everyId).not.toContain(901);
+      expect(everyId).not.toContain(99);
+    });
+
+    test('all quotation statements run after invoices and before the Deal links and the Cases', async () => {
+      const db = fakeDb(withQuotations);
+      await scoped.runCleanup(db, RUN, { startedAt: started });
+      const tables = db.$executeRawUnsafe.mock.calls.map(([sql]) => /DELETE FROM `([a-z_]+)`/.exec(sql)[1]);
+      expect(tables.indexOf('case_quotations')).toBeGreaterThan(tables.indexOf('invoices'));
+      expect(tables.lastIndexOf('case_quotations')).toBeLessThan(tables.indexOf('bitrix_deal_links'));
+      expect(tables.lastIndexOf('case_quotations')).toBeLessThan(tables.indexOf('cases'));
+    });
+
+    test('the counts of a table with several steps are added up', async () => {
+      const dry = await scoped.runCleanup(fakeDb(withQuotations), RUN, { startedAt: started, dryRun: true });
+      expect(dry.counts.case_quotations).toBe(6); // three level statements, 2 each in the fake
+      const real = await scoped.runCleanup(fakeDb(withQuotations), RUN, { startedAt: started });
+      expect(real.counts.case_quotations).toBe(9); // three level statements, 3 each in the fake
+    });
+
+    test('a succession cycle is refused before anything is deleted', async () => {
+      const db = fakeDb({ ...rows, quotations: [row(1, 41, 2), row(2, 41, 1)] });
+      await expect(scoped.runCleanup(db, RUN, { startedAt: started })).rejects.toThrow(/cycle/);
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.$executeRawUnsafe).not.toHaveBeenCalled();
+    });
+
+    test('the cleanup never relies on SQL row order: no ORDER BY, no LIMIT, no subquery on the table being deleted from', async () => {
+      const db = fakeDb(withQuotations);
+      await scoped.runCleanup(db, RUN, { startedAt: started });
+      for (const s of quotationDeletes(db)) expect(s.sql).not.toMatch(/ORDER BY|LIMIT|SELECT/i);
+    });
   });
 
   test('with nothing created by the run it deletes nothing at all', async () => {

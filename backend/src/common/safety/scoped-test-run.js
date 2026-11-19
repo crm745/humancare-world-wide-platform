@@ -269,14 +269,44 @@ async function collectRunRows(db, runId, startedAt) {
   for (const part of chunk(requestIds)) {
     caseIds.push(...(await db.$queryRawUnsafe(`SELECT id FROM cases WHERE service_request_id IN (${placeholders(part)})`, ...part)).map((r) => Number(r.id)));
   }
-  return { userIds, adminIds, identifiers, requestIds, caseIds };
+  // The quotations of those Cases and which quotation each one was superseded by (superseded_by_id). Read here so planCleanup can
+  // order the deletions by that foreign key from the actual data. The composite key (superseded_by_id, case_id) keeps a succession inside
+  // one Case, so a Case id list is enough to find every row involved.
+  const quotations = [];
+  for (const part of chunk(caseIds)) {
+    const found = await db.$queryRawUnsafe(`SELECT id, case_id, superseded_by_id FROM case_quotations WHERE case_id IN (${placeholders(part)})`, ...part);
+    for (const q of found) quotations.push({ id: Number(q.id), caseId: Number(q.case_id), supersededById: q.superseded_by_id == null ? null : Number(q.superseded_by_id) });
+  }
+  return { userIds, adminIds, identifiers, requestIds, caseIds, quotations };
+}
+
+/**
+ * The order in which quotation rows may be deleted, as LEVELS of ids. case_quotations.superseded_by_id points from an older quotation
+ * (the superseded one) to its successor, and the foreign key is RESTRICT, which InnoDB checks row by row. So a row may only be deleted
+ * once NO remaining row points at it: level 0 holds the rows nothing points at (the oldest of a chain, and independent quotations), the
+ * next level the rows that only those pointed at, and so on. The order comes ONLY from these references: not from id, version number,
+ * insertion order or any index. The ids inside one level never reference each other, so their own order does not matter (they are only
+ * sorted to keep the plan deterministic). A cycle cannot be deleted in any order and is refused.
+ */
+function quotationDeletionLevels(quotations) {
+  const remaining = new Map(quotations.map((q) => [q.id, q]));
+  const levels = [];
+  while (remaining.size > 0) {
+    const pointedAt = new Set();
+    for (const q of remaining.values()) if (q.supersededById != null && remaining.has(q.supersededById)) pointedAt.add(q.supersededById);
+    const level = [...remaining.keys()].filter((id) => !pointedAt.has(id)).sort((a, b) => a - b);
+    if (level.length === 0) throw refuse('the quotation succession references form a cycle, so they cannot be deleted in foreign-key order.');
+    levels.push(level);
+    for (const id of level) remaining.delete(id);
+  }
+  return levels;
 }
 
 /**
  * The ordered deletions (children first). Pure: from the collected ids, returns [{ table, where, params }]. Every WHERE is
  * bound to this run's ids; there is no unconditional DELETE. A step with no ids is left out.
  */
-function planCleanup({ userIds, adminIds, identifiers, requestIds, caseIds, fixtureGeonameIds = [] }) {
+function planCleanup({ userIds, adminIds, identifiers, requestIds, caseIds, quotations = [], fixtureGeonameIds = [] }) {
   const steps = [];
   const add = (table, where, params) => { if (params.length) steps.push({ table, where, params }); };
   const U = (list) => placeholders(list);
@@ -289,6 +319,14 @@ function planCleanup({ userIds, adminIds, identifiers, requestIds, caseIds, fixt
   }
   add('payments', `case_id IN (${U(caseIds)})`, caseIds);
   add('invoices', `case_id IN (${U(caseIds)})`, caseIds);
+  // After invoices (an invoice references its quotation) and before bitrix_deal_links and cases (RESTRICT). A superseded quotation points at
+  // its successor (also RESTRICT), so the rows are deleted LEVEL BY LEVEL, referencing rows first (see quotationDeletionLevels): one
+  // statement per level, each bound to explicit ids AND to this run's Case ids. Nothing depends on index or insertion order.
+  if (caseIds.length) {
+    for (const level of quotationDeletionLevels(quotations)) {
+      for (const part of chunk(level)) steps.push({ table: 'case_quotations', where: `id IN (${U(part)}) AND case_id IN (${U(caseIds)})`, params: [...part, ...caseIds] });
+    }
+  }
   add('integration_outbox', `case_id IN (${U(caseIds)})`, caseIds);
   add('bitrix_deal_links', `case_id IN (${U(caseIds)})`, caseIds);
   add('audit_logs', `case_id IN (${U(caseIds)})`, caseIds);
@@ -335,14 +373,14 @@ async function runCleanup(db, runId, { startedAt, fixtureGeonameIds = [], dryRun
   if (dryRun) {
     for (const step of steps) {
       const [row] = await db.$queryRawUnsafe(`SELECT COUNT(*) AS n FROM \`${step.table}\` WHERE ${step.where}`, ...step.params);
-      counts[step.table] = num(row.n);
+      counts[step.table] = (counts[step.table] || 0) + num(row.n); // a table may have several steps (case_quotations: one per level)
     }
     return { counts, ids: { users: rows.userIds.length, admins: rows.adminIds.length, requests: rows.requestIds.length, cases: rows.caseIds.length } };
   }
   await db.$transaction(async (tx) => {
     for (const step of steps) {
       if (!TABLE_NAME.test(step.table) || !step.where || !step.params.length) throw refuse('an unscoped cleanup step was refused.');
-      counts[step.table] = num(await tx.$executeRawUnsafe(`DELETE FROM \`${step.table}\` WHERE ${step.where}`, ...step.params));
+      counts[step.table] = (counts[step.table] || 0) + num(await tx.$executeRawUnsafe(`DELETE FROM \`${step.table}\` WHERE ${step.where}`, ...step.params));
     }
   }, { timeout: 120000 });
   return { counts, ids: { users: rows.userIds.length, admins: rows.adminIds.length, requests: rows.requestIds.length, cases: rows.caseIds.length } };
@@ -363,5 +401,5 @@ module.exports = {
   buildScopedEnv, assertScopedEnvironment,
   takeSnapshot, compareSnapshots, fingerprintProtected, compareProtected, assertPreflight,
   findMysqldump, createBackup,
-  collectRunRows, planCleanup, runCleanup, removeScopedUploads,
+  collectRunRows, planCleanup, quotationDeletionLevels, runCleanup, removeScopedUploads,
 };

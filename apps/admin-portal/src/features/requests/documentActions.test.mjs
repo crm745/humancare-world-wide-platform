@@ -42,6 +42,18 @@ test('once the request is approved nothing can be reviewed, but clean current fi
   assert.match(documentActions(doc(), { reviewStatus: 'approved' }).note, /approved/);
 });
 
+test('after approval a post-approval document (documentRequestId) stays reviewable; original stays locked', () => {
+  const approved = { reviewStatus: 'approved' };
+  const later = (over = {}) => doc({ documentRequestId: 5, ...over });
+  assert.deepEqual(flags(later(), approved), [true, true, true]);
+  assert.deepEqual(flags(doc({ documentRequestId: null }), approved), [true, false, false]);
+  // virus-scan and superseded rules still apply to post-approval documents
+  assert.deepEqual(flags(later({ scanStatus: 'pending' }), approved), [false, false, false]);
+  assert.deepEqual(flags(later({ scanStatus: 'infected' }), approved), [false, false, false]);
+  assert.deepEqual(flags(later({ supersededAt: 'x' }), approved), [false, false, false]);
+  assert.deepEqual(flags(later({ reviewStatus: 'rejected' }), approved), [true, false, false]);
+});
+
 test('changes requested does not stop review of the documents that are there', () => {
   assert.deepEqual(flags(doc(), { reviewStatus: 'changes_requested' }), [true, true, true]);
 });

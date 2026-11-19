@@ -12,6 +12,10 @@ const { documentsRouter } = require('./modules/documents/documents.routes');
 const { corporatePortalRouter } = require('./modules/corporate-portal/corporate-portal.routes');
 const { bitrixInboundRouter } = require('./modules/bitrix/bitrix-inbound.controller');
 const { corporateRegistrationRouter } = require('./modules/corporate-registration/corporate-registration.routes');
+const { razorpayWebhookRouter } = require('./modules/payments/razorpay-webhook.controller');
+const { invoicesRouter } = require('./modules/payments/payments.routes');
+const { patientQuotationsRouter } = require('./modules/quotations/patient-quotations.routes');
+const { checkoutRouter } = require('./modules/payments/checkout.routes');
 
 const app = express();
 
@@ -39,6 +43,10 @@ function logAdminRequestError(err, req, status) {
 // literal '*' origin, and the admin portal's cookie-based session needs credentials
 // allowed cross-origin (it's served from a different port than this API).
 app.use(cors({ origin: true, credentials: true }));
+// Razorpay webhook receiver. It MUST be mounted before the global express.json() below: the signature is checked against the exact raw bytes
+// Razorpay sent, so this route reads its own body (express.raw, 256 KB) and the JSON parser must never see it. Every other route keeps
+// the JSON parser exactly as before. See modules/payments/razorpay-webhook.controller.js.
+app.use('/integrations/razorpay', razorpayWebhookRouter);
 // The global 100 KB limit (the parser's default) is unchanged. `verify` runs on the raw bytes
 // before they are parsed; it records only their COUNT, so routes with a tighter limit (see
 // maxBodyBytes in admin-auth.validation.js) can enforce it on the bytes actually received - also
@@ -75,6 +83,12 @@ app.use('/notifications', notificationsRouter);
 app.use('/admin', adminRouter);
 // Bitrix24 event handler (own token authentication, no JWT): receipt only, see bitrix-inbound.controller.js.
 app.use('/integrations/bitrix', bitrixInboundRouter);
+// Patient payments (Razorpay order creation). The Razorpay webhook receiver is mounted earlier, before the JSON parser.
+app.use('/invoices', invoicesRouter);
+// The patient's quotation: view the PDF, accept, reject (see modules/quotations/patient-quotations.service.js).
+app.use('/quotations', patientQuotationsRouter);
+// The hosted Razorpay Checkout page and its return redirect (public: the session token is the capability; nothing here completes a payment).
+app.use('/checkout', checkoutRouter);
 app.use('/documents', documentsRouter);
 
 app.use((req, res) => {

@@ -21,7 +21,9 @@ export function documentActions(doc, request) {
   if (doc.scanStatus !== 'clean') return { ...none, note: 'Available once the virus scan completes cleanly.' };
 
   const download = true;
-  if (request?.reviewStatus === 'approved') {
+  // Only the original submission is locked by the approval. A document sent in answer to a post-approval
+  // document request (documentRequestId set) stays reviewable, as the backend allows (reviewDocument).
+  if (request?.reviewStatus === 'approved' && !doc.documentRequestId) {
     return { download, approve: false, reject: false, note: 'The request is approved, so its documents can no longer be reviewed.' };
   }
   if (doc.reviewStatus === 'rejected') return { download, approve: false, reject: false, note: 'Rejected. Waiting for the patient to upload a replacement.' };

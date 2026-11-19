@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { backLabel, backTarget, careLevelLabel, documentView, equipmentList, eventView, formatBytes, sortEvents } from './requestDetails.mjs';
+import { backLabel, backTarget, careLevelLabel, documentView, equipmentList, eventView, formatBytes, mobilityLabel, sortEvents } from './requestDetails.mjs';
 
 const doc = (over = {}) => ({
   id: 1, originalName: 'report.pdf', sizeBytes: 2048, mimeType: 'application/pdf', uploadedAt: '2026-11-01T10:00:00Z', replacesId: null, supersededAt: null,
@@ -13,6 +13,16 @@ test('care level keys become labels; anything else is shown as stored', () => {
   assert.equal(careLevelLabel('Needs a nurse'), 'Needs a nurse');
   assert.equal(careLevelLabel(null), null);
   assert.equal(careLevelLabel(''), null);
+});
+
+test('mobility: one key as before, several keys joined, anything else shown as stored', () => {
+  assert.equal(mobilityLabel('walking'), 'Walking');
+  assert.equal(mobilityLabel('bedridden,wheelchair'), 'Bedridden, Wheelchair');
+  assert.equal(mobilityLabel('bedridden,wheelchair,walking'), 'Bedridden, Wheelchair, Walking');
+  assert.equal(mobilityLabel('Stretcher'), 'Stretcher');
+  assert.equal(mobilityLabel('constructor'), 'constructor'); // never a property of the label table
+  assert.equal(mobilityLabel(null), null);
+  assert.equal(mobilityLabel(''), null);
 });
 
 test('equipment lists only what is true', () => {

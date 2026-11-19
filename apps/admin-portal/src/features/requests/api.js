@@ -53,6 +53,31 @@ export async function requestDocuments(id, reason) {
   return data.request;
 }
 
+/** POST .../documents/:docId/share: the Admin authorizes ONE document to be attached to the Bitrix Deal. Resolves { share, alreadyAuthorized }. */
+export async function authorizeShare(requestId, docId) {
+  const { data } = await http.post(`/admin/requests/${encodeURIComponent(requestId)}/documents/${encodeURIComponent(docId)}/share`);
+  return { share: data.share, alreadyAuthorized: Boolean(data.alreadyAuthorized) };
+}
+
+/** POST .../shares/:shareId/revoke { reason }: removes the Bitrix attachment only (the original stays). Resolves { share, alreadyRevoked }. */
+export async function revokeShare(requestId, shareId, reason) {
+  const { data } = await http.post(`/admin/requests/${encodeURIComponent(requestId)}/shares/${encodeURIComponent(shareId)}/revoke`, { reason });
+  return { share: data.share, alreadyRevoked: Boolean(data.alreadyRevoked) };
+}
+
+/** POST .../shares/:shareId/retry: tries a share that failed for good again (409 share_not_retryable when it no longer is failed). */
+export async function retryShare(requestId, shareId) {
+  const { data } = await http.post(`/admin/requests/${encodeURIComponent(requestId)}/shares/${encodeURIComponent(shareId)}/retry`);
+  return { share: data.share };
+}
+
+/** POST /admin/requests/:id/document-requests { description, reason? }: asks the patient for more documents after the approval. Resolves the new document request. */
+export async function openDocumentRequest(requestId, { description, reason }) {
+  const body = reason ? { description, reason } : { description };
+  const { data } = await http.post(`/admin/requests/${encodeURIComponent(requestId)}/document-requests`, body);
+  return data.documentRequest;
+}
+
 /**
  * POST /admin/requests/:id/approve. The backend completes the document review and copies the approved documents to the
  * request's existing Case in one transaction (201; 200 if it was already approved). An older request with no Case is refused with 409 `case_missing_manual_review`. Resolves with { request, case, alreadyApproved }.
