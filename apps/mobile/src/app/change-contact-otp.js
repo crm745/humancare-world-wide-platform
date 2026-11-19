@@ -30,6 +30,7 @@ export default function ChangeContactOtp() {
       session="patient"
       onVerify={onVerify}
       onResend={resend}
+      recaptcha
     />
   );
 }

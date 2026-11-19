@@ -174,8 +174,9 @@ describe('wiring (source checks)', () => {
   const tracking = read('../../app/tracking.js');
   const details = read('../../app/request-details.js');
 
-  test('request details: Documents opens the Documents tab of the old tracking page; Track Details opens the Tracking page', () => {
-    expect(details).toMatch(/router\.push\(trackingRoute\(request, 'docs'\)\)/);
+  test('request details: "Open live tracking" (only for a live case) opens the Tracking page; each document is listed on the screen itself', () => {
+    expect(details).toContain('{view.showTrackingBar ? (');
+    expect(details).not.toContain('trackingRoute');
     expect(details).toContain("pathname: '/request-tracking', params: { id: request.id }");
     expect(details).not.toMatch(/router\.push\(trackingRoute\(request\)\)/);
   });
@@ -185,8 +186,9 @@ describe('wiring (source checks)', () => {
     expect(tracking).toMatch(/isCase \? trackingItemFromCase\(data\.case\) : trackingItemFromRequest\(data\.request\)/);
   });
 
-  test('the request details chip and the tracking chips all come from the same review pill', () => {
-    expect(details).toMatch(/<RequestStatusPill pill=\{pill\} status=\{request\.status\} \/>/);
+  test('the request details card and the tracking chips come from the same review rules (reviewBanner / reviewPill)', () => {
+    expect(fs.readFileSync(path.join(__dirname, '../requestDetailsView.js'), 'utf8')).toContain('reviewBanner(request)');
+    expect(details).toContain('const pill = reviewPill(request);');
     expect(details).not.toMatch(/<Pill /);
     expect(tracking.match(/<RequestStatusPill pill=\{item\.reviewPill\} status=\{item\.status\} \/>/g)).toHaveLength(2);
     expect(tracking).not.toMatch(/<Pill /);

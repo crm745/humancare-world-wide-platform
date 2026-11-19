@@ -19,12 +19,14 @@ const {
 } = require('../../common/constants/request.constants');
 const { validatePrivateCharterRequest, isObject } = require('./private-charter.validation');
 const { resolveCityRefs } = require('../geo/geo.service');
+const { toPatientRequest, toPatientRequests } = require('./request-response');
 
 const REQUIRED_FIELDS = ['serviceType', 'patientName', 'origin', 'destination'];
 const { REQUIRED_SERVICE_BY_KEY } = require('../bitrix/bitrix-lead');
 // Service keys the app may send (see mobile src/data/mock.js SERVICE_TILES). Optional,
-// since older app builds don't send one; "hospital" has no Bitrix service mapped yet.
-const SERVICE_KEYS = new Set([...Object.keys(REQUIRED_SERVICE_BY_KEY), 'hospital', 'air']);
+// since older app builds don't send one; "hospital", "marine" (Marine Medical Safety) and
+// "medvalue" (Medical Value Travel) have no Bitrix service mapped yet.
+const SERVICE_KEYS = new Set([...Object.keys(REQUIRED_SERVICE_BY_KEY), 'hospital', 'marine', 'medvalue', 'air']);
 // Mortal Remains as the app asks it now ("Within India / International"); older builds
 // sent plain "mortal" with the ordinary patient form.
 const MORTAL_KEYS = ['mortal_domestic', 'mortal_international'];
@@ -91,7 +93,7 @@ async function submitRequest(req, res, next) {
       // Which legacy formats are still arriving, by field name only: never the values.
       if (legacy.length) console.info('[legacy-format] privatecharter:', legacy.join(', '));
       const request = await createRequest(req.user.id, data);
-      return res.status(201).json({ request });
+      return res.status(201).json({ request: toPatientRequest(request) });
     }
     const missing = REQUIRED_FIELDS.filter((field) => !req.body[field]);
     if (missing.length) {
@@ -105,7 +107,7 @@ async function submitRequest(req, res, next) {
     const medicalError = medicalFieldsError(req.body);
     if (medicalError) return res.status(400).json({ error: medicalError });
     const request = await createRequest(req.user.id, req.body);
-    res.status(201).json({ request });
+    res.status(201).json({ request: toPatientRequest(request) });
   } catch (err) {
     next(err);
   }
@@ -114,7 +116,7 @@ async function submitRequest(req, res, next) {
 async function listMyRequests(req, res, next) {
   try {
     const requests = await listRequestsForUser(req.user.id, { status: req.query.status });
-    res.json({ requests });
+    res.json({ requests: toPatientRequests(requests) });
   } catch (err) {
     next(err);
   }
@@ -132,7 +134,9 @@ async function getMyRequestById(req, res, next) {
     const invoices = await listInvoicesForRequest({ userId: Number(req.user.id), requestId: request.id });
     // invoicePending: the patient accepted a quotation and its invoice is not there yet (the app shows a pending state and retries).
     const pending = await isInvoicePending({ userId: Number(req.user.id), requestId: request.id });
-    res.json({ request: { ...request, invoices, invoicePending: Boolean(pending), ...(pending ? { invoicePendingQuotationId: pending.quotationId } : {}) } });
+    // The request goes through the patient allow-list (request-response.js); invoices and the pending flag are already patient-safe summaries, added after it.
+    res.json({ request: { ...toPatientRequest(request), invoices, invoicePending: Boolean(pending), ...(pending ? { invoicePendingQuotationId: pending.quotationId } : {}) } });
+
   } catch (err) {
     next(err);
   }

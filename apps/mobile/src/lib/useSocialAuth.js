@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import { useGoogleSignIn, isGoogleConfigured } from './googleAuth';
@@ -5,6 +6,7 @@ import { signInWithApple } from './appleAuth';
 import { apiPost } from './api';
 import { beginSignIn } from './session';
 import { setAuthStep } from './authFlow';
+import { runGoogleLogin } from './googleLogin';
 import { GoogleMark, AppleMark } from '../components/SocialMarks';
 
 // Used by login.js: Google works on both platforms, Apple is
@@ -13,9 +15,10 @@ import { GoogleMark, AppleMark } from '../components/SocialMarks';
 export function useSocialAuth({ toast, afterSocialLogin }) {
   // Each attempt is numbered before its request goes out (see session.js beginSignIn), so an answer that arrives after
   // a newer sign-in or a sign-out is refused instead of restoring a session.
-  // An existing account is signed straight in. Someone new gets a sign-up ticket with the
-  // name and email the provider vouched for, and finishes on complete-profile.js (mobile
-  // + consents). Without a ticket (provider hadn't verified the email) it's the full form.
+  // An existing account is signed straight in, and so is a new Google user whose email Google verified (the backend
+  // creates the account; mobile and the rest are added later from Personal Details). A new Apple user gets a sign-up
+  // ticket with the name and email Apple vouched for, and finishes on complete-profile.js (mobile + consents). Without
+  // a ticket (the provider hadn't verified the email) it's the full form.
   const onFailed = (err) => {
     if (err.code === 'stale_sign_in') return; // replaced by a newer sign-in or a sign-out
     if (err.code === 'no_account' && err.data?.signupTicket) {
@@ -30,13 +33,18 @@ export function useSocialAuth({ toast, afterSocialLogin }) {
   // googleAuth.web.js (popup) on web, googleAuth.native.js (native picker) on phones.
   const google = useGoogleSignIn();
 
+  const googleGuard = useRef({ busy: false }); // a second tap while one attempt is running does nothing
   const onGoogle = async () => {
     if (!isGoogleConfigured) { toast('Google sign-in isn’t set up yet.'); return; }
     try {
-      const attempt = beginSignIn();
-      const idToken = await google.signIn();
-      if (!idToken) return; // closed the picker
-      await afterSocialLogin(await apiPost('/auth/google', { idToken }), attempt);
+      // Closing the picker or the popup ends quietly (no sign-in, no message); the screen after sign-in opens only once the backend has said yes.
+      await runGoogleLogin({
+        begin: beginSignIn,
+        getIdToken: google.signIn,
+        postToken: (idToken) => apiPost('/auth/google', { idToken }),
+        afterLogin: afterSocialLogin,
+        reopenPicker: google.reopen, // web: a second tap brings the popup back
+      }, googleGuard.current);
     } catch (err) {
       onFailed(err);
     }

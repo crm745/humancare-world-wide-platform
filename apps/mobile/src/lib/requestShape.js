@@ -22,7 +22,9 @@ export function formatDisplayDate(iso, locale) {
   return formatDate(iso, locale);
 }
 
-// Shapes one backend ServiceRequest into what the My Requests list / filters expect.
+// Shapes one backend ServiceRequest into what the My Requests list / filters expect. The first six fields are what the
+// list has always had; the rest (the backend's own status, service key and type, the two places and the creation time)
+// are added for the cards and change nothing for the filters.
 export function toListItem(request) {
   return {
     id: request.referenceNumber,
@@ -31,6 +33,12 @@ export function toListItem(request) {
     status: toUiStatus(request.status),
     date: (request.createdAt || '').slice(0, 10),
     display: formatDisplayDate(request.createdAt),
+    rawStatus: request.status,
+    serviceKey: request.serviceKey || null,
+    serviceType: request.serviceType || '',
+    origin: request.origin || '',
+    destination: request.destination || '',
+    createdAt: request.createdAt || null,
   };
 }
 

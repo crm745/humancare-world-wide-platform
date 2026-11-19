@@ -33,7 +33,7 @@ describe('searchCities', () => {
     const result = await searchCities(fetcher, 'mumb', { sleep: noSleep });
     expect(result.cities).toEqual([MUMBAI]);
     expect(result.attribution).toEqual(ATTRIBUTION);
-    expect(fetcher).toHaveBeenCalledWith('/geo/cities?q=mumb&limit=8');
+    expect(fetcher).toHaveBeenCalledWith('/geo/cities?q=mumb&limit=10');
   });
 
   it('does not call the server for text that is too short', async () => {

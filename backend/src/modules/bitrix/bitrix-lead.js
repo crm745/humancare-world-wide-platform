@@ -32,7 +32,9 @@ const FIELD = {
 // The app's service keys (mobile src/data/mock.js SERVICE_TILES, plus the Commercial
 // Airlines stretcher/wheelchair choice) -> Bitrix "Required Service" item ids.
 // Not listed yet, so sent without one for Operations to pick: "hospital"
-// (Hospitalization Assistance, no matching Bitrix service agreed) and the old "air".
+// (Hospitalization Assistance, no matching Bitrix service agreed), "marine" (Marine Medical
+// Safety), "medvalue" (Medical Value Travel) and the old "air". Their service name then goes
+// in the lead's comment.
 const REQUIRED_SERVICE_BY_KEY = {
   privatecharter: 2820, // Private Charter Air Ambulance
   commercialair_stretcher: 2824, // Commercial Airline Stretcher (CAS)

@@ -4,6 +4,7 @@ import { Download, File, FileImage, FileText, FileType } from 'lucide-react-nati
 import { fileMeta, fileTypeOf, documentDate, documentAccessibilityLabel, downloadAnnouncement } from '../../lib/documentsView';
 import { TRACKING_PALETTE as P } from '../../lib/tracking/palette';
 import { Spinner } from '../Spinner';
+import { HighlightFill } from '../skeleton/HighlightFill';
 import { Text } from '../ui';
 
 // One document on My Documents. A dedicated card (the shared DocRow, which the corporate tracking page also uses, is
@@ -19,7 +20,8 @@ const ICON = {
 const HIDDEN_FROM_READER = { accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' };
 
 // state: { status: 'idle' | 'downloading' | 'error', progress (0..1), message }
-export function DocumentCard({ doc, state = { status: 'idle' }, onPress, t }) {
+// `isNew`: a document that was not in the list before the last pull-to-refresh (a brief highlight, 1.8 s).
+export function DocumentCard({ doc, state = { status: 'idle' }, onPress, t, isNew = false }) {
   // A change of the download's state (started, failed, finished) is announced once; progress ticks are not.
   const previous = useRef(state);
   useEffect(() => {
@@ -42,6 +44,7 @@ export function DocumentCard({ doc, state = { status: 'idle' }, onPress, t }) {
       onPress={onPress}
       className="mb-2.5 overflow-hidden rounded-2xl border border-line bg-white active:opacity-80"
     >
+      {isNew ? <HighlightFill radius={16} /> : null}
       <View className="flex-row items-center gap-3 p-3" {...HIDDEN_FROM_READER}>
         <View className="h-10 w-10 items-center justify-center rounded-[11px]" style={{ backgroundColor: bg }}>
           <Icon size={19} color={color} />

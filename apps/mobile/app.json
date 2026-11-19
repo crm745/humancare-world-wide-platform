@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "com.humancareworldwide.app",
+      "softwareKeyboardLayoutMode": "resize",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
@@ -45,7 +46,7 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#1A73E8"
+          "color": "#303A8F"
         }
       ],
       "@react-native-community/datetimepicker",

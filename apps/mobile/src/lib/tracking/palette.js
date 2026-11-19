@@ -1,8 +1,9 @@
 // Brand colours for the tracking screens, in one place (no React, no native modules).
 // Navy / blue / light blue / white are the theme; green is deliberately not part of it.
 
+import { COLORS } from '../../theme/colors';
 export const NAVY = '#0D2340';
-export const BLUE = '#2457A7';
+export const BLUE = COLORS.primary;
 export const LIGHT = '#EDF2F9';
 export const WHITE = '#FFFFFF';
 
@@ -22,14 +23,14 @@ export const PALETTE = Object.freeze({ NAVY, BLUE, LIGHT, WHITE, TEXT, MUTED, FA
 // Tracking sits in the same design system as Home and Request Details. Used only by the Tracking screen: the rest
 // of the app keeps its own tokens.
 export const TRACKING_PALETTE = {
-  brand: '#303A8F', // official primary logo blue: active step, progress, status chip, route markers
-  brandSoft: '#E9EAF4', // the blue's light tint (status chip background)
+  brand: COLORS.primary, // official primary logo blue: active step, progress, status chip, route markers
+  brandSoft: COLORS.primarySoft, // the blue's light tint (status chip background)
   navy: '#2F2A62', // official secondary navy: the destination marker
   done: '#1E8E4A', // completed steps (the app's success colour)
   doneSoft: '#E4F7EA',
   cancelled: '#C23B3B', // the app's muted red for a cancelled request
   cancelledSoft: '#FBE9E9',
-  brandOnDark: '#A9B3F0', // the brand blue's light tint, for lines and markers on the blue route card
+  brandOnDark: COLORS.onPrimaryMuted, // the brand blue's light tint, for lines and markers on the blue route card
   doneOnDark: '#8FE0AB',
   cancelledOnDark: '#F4A3A3',
   dash: '#C9D3E1', // the dotted part of the route (the same grey as Home's active-request route)

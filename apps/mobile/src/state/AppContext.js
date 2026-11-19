@@ -10,6 +10,7 @@ import { apiGet } from '../lib/api';
 import { getAccessToken, onSessionChange } from '../lib/session';
 import { createAuthStore } from '../lib/authState';
 import { profileFromUser } from '../lib/profile';
+import { clearCache } from '../lib/screenCache';
 import { draftForService, needsCareLevel } from '../lib/requestForm';
 import { clearErrorsForPatch } from '../lib/privateCharter';
 
@@ -143,12 +144,21 @@ export function AppProvider({ children }) {
 
   useEffect(() => {
     // Signing in (a login, an account activation) or out (tokens cleared) is announced by lib/session.js.
-    const unsubscribe = onSessionChange((signedIn) => (signedIn ? authStore.signedIn() : authStore.signedOut()));
+    // What the screens had loaded is forgotten at every sign-in and sign-out (lib/screenCache.js), so it never shows for another account.
+    const unsubscribe = onSessionChange((signedIn) => { clearCache(); return signedIn ? authStore.signedIn() : authStore.signedOut(); });
     Promise.resolve().then(authStore.validate);
     return unsubscribe;
   }, [authStore]);
 
   const retryAuth = authStore.retry;
+
+  // Pull-to-refresh on Profile: reads the account again. A failure leaves the profile as it was (the caller says so).
+  const refreshProfile = useCallback(async () => {
+    const data = await apiGet('/auth/me');
+    const restored = profileFromMe(data);
+    setProfile(restored.profile);
+    return restored.profile;
+  }, []);
 
   const value = useMemo(
     () => ({
@@ -164,6 +174,7 @@ export function AppProvider({ children }) {
       isCorporate: session === 'corporate',
       profile,
       setProfile,
+      refreshProfile,
       draft,
       updateDraft,
       resetDraft: (service) => { setDraft((d) => draftForService(d, service, INITIAL_DRAFT)); setServerErrors(null); },
@@ -172,7 +183,7 @@ export function AppProvider({ children }) {
       toast,
       toastMsg,
     }),
-    [lang, setLang, t, session, authStatus, retryAuth, profile, draft, updateDraft, serverErrors, toast, toastMsg]
+    [lang, setLang, t, session, authStatus, retryAuth, refreshProfile, profile, draft, updateDraft, serverErrors, toast, toastMsg]
   );
 
   // Nothing is drawn until the language is known (a moment at most); sign-in restoration above keeps running.

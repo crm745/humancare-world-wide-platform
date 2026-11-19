@@ -3,6 +3,7 @@ import Svg, { Line } from 'react-native-svg';
 import { useApp } from '../../state/AppContext';
 import { Text } from '../ui';
 import { ServiceIconTile } from './ServiceIcon';
+import { COLORS } from '../../theme/colors';
 
 // origin -> destination with a dashed line between the two dots.
 function Route({ origin, destination }) {
@@ -10,11 +11,11 @@ function Route({ origin, destination }) {
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
       <Text className="font-inter-bold" numberOfLines={1} style={{ flexShrink: 1, maxWidth: '40%', fontSize: 13, color: '#17233D' }}>{origin}</Text>
       <View accessible={false} importantForAccessibility="no-hide-descendants" style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#1A73E8' }} />
+        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.primary }} />
         <Svg height={2} style={{ flex: 1 }}>
           <Line x1="0" y1="1" x2="100%" y2="1" stroke="#C9D3E1" strokeWidth={2} strokeDasharray="4 3" />
         </Svg>
-        <View style={{ width: 6, height: 6, borderRadius: 3, borderWidth: 2, borderColor: '#1A73E8' }} />
+        <View style={{ width: 6, height: 6, borderRadius: 3, borderWidth: 2, borderColor: COLORS.primary }} />
       </View>
       <Text className="font-inter-bold" numberOfLines={1} style={{ flexShrink: 1, maxWidth: '40%', fontSize: 13, color: '#17233D', textAlign: 'right' }}>{destination}</Text>
     </View>
@@ -29,7 +30,7 @@ function Progress({ step, total }) {
     <View accessible accessibilityLabel={label} style={{ gap: 6 }}>
       <View style={{ flexDirection: 'row', gap: 4 }}>
         {Array.from({ length: total }, (_, i) => (
-          <View key={i} style={{ flex: 1, height: 5, borderRadius: 5, backgroundColor: i + 1 < step ? '#1E8E4A' : i + 1 === step ? '#1A73E8' : '#E4E9F2' }} />
+          <View key={i} style={{ flex: 1, height: 5, borderRadius: 5, backgroundColor: i + 1 < step ? '#1E8E4A' : i + 1 === step ? COLORS.primary : '#E4E9F2' }} />
         ))}
       </View>
       <Text style={{ fontSize: 12, color: '#5B6B84' }}>{label}</Text>
@@ -48,12 +49,12 @@ export function ActiveRequestCard({ request, onTrack }) {
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <Text className="font-inter-bold" style={{ flexShrink: 1, fontSize: 12.5, color: '#5B6B84' }}>{t('home_active_request')}</Text>
-        <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: '#D6E6FD' }}>
-          <Text className="font-inter-black" style={{ fontSize: 12, color: '#0F4FB0' }}>{statusLabel}</Text>
+        <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: COLORS.primarySoft }}>
+          <Text className="font-inter-black" style={{ fontSize: 12, color: COLORS.primary }}>{statusLabel}</Text>
         </View>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <ServiceIconTile serviceKey={serviceKey} tint="#E7F0FE" color="#1A5FC4" fill="#1A73E8" fillOpacity={0.22} radius={13} />
+        <ServiceIconTile serviceKey={serviceKey} tint={COLORS.primarySoft} color={COLORS.primary} fill={COLORS.primary} fillOpacity={0.22} radius={13} />
         <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
           <Text className="font-inter-black" style={{ fontSize: 15, color: '#0D2340' }}>{serviceName}</Text>
           <Text style={{ fontSize: 12.5, color: '#5B6B84' }}>{reference}</Text>
@@ -65,9 +66,9 @@ export function ActiveRequestCard({ request, onTrack }) {
         accessibilityRole="button"
         accessibilityLabel={`${t('home_track_request')}, ${reference}`}
         onPress={onTrack}
-        style={{ minHeight: 44, borderRadius: 12, backgroundColor: '#E7F0FE', alignItems: 'center', justifyContent: 'center' }}
+        style={{ minHeight: 44, borderRadius: 12, backgroundColor: COLORS.primarySoft, alignItems: 'center', justifyContent: 'center' }}
       >
-        <Text className="font-inter-black" style={{ fontSize: 13.5, color: '#1A5FC4' }}>{t('home_track_request')}</Text>
+        <Text className="font-inter-black" style={{ fontSize: 13.5, color: COLORS.primary }}>{t('home_track_request')}</Text>
       </Pressable>
     </View>
   );

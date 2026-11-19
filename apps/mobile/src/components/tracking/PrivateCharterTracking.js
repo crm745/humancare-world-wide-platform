@@ -127,7 +127,7 @@ export default function PrivateCharterTracking({ model, onOpenRequest }) {
       <RouteCard model={model} />
       <ChangesNotice model={model} />
       <TimelineCard model={model} />
-      {onOpenRequest && showOpenRequest(model) ? <Button title={t('tcp_open_request')} onPress={onOpenRequest} className="mt-1 bg-[#303A8F]" /> : null}
+      {onOpenRequest && showOpenRequest(model) ? <Button title={t('tcp_open_request')} onPress={onOpenRequest} className="mt-1 bg-primary" /> : null}
     </View>
   );
 }

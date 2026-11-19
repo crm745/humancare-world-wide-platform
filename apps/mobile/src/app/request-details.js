@@ -1,109 +1,167 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, Pressable, Share, View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { Linking, Pressable, Share, Text, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { Check, Download, Phone, Share2 } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  ArrowRight, Ban, Check, ChevronLeft, CircleCheck, Download, Phone, Share2,
+} from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { apiGet } from '../lib/api';
 import { downloadAndShare } from '../lib/download';
-import { isMortalRequest, toUiStatus, formatDisplayDate, careLevelText } from '../lib/requestShape';
-import { Body, Screen, TopBar } from '../components/layout';
-import { Button, Card, InfoRow, Spacer, Text } from '../components/ui';
-import { LoadError, LoadingState } from '../components/LoadingState';
+import { openDocumentPreview } from '../lib/documentPreview';
+import { goBack } from '../lib/nav';
+import { toUiStatus } from '../lib/requestShape';
+import { reviewPill } from '../lib/requestDocuments';
+import { detailsView } from '../lib/requestDetailsView';
+import { Screen, Body } from '../components/layout';
+import { AppRefreshControl } from '../components/AppRefreshControl';
+import { LoadFailure } from '../components/LoadFailure';
+import { Reveal } from '../components/skeleton/Reveal';
+import { useSkeletonGate } from '../components/skeleton/hooks';
+import { RequestDetailsSkeleton } from '../components/skeleton/screens';
+import { useResource } from '../lib/useResource';
+import { ServiceIcon } from '../components/home/ServiceIcon';
 import AdditionalDocuments from '../components/request/AdditionalDocuments';
+import { DocumentRow, Medical, PatientGrid, Trip } from '../components/request/DetailsBlocks';
 import DocumentHistory from '../components/request/DocumentHistory';
 import InvoicesSection from '../components/request/InvoicesSection';
 import QuotationSection from '../components/request/QuotationSection';
 import ReviewBanner from '../components/request/ReviewBanner';
-import RequestStatusPill from '../components/request/RequestStatusPill';
-import { documentsSummary } from '../lib/documentHistoryView';
-import { reviewPill } from '../lib/requestDocuments';
-import { trackingRoute } from '../lib/trackingItem';
+import { C, Card, FONT, Section, StatusLayout, WRAP } from '../components/request/DetailsParts';
+import { COLORS } from '../theme/colors';
+import { PressBox } from '../components/PressBox';
 
-function Action({ Icon, label, onPress }) {
+// Request Details, drawn to the design. Everything on it is worked out in lib/requestDetailsView.js; this file only
+// draws it. Every value wraps (nothing is cut off) except a file name, which is one line with an ellipsis.
+
+function Header({ title, backLabel, isRTL }) {
   return (
-    <Pressable onPress={onPress} className="flex-1 items-center gap-1.5 rounded-xl border border-line bg-white px-1.5 py-3.5 active:opacity-80">
-      <Icon size={18} color="#1A73E8" />
-      <Text className="text-center font-inter-bold text-[11px]">{label}</Text>
-    </Pressable>
-  );
-}
-
-const STATUS_ORDER = ['submitted', 'in_progress', 'completed'];
-const STATUS_STEP_KEY = { submitted: 'status_submitted', in_progress: 'status_progress', completed: 'status_completed' };
-
-function stepsFor(status) {
-  const idx = STATUS_ORDER.indexOf(status);
-  return STATUS_ORDER.map((s, i) => ({
-    key: STATUS_STEP_KEY[s],
-    state: status === 'cancelled' ? 'todo' : i < idx ? 'done' : i === idx ? 'current' : 'todo',
-  }));
-}
-
-function StatusTracker({ status }) {
-  const { t } = useApp();
-  const steps = stepsFor(status);
-  return (
-    <View className="flex-row items-start">
-      {steps.map((s, i) => (
-        <View key={s.key} className={`flex-row items-start ${i < steps.length - 1 ? 'flex-1' : ''}`}>
-          <View className="w-[26px] items-center">
-            <View className={`h-[26px] w-[26px] items-center justify-center rounded-full ${s.state === 'done' ? 'bg-success' : s.state === 'current' ? 'bg-primary' : 'border-2 border-line bg-white'}`}>
-              {s.state === 'done' && <Check size={13} color="#fff" strokeWidth={3} />}
-              {s.state === 'current' && <View className="h-2 w-2 rounded-full bg-white" />}
-            </View>
-            <Text numberOfLines={1} style={{ width: 90 }} className={`mt-1.5 text-center font-inter-bold text-[10.5px] ${s.state === 'current' ? 'text-primary' : s.state === 'todo' ? 'text-faint' : 'text-ink'}`}>
-              {t(s.key)}
-            </Text>
-          </View>
-          {i < steps.length - 1 && (
-            <View className={`mt-[13px] h-0.5 flex-1 ${steps[i + 1].state === 'todo' ? 'bg-line' : steps[i + 1].state === 'current' ? 'bg-primary' : 'bg-success'}`} />
-          )}
-        </View>
-      ))}
+    <View style={{ height: 76, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: C.line }}>
+      <Pressable
+        accessibilityRole="button" accessibilityLabel={backLabel} onPress={goBack}
+        style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: C.soft, alignItems: 'center', justifyContent: 'center' }}
+      >
+        <View style={isRTL ? { transform: [{ scaleX: -1 }] } : null}><ChevronLeft size={22} color={C.navy} strokeWidth={2.4} /></View>
+      </Pressable>
+      <Text accessibilityRole="header" numberOfLines={2} style={{ flex: 1, minWidth: 0, fontFamily: FONT[800], fontSize: 18, lineHeight: 24, color: C.navy }}>{title}</Text>
     </View>
   );
 }
 
+function Action({ Icon, label, onPress }) {
+  return (
+    <PressBox
+      accessibilityRole="button" accessibilityLabel={label} onPress={onPress}
+      style={({ pressed }) => ({ flex: 1, minWidth: 0, minHeight: 66, borderRadius: 14, backgroundColor: '#F5F8FC', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 4, paddingVertical: 8, opacity: pressed ? 0.8 : 1 })}
+    >
+      <Icon size={20} color={C.blueText} />
+      <Text style={{ fontFamily: FONT[700], fontSize: 12.5, lineHeight: 16, color: C.ink, textAlign: 'center' }}>{label}</Text>
+    </PressBox>
+  );
+}
+
+function Summary({ view, t, onDownload, onShare, onContact }) {
+  const h = view.header;
+  return (
+    <Card big>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
+        <View style={{ width: 52, height: 52, borderRadius: 16, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: C.line, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <ServiceIcon serviceKey={h.serviceKey} size={24} color={C.navy} fill={C.navy} fillOpacity={0.12} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          {h.reference ? <Text style={{ fontFamily: FONT[600], fontSize: 13, lineHeight: 18, color: C.muted }}>{h.reference}</Text> : null}
+          <Text accessibilityRole="header" style={[{ fontFamily: FONT[800], fontSize: 19, lineHeight: 25, color: C.navy }, WRAP]}>{h.name}</Text>
+        </View>
+      </View>
+      <View style={{ marginTop: 12, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
+        <View style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: h.badge.bg }}>
+          <Text style={{ fontFamily: FONT[800], fontSize: 11.5, lineHeight: 14, textTransform: 'uppercase', color: h.badge.fg }}>{h.badge.label}</Text>
+        </View>
+        {h.requested ? <Text style={{ flexShrink: 1, fontFamily: FONT[400], fontSize: 13, lineHeight: 18, color: C.muted }}>{t('rd_requested', { date: h.requested })}</Text> : null}
+      </View>
+      <View style={{ marginTop: 16, flexDirection: 'row', gap: 8 }}>
+        <Action Icon={Download} label={t('rd_download')} onPress={onDownload} />
+        <Action Icon={Share2} label={t('rd_share')} onPress={onShare} />
+        <Action Icon={Phone} label={t('rd_contact_team')} onPress={onContact} />
+      </View>
+    </Card>
+  );
+}
+
+function StatusCard({ view, request, t }) {
+  const s = view.status;
+  if (s.kind === 'active') {
+    return (
+      <Card big>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <Text accessibilityRole="header" style={{ flex: 1, minWidth: 0, fontFamily: FONT[800], fontSize: 16, lineHeight: 22, color: C.navy }}>{t('rd_live_tracking')}</Text>
+          <View style={{ flexShrink: 0, flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: COLORS.primarySoft }}>
+            <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: C.blue }} />
+            <Text style={{ fontFamily: FONT[800], fontSize: 12, lineHeight: 16, color: C.blueText }}>{t('rd_case_active')}</Text>
+          </View>
+        </View>
+        <View style={{ marginTop: 12, flexDirection: 'row', gap: 4 }}>
+          {Array.from({ length: s.total }, (_, i) => (
+            <View key={i} style={{ flex: 1, height: 6, borderRadius: 3, backgroundColor: i < s.step ? C.blue : C.line }} />
+          ))}
+        </View>
+        <View style={{ marginTop: 10, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', columnGap: 8, rowGap: 2 }}>
+          <Text style={{ flexShrink: 1, fontSize: 13.5, lineHeight: 19 }}>
+            <Text style={{ fontFamily: FONT[700], color: C.ink }}>{t('mr_step_of', { n: s.step, total: s.total })}</Text>
+            <Text style={{ fontFamily: FONT[500], color: C.muted }}>{` · ${t(s.stageKey)}`}</Text>
+          </Text>
+          {s.updated ? <Text style={{ flexShrink: 1, fontFamily: FONT[400], fontSize: 12.5, lineHeight: 17, color: C.muted }}>{t('rd_updated', { when: s.updated })}</Text> : null}
+        </View>
+      </Card>
+    );
+  }
+  if (s.kind === 'review') return <ReviewBanner request={request} />;
+  if (s.kind === 'approved') return <StatusLayout bg="#E0F5F4" fg="#0B6564" Icon={CircleCheck} title={t('rd_approved_title')} text={t('rd_approved_text')} />;
+  if (s.kind === 'completed') return <StatusLayout bg="#E0F5F4" fg="#0B6564" Icon={Check} title={t('rd_completed_title')} text={s.date ? t('rd_completed_on', { date: s.date }) : t('rd_completed_text')} />;
+  if (s.kind === 'cancelled') return <StatusLayout bg="#EEF1F6" fg="#5B6B84" Icon={Ban} title={t('rd_cancelled_title')} text={t('rd_cancelled_text')} />;
+  return null; // the case has not started: no card
+}
+
 export default function RequestDetails() {
-  const { t, toast } = useApp();
+  const { t, toast, isRTL } = useApp();
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
-  const [request, setRequest] = useState(null);
-  const [failed, setFailed] = useState(false);
+  // Loaded the way every data screen loads (lib/useResource.js): a shimmer skeleton on the first load only, what an earlier visit loaded
+  // shows at once and refreshes quietly, "Try again" if the first load fails, and pull-to-refresh with the page staying on screen.
+  // `reload` (after documents were sent) is the same quiet refetch: the screen keeps showing the current request meanwhile.
+  const { data, loading, error, reload, onRefresh, refreshing } = useResource({
+    key: `request:${id}`,
+    enabled: Boolean(id),
+    fetcher: () => apiGet(`/requests/me/${id}`).then(({ request: r }) => r),
+    onRefreshError: () => toast(t('sk_refresh_failed')),
+  });
+  const request = data ?? null;
+  const gate = useSkeletonGate(loading && Boolean(id));
+  // The height of the "Open live tracking" bar under the scroll area (0 when it is not drawn): the room the floating SOS button needs is measured from above it.
+  const [barHeight, setBarHeight] = useState(0);
 
-  useEffect(() => {
-    if (!id) return;
-    apiGet(`/requests/me/${id}`)
-      .then(({ request: r }) => setRequest(r))
-      .catch((err) => { setFailed(true); toast(err.message); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per id
-  }, [id]);
-
-  // Reloads the request after documents were sent. The screen keeps showing the current request while
-  // this runs (and if it fails), so an upload's results on screen are never lost to a failed reload.
-  const reload = () => apiGet(`/requests/me/${id}`)
-    .then(({ request: r }) => setRequest(r))
-    .catch((err) => toast(err.message));
+  const page = { backgroundColor: '#F2F6FC' };
 
   // Coming back to this screen (from the payment page, from the payment-return link, from another screen) refreshes the
   // request, so the invoices show what the backend now says. The first focus is the initial load above.
   const firstFocus = useRef(true);
   useFocusEffect(useCallback(() => {
     if (firstFocus.current) { firstFocus.current = false; return; }
-    if (id) apiGet(`/requests/me/${id}`).then(({ request: r }) => setRequest(r)).catch(() => undefined);
-  }, [id]));
+    if (id) reload(); // the quiet refetch of useResource: keeps the screen as it is, a failure is ignored
+  }, [id, reload]));
 
   if (!request) {
     return (
-      <Screen>
-        <TopBar title={t('request_details_title')} />
-        {failed || !id ? <LoadError message="Couldn't load this request. Please go back and try again." /> : <LoadingState />}
+      <Screen style={page}>
+        <Header title={t('request_details_title')} backLabel={t('home_back')} isRTL={isRTL} />
+        {!id || (error && !request) ? <LoadFailure message={t('rd_load_failed')} onRetry={id ? reload : undefined} /> : null}
+        {loading && id && gate.visible ? <RequestDetailsSkeleton label={t('sk_loading_request')} /> : null}
       </Screen>
     );
   }
 
-  // Workflow requests list requestDocuments; every other request keeps its Case documents (see documentHistoryView).
-  const docsLabel = documentsSummary(request);
-  // A workflow request's chip says the same as its banner; every other request keeps the usual chip.
+  const view = detailsView(request, t);
+  // A workflow request's status is said the same way in the shared message as on the card.
   const pill = reviewPill(request);
 
   const downloadSummary = async () => {
@@ -132,43 +190,61 @@ export default function RequestDetails() {
     }
   };
 
+  const docs = view.documents;
+
   return (
-    <Screen>
-      <TopBar title={t('request_details_title')} />
-      <Body contentClassName="px-[18px] py-6">
-        <Text className="mb-[5px] text-[12.5px] text-faint">{request.referenceNumber}</Text>
-        <View className="mb-6 flex-row items-center justify-between">
-          <Text className="font-inter-black text-[20px] text-navy">{request.serviceType}</Text>
-          <RequestStatusPill pill={pill} status={request.status} />
-        </View>
-        <ReviewBanner request={request} />
-        <View className="mb-6 flex-row gap-2.5">
-          <Action Icon={Download} label={t('btn_download_summary')} onPress={downloadSummary} />
-          <Action Icon={Share2} label={t('btn_share')} onPress={shareRequest} />
-          <Action Icon={Phone} label={t('btn_contact_team')} onPress={() => Linking.openURL('tel:+919699999065')} />
-        </View>
-        <Card>
-          <InfoRow label={t('lbl_request_date')} value={formatDisplayDate(request.createdAt)} />
-          <InfoRow label={t(isMortalRequest(request) ? 'lbl_deceased_name' : 'lbl_patient_name')} value={request.patientName} />
-          <InfoRow label={t('field_care_level')} value={careLevelText(request.careLevel, t) || '—'} />
-          <InfoRow label={t('lbl_service')} value={request.serviceType} />
-          <InfoRow label={t('lbl_from')} value={request.origin} />
-          <InfoRow label={t('lbl_to')} value={request.destination} />
-          <InfoRow label={t(isMortalRequest(request) ? 'field_transfer_date' : 'lbl_expected_date')} value={request.preferredDate ? formatDisplayDate(request.preferredDate) : '—'} />
-          <InfoRow last label={t('lbl_documents')} value={docsLabel} valueClassName="text-primary" onPress={() => router.push(trackingRoute(request, 'docs'))} />
-        </Card>
-        <Card className="mt-5">
-          <Text className="mb-[22px] font-inter-black text-[14.5px] text-navy">{t('lbl_tracking_status')}</Text>
-          <StatusTracker status={request.status} />
-        </Card>
-        {/* The patient's quotation (Private Charter): view the PDF, accept or reject. Hides itself when the server says there is none. */}
-        {request.serviceKey === 'privatecharter' && <QuotationSection request={request} onChanged={reload} />}
-        <InvoicesSection request={request} onChanged={reload} />
-        <DocumentHistory request={request} />
-        <AdditionalDocuments request={request} onUploaded={reload} />
-        <Spacer />
-        <Button title={t('btn_track_details')} onPress={() => router.push({ pathname: '/request-tracking', params: { id: request.id } })} />
+    <Screen style={page}>
+      <Header title={t('request_details_title')} backLabel={t('home_back')} isRTL={isRTL} />
+      <Body contentClassName="" bottomEdge={view.showTrackingBar ? barHeight : 0} refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+        <Reveal animate={gate.wasShown} style={{ paddingTop: 16, paddingHorizontal: 16, paddingBottom: 0, gap: 14 }}>
+          <Summary view={view} t={t} onDownload={downloadSummary} onShare={shareRequest} onContact={() => Linking.openURL('tel:+919699999065')} />
+          <StatusCard view={view} request={request} t={t} />
+
+          {view.patient.fields.length ? (
+            <Section title={t(view.patient.titleKey)}>
+              <Card><PatientGrid fields={view.patient.fields} /></Card>
+            </Section>
+          ) : null}
+
+          {view.trip.from || view.trip.to || view.trip.rows.length ? (
+            <Section title={t('rd_trip')}><Trip trip={view.trip} t={t} /></Section>
+          ) : null}
+
+          <Medical medical={view.medical} t={t} />
+
+          {/* The patient's quotation (Private Charter): view the PDF, accept or reject. Hides itself when the server says there is none. */}
+          {request.serviceKey === 'privatecharter' ? <QuotationSection request={request} onChanged={reload} className="" /> : null}
+          <InvoicesSection request={request} onChanged={reload} className="" />
+
+          <Section title={t('rd_documents_n', { n: docs.length })}>
+            <Card padding={0} style={{ overflow: 'hidden' }}>
+              {docs.length === 0 ? (
+                <Text style={{ padding: 16, fontFamily: FONT[400], fontSize: 13.5, lineHeight: 19, color: C.muted }}>{t('rd_no_documents')}</Text>
+              ) : docs.map((doc, i) => (
+                <DocumentRow
+                  key={doc.id} doc={doc} first={i === 0} t={t}
+                  onOpen={() => openDocumentPreview(router.push, doc)}
+                />
+              ))}
+            </Card>
+          </Section>
+
+          <DocumentHistory request={request} styled />
+          <AdditionalDocuments request={request} onUploaded={reload} />
+        </Reveal>
       </Body>
+      {view.showTrackingBar ? (
+        <View onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: C.line, paddingTop: 12, paddingHorizontal: 16, paddingBottom: 20 + insets.bottom }}>
+          <PressBox
+            accessibilityRole="button" accessibilityLabel={t('rd_open_tracking')}
+            onPress={() => router.push({ pathname: '/request-tracking', params: { id: request.id } })}
+            style={({ pressed }) => ({ minHeight: 52, borderRadius: 16, backgroundColor: C.blue, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, opacity: pressed ? 0.88 : 1 })}
+          >
+            <Text style={{ fontFamily: FONT[800], fontSize: 16, color: '#FFFFFF' }}>{t('rd_open_tracking')}</Text>
+            <View style={isRTL ? { transform: [{ scaleX: -1 }] } : null}><ArrowRight size={18} color="#FFFFFF" strokeWidth={2.4} /></View>
+          </PressBox>
+        </View>
+      ) : null}
     </Screen>
   );
 }

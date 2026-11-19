@@ -167,7 +167,7 @@ describe('wiring (source checks)', () => {
     const screen = read('../../app/request-details.js');
     expect(screen).toMatch(/import AdditionalDocuments from '\.\.\/components\/request\/AdditionalDocuments'/);
     expect(screen).toMatch(/<AdditionalDocuments request=\{request\} onUploaded=\{reload\} \/>/);
-    expect(screen).toMatch(/const reload = \(\) => apiGet\(`\/requests\/me\/\$\{id\}`\)/);
+    expect(screen).toContain("fetcher: () => apiGet(`/requests/me/${id}`).then(({ request: r }) => r),"); // the reload after an upload is useResource's quiet refetch
   });
 
   test('the card appears only for requests in the review workflow, and respects approval and the limit', () => {

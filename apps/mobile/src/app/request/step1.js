@@ -5,18 +5,29 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar, ChevronDown } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
 import {
-  AIRLINE_MODES, AIRLINE_MODE_LABELS, DECEASED_RELATIONS, MORTAL_TRANSFERS, MORTAL_TRANSFER_LABELS,
+  AIRLINE_MODES, AIRLINE_MODE_LABELS, DECEASED_RELATIONS, MORTAL_TRANSFERS,
   isMortal, needsAirlineMode,
 } from '../../data/mock';
 import { nameOf } from '../../lib/phoneCountry';
+import { apiGet } from '../../lib/api';
+import { resolveTypedCity } from '../../lib/citySearch';
+import { locationProblems } from '../../lib/locationRules';
 import { pickRequestCountry, pickRequestPhoneCountry } from '../../lib/requestForm';
 import { isValidAge, isValidDateString, isValidMobileNumber, isValidName } from '../../lib/validators';
-import { isPrivateCharter, isPrivateCharterAge, firstAnchorOnStep } from '../../lib/privateCharter';
+import { isPrivateCharter, isPrivateCharterAge, firstAnchorOnStep, toCityChoice } from '../../lib/privateCharter';
 import { CountryPicker } from '../../components/NationalityPhone';
 import CityField from '../../components/request/CityField';
 import { Anchor, RequestFrame } from '../../components/request/RequestFrame';
 import { Field, FieldLabel, Input, Text } from '../../components/ui';
 import { Select, Sheet } from '../../components/widgets';
+
+// What the Mortal Remains answers READ in the app's language. Only the shown text: the value stored and sent stays the English one ("Father",
+// "domestic"), so nothing the backend compares changes.
+const RELATION_LABELS = (t) => Object.fromEntries(DECEASED_RELATIONS.map((r) => [r, t(`rd_rel_${r.toLowerCase()}`)]));
+const TRANSFER_LABELS = (t) => Object.fromEntries(MORTAL_TRANSFERS.map((m) => [m, t(`rd_transfer_${m}`)]));
+
+// Private Charter, a place typed by hand that is not a verified city: the backend takes only a verified city for this service (see lib/locationRules.js).
+const CHOOSE_CITY = 'Pick a city from the suggestions: Private Charter needs a verified city.';
 
 function dateStringToObj(value) {
   if (value && isValidDateString(value)) {
@@ -144,23 +155,47 @@ export default function RequestStep1() {
   const [picking, setPicking] = useState(null); // 'country' | 'phone' | null
 
   // What is wrong, in page order. The first one is where the page scrolls to.
-  const problems = [
-    ['name', !isValidName(draft.name)],
+  const problemsFor = (d) => [
+    ['name', !isValidName(d.name)],
     ['age', draft.age.trim() === '' || !isValidAge(draft.age) || (charter && !isPrivateCharterAge(draft.age)) || !draft.gender],
     ...(mortal ? [['relation', !draft.relation], ['deathPlace', !draft.deathPlace.trim()], ['deathDate', !isNotFuture(draft.deathDate)]] : []),
     ['country', !draft.country || (charter && !draft.countryIso)],
-    ['location', charter ? !draft.originCity : !draft.location.trim()],
-    ['dest', charter ? !draft.destCity : !draft.dest.trim()],
+    ['location', locationProblems(d, charter).location !== null],
+    ['dest', locationProblems(d, charter).dest !== null],
     ['phone', !isValidMobileNumber(draft.phone, draft.cc)],
     ['date', !isValidDateString(draft.date)],
     ...(needsAirlineMode(draft.service) ? [['airlineMode', !draft.airlineMode]] : []),
     ...(mortal ? [['mortalTransfer', !draft.mortalTransfer]] : []),
   ];
-  const firstError = () => problems.find(([, wrong]) => wrong)?.[0] || null;
+  const firstError = (patch) => problemsFor(patch ? { ...draft, ...patch } : draft).find(([, wrong]) => wrong)?.[0] || null;
+
+  // Private Charter: the backend takes a city only as a verified { geonameId }. A city typed by hand and never picked is matched to the verified
+  // list here, when Continue is tapped: if it names exactly one city ("Pune"), that city is used and the text stays as typed; if it names none
+  // or several, nothing is guessed and the field asks for a suggestion to be picked.
+  const prepare = charter ? async () => {
+    const patch = {};
+    // The Current Location is matched among the cities of the selected country (so a typed place is never matched to a city of another country);
+    // the Destination may be in any country, so it is matched among all verified cities.
+    if (!draft.originCity && draft.location.trim()) { const c = await resolveTypedCity(apiGet, draft.location, undefined, draft.countryIso); if (c) patch.originCity = toCityChoice(c); }
+    if (!draft.destCity && draft.dest.trim()) { const c = await resolveTypedCity(apiGet, draft.dest); if (c) patch.destCity = toCityChoice(c); }
+    if (Object.keys(patch).length) updateDraft(patch);
+    return patch;
+  } : undefined;
+
+  // Each location field is judged on its own (lib/locationRules.js). A city from another country is a conflict, so it is said at once; the other
+  // messages wait for a Continue tap, as the other fields do.
+  const locProblems = locationProblems(draft, charter);
+  const locationError = (problem, apiField) => {
+    if (problem === 'wrong_country') return `This city is not in ${draft.country}. Pick a city in ${draft.country}, or change the country.`;
+    if (problem && !attempted) return undefined;
+    if (problem === 'pick_city') return CHOOSE_CITY;
+    if (problem === 'required') return charter ? 'Select a city from the list.' : 'This field is required.';
+    return charter ? serverError(apiField) : undefined;
+  };
 
   return (
     <RequestFrame
-      step={1} firstError={firstError} onInvalid={() => setAttempted(true)} onNext={() => router.push('/request/step2')}
+      step={1} firstError={firstError} prepare={prepare} onInvalid={() => setAttempted(true)} onNext={() => router.push('/request/step2')}
       nextKey="req_next_medical" serverAnchor={firstAnchorOnStep(serverErrors, 1)}
     >
       <SectionHeading first>{t(mortal ? 'step1_heading_mortal' : 'step1_heading')}</SectionHeading>
@@ -188,7 +223,7 @@ export default function RequestStep1() {
         <>
           <Anchor id="relation">
             <FieldLabel required>{t('field_relation')}</FieldLabel>
-            <Select value={draft.relation} options={DECEASED_RELATIONS} onChange={(relation) => updateDraft({ relation })} title={t('field_relation')} placeholder="Select relation" />
+            <Select value={draft.relation} options={DECEASED_RELATIONS} labels={RELATION_LABELS(t)} onChange={(relation) => updateDraft({ relation })} title={t('field_relation')} placeholder="Select relation" />
             {attempted && !draft.relation ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : null}
           </Anchor>
           <Anchor id="deathPlace">
@@ -218,32 +253,24 @@ export default function RequestStep1() {
         {attempted && !draft.country ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : serverError('country') ? <Text className="mt-1 text-[12px] text-danger">{serverError('country')}</Text> : null}
       </Anchor>
       <Anchor id="location">
-        {charter ? (
-          <CityField
-            required label={t('field_location')} city={draft.originCity} testID="origin-city"
-            onChange={(city) => updateDraft({ originCity: city, location: city.label })}
-            error={attempted && !draft.originCity ? 'Select a city from the list.' : serverError('origin')}
-          />
-        ) : (
-          <Field
-            required label={t('field_location')} placeholder="City, Country" value={draft.location} onChangeText={(location) => updateDraft({ location })}
-            error={attempted && !draft.location.trim() ? 'This field is required.' : undefined}
-          />
-        )}
+        <CityField
+          required label={t('field_location')} testID="origin-city" structured={charter}
+          value={draft.location} city={draft.originCity}
+          countryIso={draft.countryIso} countryName={draft.country} restrictToCountry
+          // typing again makes it a typed place (manual) until a suggestion is tapped; a tapped suggestion keeps its verified city (and country)
+          onChangeText={(location) => updateDraft({ location, originCity: null })}
+          onSelect={(city) => updateDraft({ originCity: city, location: city.label })}
+          error={locationError(locProblems.location, 'origin')}
+        />
       </Anchor>
       <Anchor id="dest">
-        {charter ? (
-          <CityField
-            required label={t('field_destination')} city={draft.destCity} testID="destination-city"
-            onChange={(city) => updateDraft({ destCity: city, dest: city.label })}
-            error={attempted && !draft.destCity ? 'Select a city from the list.' : serverError('destination')}
-          />
-        ) : (
-          <Field
-            required label={t('field_destination')} placeholder="City, Country" value={draft.dest} onChangeText={(dest) => updateDraft({ dest })}
-            error={attempted && !draft.dest.trim() ? 'This field is required.' : undefined}
-          />
-        )}
+        <CityField
+          required label={t('field_destination')} testID="destination-city" structured={charter}
+          value={draft.dest} city={draft.destCity}
+          onChangeText={(dest) => updateDraft({ dest, destCity: null })}
+          onSelect={(city) => updateDraft({ destCity: city, dest: city.label })}
+          error={locationError(locProblems.dest, 'destination')}
+        />
       </Anchor>
       <Anchor id="phone">
         <FieldLabel required>{t('field_contact_number')}</FieldLabel>
@@ -280,7 +307,7 @@ export default function RequestStep1() {
         <Anchor id="mortalTransfer">
           <FieldLabel required>{t('field_mortal_transfer')}</FieldLabel>
           <Select
-            value={draft.mortalTransfer} options={MORTAL_TRANSFERS} labels={MORTAL_TRANSFER_LABELS}
+            value={draft.mortalTransfer} options={MORTAL_TRANSFERS} labels={TRANSFER_LABELS(t)}
             onChange={(mortalTransfer) => updateDraft({ mortalTransfer })} title={t('field_mortal_transfer')} placeholder="Within India or International"
           />
           {attempted && !draft.mortalTransfer ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : null}

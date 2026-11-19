@@ -8,7 +8,8 @@ import { documentHistory, reviewState, uploadBlockReason, MAX_DOCUMENTS_PER_REQU
 import { remainingSlots, sendAdditionalDocuments } from '../../lib/additionalUploads';
 import { openDocumentRequests } from '../../lib/documentRequests';
 import { formatDisplayDate } from '../../lib/requestShape';
-import { Button, Card, Text } from '../ui';
+import { Button, Text } from '../ui';
+import { Card, Section } from './DetailsParts';
 import { ReportTiles } from './fields';
 
 const BLOCKED_TEXT = {
@@ -37,10 +38,11 @@ export default function AdditionalDocuments({ request, onUploaded }) {
   const documentRequests = blocked === 'approved' && remainingSlots(documents) > 0 ? openDocumentRequests(request) : [];
   if (blocked && !(blocked === 'approved' && documentRequests.length)) {
     return (
-      <Card className="mt-5">
-        <Text className="font-inter-black text-[14.5px] text-navy">Documents</Text>
-        <Text className="mt-2 text-[13px] leading-5 text-muted">{BLOCKED_TEXT[blocked]}</Text>
-      </Card>
+      <Section title="Add documents">
+        <Card>
+          <Text className="text-[13px] leading-5 text-muted">{BLOCKED_TEXT[blocked]}</Text>
+        </Card>
+      </Section>
     );
   }
 
@@ -112,11 +114,10 @@ export default function AdditionalDocuments({ request, onUploaded }) {
 
   if (panel) {
     return (
-      <Card className="mt-5 p-[18px]">
-        <Text className="mb-3.5 font-inter-black text-[14.5px] text-navy" numberOfLines={2}>
-          {replacing ? `Replace ${replacing.name}` : answering ? 'Send requested documents' : 'Add documents'}
-        </Text>
-        {!!answering && <Text className="-mt-2 mb-3.5 text-[13px] leading-5 text-muted">{answering.description}</Text>}
+      <Section title={replacing ? 'Replace a document' : answering ? 'Send requested documents' : 'Add documents'}>
+      <Card>
+        {replacing ? <Text className="mb-3.5 font-inter-bold text-[14.5px] text-navy" numberOfLines={2}>{replacing.name}</Text> : null}
+        {!!answering && <Text className="mb-3.5 text-[13px] leading-5 text-muted">{answering.description}</Text>}
         <View pointerEvents={busy ? 'none' : 'auto'} style={{ opacity: busy ? 0.6 : 1 }}>
           <ReportTiles
             title={replacing ? 'New file' : 'Files'}
@@ -144,14 +145,15 @@ export default function AdditionalDocuments({ request, onUploaded }) {
         <Button title={buttonLabel} onPress={run} loading={busy} disabled={!pending.length} className="mt-4 w-full" />
         {!busy && <Button variant="ghost" title="Cancel" onPress={close} className="mt-2.5 w-full" />}
       </Card>
+      </Section>
     );
   }
 
   if (blocked === 'approved') {
     return (
-      <Card className="mt-5 p-[18px]">
-        <Text className="font-inter-black text-[14.5px] text-navy">Documents requested by HumanCare</Text>
-        <Text className="mt-1.5 text-[13px] leading-5 text-muted">Your request is approved. Please send the documents below; your request and reference stay the same.</Text>
+      <Section title="Documents requested by HumanCare">
+      <Card>
+        <Text className="text-[13px] leading-5 text-muted">Your request is approved. Please send the documents below; your request and reference stay the same.</Text>
         {documentRequests.map((item) => (
           <View key={item.id} className="mt-4 rounded-xl border border-line p-3">
             <Text className="font-inter-bold text-[13.5px] text-navy">{item.description}</Text>
@@ -161,13 +163,14 @@ export default function AdditionalDocuments({ request, onUploaded }) {
           </View>
         ))}
       </Card>
+      </Section>
     );
   }
 
   return (
-    <Card className="mt-5 p-[18px]">
-      <Text className="font-inter-black text-[14.5px] text-navy">Documents</Text>
-      <Text className="mt-1.5 text-[13px] leading-5 text-muted">Send more documents for this request. Your request and reference stay the same.</Text>
+    <Section title="Add documents">
+    <Card>
+      <Text className="text-[13px] leading-5 text-muted">Send more documents for this request. Your request and reference stay the same.</Text>
       {replaceable.map((doc) => (
         <View key={doc.id} className="mt-4 rounded-xl border border-danger-line p-3">
           <Text className="font-inter-bold text-[13.5px] text-navy" numberOfLines={2}>{doc.name}</Text>
@@ -177,5 +180,6 @@ export default function AdditionalDocuments({ request, onUploaded }) {
       ))}
       <Button variant="outline" title="Add documents" onPress={() => open(null)} className="mt-4 w-full" />
     </Card>
+    </Section>
   );
 }
