@@ -3,14 +3,16 @@ import { Platform, Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar, ChevronDown } from 'lucide-react-native';
+import { genderLabels } from '../../lib/genderLabels';
 import { useApp } from '../../state/AppContext';
 import {
   DECEASED_RELATIONS, MORTAL_TRANSFERS,
   isMortal,
 } from '../../data/mock';
-import { nameOf } from '../../lib/phoneCountry';
+import { displayNameOf, countryDisplay } from '../../lib/countryNames';
 import { apiGet } from '../../lib/api';
-import { resolveTypedCity } from '../../lib/citySearch';
+import { resolveCharterCities } from '../../lib/citySearch';
+import { useNetwork } from '../../state/NetworkContext';
 import { locationProblems } from '../../lib/locationRules';
 import { pickRequestCountry, pickRequestPhoneCountry } from '../../lib/requestForm';
 import { isValidAge, isValidDateString, isValidMobileNumber, isValidName } from '../../lib/validators';
@@ -39,7 +41,6 @@ const RELATION_LABELS = (t) => Object.fromEntries(DECEASED_RELATIONS.map((r) => 
 const TRANSFER_LABELS = (t) => Object.fromEntries(MORTAL_TRANSFERS.map((m) => [m, t(`rd_transfer_${m}`)]));
 
 // Private Charter, a place typed by hand that is not a verified city: the backend takes only a verified city for this service (see lib/locationRules.js).
-const CHOOSE_CITY = 'Pick a city from the suggestions: Private Charter needs a verified city.';
 
 function dateStringToObj(value) {
   if (value && isValidDateString(value)) {
@@ -99,6 +100,7 @@ function WebDateField({ label, required, value, onChange, error, past }) {
 }
 
 function DateField({ label, required, value, onChange, error, past }) {
+  const { t } = useApp();
   const [open, setOpen] = useState(false);
   const limits = past ? { maximumDate: TODAY } : { minimumDate: TODAY };
 
@@ -119,7 +121,7 @@ function DateField({ label, required, value, onChange, error, past }) {
         onPress={() => setOpen(true)}
         className="flex-row items-center justify-between gap-1 rounded-[10px] border-[1.5px] border-field bg-input px-3 py-3"
       >
-        <Text className={`text-[15px] ${value ? 'text-ink' : 'text-faint'}`}>{value || 'Select a date'}</Text>
+        <Text className={`text-[15px] ${value ? 'text-ink' : 'text-faint'}`}>{value || t('ph_select_date')}</Text>
         <Calendar size={16} color="#97A4B8" />
       </Pressable>
       {error ? <Text className="mt-1 text-[12px] text-danger">{error}</Text> : null}
@@ -165,6 +167,7 @@ function GenericStep1() {
   // form they haven't started filling in yet).
   const [attempted, setAttempted] = useState(false);
   const [picking, setPicking] = useState(null); // 'country' | 'phone' | null
+  const { isOffline } = useNetwork(); // Continue works offline (this step only collects information); only the verified-city check needs the server
 
   // What is wrong, in page order. The first one is where the page scrolls to.
   const problemsFor = (d) => [
@@ -172,8 +175,8 @@ function GenericStep1() {
     ['age', draft.age.trim() === '' || !isValidAge(draft.age) || (charter && !isPrivateCharterAge(draft.age)) || !draft.gender],
     ...(mortal ? [['relation', !draft.relation], ['deathPlace', !draft.deathPlace.trim()], ['deathDate', !isNotFuture(draft.deathDate)]] : []),
     ['country', !draft.country || (charter && !draft.countryIso)],
-    ['location', locationProblems(d, charter).location !== null],
-    ['dest', locationProblems(d, charter).dest !== null],
+    ['location', locationProblems(d, charter, { offline: isOffline }).location !== null],
+    ['dest', locationProblems(d, charter, { offline: isOffline }).dest !== null],
     ['phone', !isValidMobileNumber(draft.phone, draft.cc)],
     ['date', !isValidDateString(draft.date)],
     ...(mortal ? [['mortalTransfer', !draft.mortalTransfer]] : []),
@@ -183,24 +186,22 @@ function GenericStep1() {
   // Private Charter: the backend takes a city only as a verified { geonameId }. A city typed by hand and never picked is matched to the verified
   // list here, when Continue is tapped: if it names exactly one city ("Pune"), that city is used and the text stays as typed; if it names none
   // or several, nothing is guessed and the field asks for a suggestion to be picked.
+  // Offline nothing is asked: the typed places are kept as typed (saved in the encrypted draft like everything else) and are matched when the request is submitted, online.
   const prepare = charter ? async () => {
-    const patch = {};
-    // The Current Location is matched among the cities of the selected country (so a typed place is never matched to a city of another country);
-    // the Destination may be in any country, so it is matched among all verified cities.
-    if (!draft.originCity && draft.location.trim()) { const c = await resolveTypedCity(apiGet, draft.location, undefined, draft.countryIso); if (c) patch.originCity = toCityChoice(c); }
-    if (!draft.destCity && draft.dest.trim()) { const c = await resolveTypedCity(apiGet, draft.dest); if (c) patch.destCity = toCityChoice(c); }
+    if (isOffline) return {};
+    const patch = await resolveCharterCities(apiGet, draft, toCityChoice);
     if (Object.keys(patch).length) updateDraft(patch);
     return patch;
   } : undefined;
 
   // Each location field is judged on its own (lib/locationRules.js). A city from another country is a conflict, so it is said at once; the other
   // messages wait for a Continue tap, as the other fields do.
-  const locProblems = locationProblems(draft, charter);
+  const locProblems = locationProblems(draft, charter, { offline: isOffline });
   const locationError = (problem, apiField) => {
-    if (problem === 'wrong_country') return `This city is not in ${draft.country}. Pick a city in ${draft.country}, or change the country.`;
+    if (problem === 'wrong_country') return t('err_wrong_country', { country: countryDisplay(draft.countryIso, draft.country) });
     if (problem && !attempted) return undefined;
-    if (problem === 'pick_city') return CHOOSE_CITY;
-    if (problem === 'required') return charter ? 'Select a city from the list.' : 'This field is required.';
+    if (problem === 'pick_city') return t('req_pick_city');
+    if (problem === 'required') return charter ? t('err_select_city') : t('req_required');
     return charter ? serverError(apiField) : undefined;
   };
 
@@ -212,21 +213,21 @@ function GenericStep1() {
       <SectionHeading first>{t(mortal ? 'step1_heading_mortal' : 'step1_heading')}</SectionHeading>
       <Anchor id="name">
         <Field
-          required label={t(mortal ? 'field_deceased_name' : 'field_patient_name')} placeholder={mortal ? 'Full name of the deceased' : "Enter patient's full name"}
+          required label={t(mortal ? 'field_deceased_name' : 'field_patient_name')} placeholder={mortal ? t('ph_deceased_name') : t('ph_patient_full_name')}
           value={draft.name} onChangeText={(name) => updateDraft({ name })}
-          error={(attempted || draft.name) && !isValidName(draft.name) ? 'Enter a valid name.' : serverError('patientName')}
+          error={(attempted || draft.name) && !isValidName(draft.name) ? t('pd_err_full') : serverError('patientName')}
         />
       </Anchor>
       <Anchor id="age">
         <View className="flex-row gap-2.5">
           <Field
-            required className="flex-1" label={t(mortal ? 'field_deceased_age' : 'field_age')} placeholder="Age" keyboardType="number-pad" value={draft.age} onChangeText={(age) => updateDraft({ age })}
-            error={(attempted || draft.age) && (!draft.age.trim() || !isValidAge(draft.age) || (charter && !isPrivateCharterAge(draft.age))) ? 'Enter a valid age.' : serverError('patientAge')}
+            required className="flex-1" label={t(mortal ? 'field_deceased_age' : 'field_age')} placeholder={t('field_deceased_age')} keyboardType="number-pad" value={draft.age} onChangeText={(age) => updateDraft({ age })}
+            error={(attempted || draft.age) && (!draft.age.trim() || !isValidAge(draft.age) || (charter && !isPrivateCharterAge(draft.age))) ? t('err_valid_age') : serverError('patientAge')}
           />
           <View className="flex-1">
             <FieldLabel required>{t('field_gender')}</FieldLabel>
-            <Select value={draft.gender} options={['Male', 'Female', 'Other']} onChange={(gender) => updateDraft({ gender })} title={t('field_gender')} placeholder="Select gender" />
-            {attempted && !draft.gender ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : serverError('patientGender') ? <Text className="mt-1 text-[12px] text-danger">{serverError('patientGender')}</Text> : null}
+            <Select value={draft.gender} options={['Male', 'Female', 'Other']} onChange={(gender) => updateDraft({ gender })} title={t('field_gender')} labels={genderLabels(t)} keepSize placeholder={t('gender_placeholder')} />
+            {attempted && !draft.gender ? <Text className="mt-1 text-[12px] text-danger">{t('req_required')}</Text> : serverError('patientGender') ? <Text className="mt-1 text-[12px] text-danger">{serverError('patientGender')}</Text> : null}
           </View>
         </View>
       </Anchor>
@@ -234,19 +235,19 @@ function GenericStep1() {
         <>
           <Anchor id="relation">
             <FieldLabel required>{t('field_relation')}</FieldLabel>
-            <Select value={draft.relation} options={DECEASED_RELATIONS} labels={RELATION_LABELS(t)} onChange={(relation) => updateDraft({ relation })} title={t('field_relation')} placeholder="Select relation" />
-            {attempted && !draft.relation ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : null}
+            <Select value={draft.relation} options={DECEASED_RELATIONS} labels={RELATION_LABELS(t)} onChange={(relation) => updateDraft({ relation })} title={t('field_relation')} placeholder={t('ph_select_relation')} />
+            {attempted && !draft.relation ? <Text className="mt-1 text-[12px] text-danger">{t('req_required')}</Text> : null}
           </Anchor>
           <Anchor id="deathPlace">
             <Field
-              required label={t('field_place_of_death')} placeholder="Hospital or place, City, Country" value={draft.deathPlace} onChangeText={(deathPlace) => updateDraft({ deathPlace })}
-              error={attempted && !draft.deathPlace.trim() ? 'This field is required.' : undefined}
+              required label={t('field_place_of_death')} placeholder={t('ph_place_of_death')} value={draft.deathPlace} onChangeText={(deathPlace) => updateDraft({ deathPlace })}
+              error={attempted && !draft.deathPlace.trim() ? t('req_required') : undefined}
             />
           </Anchor>
           <Anchor id="deathDate">
             <DateField
               required past label={t('field_date_of_death')} value={draft.deathDate} onChange={(deathDate) => updateDraft({ deathDate })}
-              error={(attempted || draft.deathDate) && !isNotFuture(draft.deathDate) ? 'Enter a valid date.' : undefined}
+              error={(attempted || draft.deathDate) && !isNotFuture(draft.deathDate) ? t('err_valid_date') : undefined}
             />
           </Anchor>
         </>
@@ -255,13 +256,13 @@ function GenericStep1() {
         <FieldLabel required>{t('field_country')}</FieldLabel>
         <Pressable
           onPress={() => setPicking('country')} accessibilityRole="button"
-          accessibilityLabel={`${t('field_country')}, ${draft.country || 'Select country'}`}
+          accessibilityLabel={`${t('field_country')}, ${countryDisplay(draft.countryIso, draft.country) || t('ph_select_country')}`}
           className="min-h-[48px] flex-row items-center justify-between gap-2 rounded-[10px] border-[1.5px] border-field bg-input px-3 py-3 active:opacity-80"
         >
-          <Text className={`flex-1 text-[15px] ${draft.country ? '' : 'text-faint'}`} numberOfLines={1}>{draft.country || 'Select country'}</Text>
+          <Text className={`flex-1 text-[15px] ${draft.country ? '' : 'text-faint'}`} numberOfLines={1}>{countryDisplay(draft.countryIso, draft.country) || t('ph_select_country')}</Text>
           <ChevronDown size={16} color="#97A4B8" />
         </Pressable>
-        {attempted && !draft.country ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : serverError('country') ? <Text className="mt-1 text-[12px] text-danger">{serverError('country')}</Text> : null}
+        {attempted && !draft.country ? <Text className="mt-1 text-[12px] text-danger">{t('req_required')}</Text> : serverError('country') ? <Text className="mt-1 text-[12px] text-danger">{serverError('country')}</Text> : null}
       </Anchor>
       <Anchor id="location">
         <CityField
@@ -288,20 +289,20 @@ function GenericStep1() {
         <View className="flex-row gap-2">
           <Pressable
             onPress={() => setPicking('phone')} accessibilityRole="button"
-            accessibilityLabel={`${t('phone_country_code_label')}, ${nameOf(draft.phoneCountry)} ${draft.cc}`}
+            accessibilityLabel={`${t('phone_country_code_label')}, ${displayNameOf(draft.phoneCountry)} ${draft.cc}`}
             className="min-h-[48px] min-w-[96px] flex-row items-center justify-center gap-1 rounded-[10px] border-[1.5px] border-field bg-input px-3 active:opacity-80"
           >
             <Text className="text-[13px]">{draft.phoneCountry} {draft.cc}</Text>
             <ChevronDown size={16} color="#97A4B8" />
           </Pressable>
-          <Input className="flex-1" placeholder="Enter number" keyboardType="phone-pad" value={draft.phone} onChangeText={(phone) => updateDraft({ phone })} />
+          <Input className="flex-1" placeholder={t('ph_enter_number')} keyboardType="phone-pad" value={draft.phone} onChangeText={(phone) => updateDraft({ phone })} />
         </View>
-        {(attempted || draft.phone) && !isValidMobileNumber(draft.phone, draft.cc) ? <Text className="mt-1 text-[12px] text-danger">{draft.phone ? 'Enter a valid number for the selected country.' : 'This field is required.'}</Text> : serverError('patientContact') ? <Text className="mt-1 text-[12px] text-danger">{serverError('patientContact')}</Text> : null}
+        {(attempted || draft.phone) && !isValidMobileNumber(draft.phone, draft.cc) ? <Text className="mt-1 text-[12px] text-danger">{draft.phone ? t('err_number_for_country') : t('req_required')}</Text> : serverError('patientContact') ? <Text className="mt-1 text-[12px] text-danger">{serverError('patientContact')}</Text> : null}
       </Anchor>
       <Anchor id="date">
         <DateField
           required label={t(mortal ? 'field_transfer_date' : 'field_preferred_date')} value={draft.date} onChange={(date) => updateDraft({ date })}
-          error={(attempted || draft.date) && !isValidDateString(draft.date) ? 'Enter a valid date.' : serverError('preferredDate')}
+          error={(attempted || draft.date) && !isValidDateString(draft.date) ? t('err_valid_date') : serverError('preferredDate')}
         />
       </Anchor>
       {mortal && (
@@ -309,9 +310,9 @@ function GenericStep1() {
           <FieldLabel required>{t('field_mortal_transfer')}</FieldLabel>
           <Select
             value={draft.mortalTransfer} options={MORTAL_TRANSFERS} labels={TRANSFER_LABELS(t)}
-            onChange={(mortalTransfer) => updateDraft({ mortalTransfer })} title={t('field_mortal_transfer')} placeholder="Within India or International"
+            onChange={(mortalTransfer) => updateDraft({ mortalTransfer })} title={t('field_mortal_transfer')} placeholder={t('ph_mortal_transfer')}
           />
-          {attempted && !draft.mortalTransfer ? <Text className="mt-1 text-[12px] text-danger">This field is required.</Text> : null}
+          {attempted && !draft.mortalTransfer ? <Text className="mt-1 text-[12px] text-danger">{t('req_required')}</Text> : null}
         </Anchor>
       )}
       <CountryPicker

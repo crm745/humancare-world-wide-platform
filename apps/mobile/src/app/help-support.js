@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Linking, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { ChevronDown, Mail, Phone } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { EMERGENCY_TEL, FAQS, OPS_EMAIL, REGIONAL_NUMBERS } from '../data/mock';
 import { Body, Screen, TopBar } from '../components/layout';
 import { Card, InfoRow, Text } from '../components/ui';
 import { COLORS } from '../theme/colors';
+import { useOpenLink } from '../lib/useOpenLink';
 
 function ContactTile({ Icon, bg, color, label, onPress }) {
   return (
@@ -35,13 +36,14 @@ function Heading({ children }) {
 
 export default function HelpSupport() {
   const { t } = useApp();
+  const open = useOpenLink();
   return (
     <Screen>
       <TopBar title={t('help_support')} />
       <Body contentClassName="px-[18px] py-4">
         <View className="mb-[26px] flex-row justify-between">
-          <ContactTile Icon={Phone} bg="bg-cancel-soft" color="#D64545" label={t('btn_call_alarm_desk')} onPress={() => Linking.openURL(`tel:${EMERGENCY_TEL}`)} />
-          <ContactTile Icon={Mail} bg="bg-primary-soft" color={COLORS.primary} label={t('btn_email_ops')} onPress={() => Linking.openURL(`mailto:${OPS_EMAIL}`)} />
+          <ContactTile Icon={Phone} bg="bg-cancel-soft" color="#D64545" label={t('btn_call_alarm_desk')} onPress={() => open(`tel:${EMERGENCY_TEL}`)} />
+          <ContactTile Icon={Mail} bg="bg-primary-soft" color={COLORS.primary} label={t('btn_email_ops')} onPress={() => open(`mailto:${OPS_EMAIL}`)} />
         </View>
 
         <Heading>{t('lbl_regional_numbers')}</Heading>
@@ -50,7 +52,7 @@ export default function HelpSupport() {
             <InfoRow
               key={n.tel}
               last={i === REGIONAL_NUMBERS.length - 1}
-              onPress={() => Linking.openURL(`tel:${n.tel}`)}
+              onPress={() => open(`tel:${n.tel}`)}
               label={t(n.label)}
               labelClassName="font-inter-bold text-[13.5px] text-ink"
               valueNode={<Text className="font-inter-bold text-[13.5px] text-primary">{n.display}</Text>}

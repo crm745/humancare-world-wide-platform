@@ -3,6 +3,7 @@ import { Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 import { Search } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
+import { useNetwork } from '../state/NetworkContext';
 import { apiGet } from '../lib/api';
 import { openDocumentPreview } from '../lib/documentPreview';
 import { countLabel, filterDocuments } from '../lib/documentsView';
@@ -15,12 +16,15 @@ import { useSkeletonGate } from '../components/skeleton/hooks';
 import { RowsSkeleton } from '../components/skeleton/screens';
 import { useResource } from '../lib/useResource';
 import { DocumentCard } from '../components/documents/DocumentCard';
+import { LoadFailure } from '../components/LoadFailure';
+import { CachedNote } from '../components/network/CachedNote';
 
 // My Documents: every document attached to the patient's cases, from GET /requests/me/documents (unchanged). Each card
 // shows the file name, its type and size, the case reference and when it was added to the case; tapping it opens the in-app preview
 // (app/document-preview.js), which loads it with progress, shows an error with Try again if it cannot, and has its own Share button.
 export default function MyDocuments() {
   const { t, toast } = useApp();
+  const { isOffline } = useNetwork();
   const [query, setQuery] = useState('');
 
   // Loaded the way every data screen loads (lib/useResource.js): a shimmer skeleton on the first load only, what an earlier visit loaded
@@ -36,7 +40,8 @@ export default function MyDocuments() {
   const gate = useSkeletonGate(loading);
 
   // A tap opens the preview, never the share sheet. A double tap opens one preview (lib/documentPreview.js).
-  const start = (doc) => { openDocumentPreview(router.push, doc); };
+  // Offline, nothing is opened: the preview would only start a download that cannot finish (no document is ever kept on the phone to show instead).
+  const start = (doc) => { if (isOffline) return; openDocumentPreview(router.push, doc); };
 
   const shown = filterDocuments(docs, query);
 
@@ -46,14 +51,7 @@ export default function MyDocuments() {
       <Body contentClassName="px-[18px] py-4" refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {loading && gate.visible ? <RowsSkeleton label={t('sk_loading_documents')} count={5} lines={2} trailing /> : null}
 
-        {!loading && failed ? (
-          <View className="items-center px-5 py-[50px]">
-            <Text className="text-center font-inter-bold text-[14px] text-navy">{t('docs_load_failed')}</Text>
-            <Pressable accessibilityRole="button" accessibilityLabel={t('docs_try_again')} onPress={retry} className="mt-4 min-h-[44px] justify-center rounded-xl px-6 active:opacity-85" style={{ backgroundColor: P.brand }}>
-              <Text className="font-inter-bold text-[14px] text-white">{t('docs_try_again')}</Text>
-            </Pressable>
-          </View>
-        ) : null}
+        {!loading && failed ? <LoadFailure titleKey="lf_title_documents" error={error} message={t('docs_load_failed')} onRetry={retry} /> : null}
 
         {!loading && !failed && docs.length === 0 ? (
           <View className="items-center px-5 py-[50px]">
@@ -79,8 +77,9 @@ export default function MyDocuments() {
                 </Pressable>
               </View>
             ) : (
-              shown.map((d) => <DocumentCard key={d.id} doc={d} onPress={() => start(d)} t={t} isNew={highlight.includes(d.id)} />)
+              shown.map((d) => <DocumentCard key={d.id} doc={d} onPress={() => start(d)} t={t} isNew={highlight.includes(d.id)} offline={isOffline} />)
             )}
+            <CachedNote />
           </Reveal>
         ) : null}
       </Body>

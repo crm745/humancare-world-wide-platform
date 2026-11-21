@@ -6,8 +6,10 @@ import { OPS_EMAIL } from '../data/mock';
 import { BackButton, Body, Screen } from '../components/layout';
 import { Button, Card, Consent, Field, Heading, Text } from '../components/ui';
 import { PasswordField } from '../components/widgets';
+import { errorText } from '../lib/errorText';
 import { apiPost } from '../lib/api';
 import { isValidEmail } from '../lib/validators';
+import { NeedsInternet } from '../components/network/NeedsInternet';
 
 export default function CorporateLogin() {
   const { t, toast } = useApp();
@@ -19,12 +21,12 @@ export default function CorporateLogin() {
 
   // Password checks out -> backend sends an OTP -> corporate-otp.js does the actual verify+token step.
   const submit = async () => {
-    if (!ready) { toast('Enter a valid email and password.'); return; }
+    if (!ready) { toast(t('corp_err_login')); return; }
     try {
       await apiPost('/auth/corporate/login', { email, password });
       router.push({ pathname: '/corporate-otp', params: { identifier: email } });
     } catch (err) {
-      toast(err.message);
+      toast(errorText(err, t));
     }
   };
 
@@ -39,11 +41,11 @@ export default function CorporateLogin() {
         <View className="gap-[18px]">
           <Field
             large required label={t('field_email_address')} placeholder="corporate@company.com" keyboardType="email-address" autoCapitalize="none" value={email} onChangeText={setEmail}
-            error={email && !isValidEmail(email) ? 'Enter a valid email address.' : undefined}
+            error={email && !isValidEmail(email) ? t('change_err_email') : undefined}
           />
           <PasswordField
-            required label={t('field_password')} placeholder="Password issued by HumanCare" value={password} onChangeText={setPassword}
-            error={password && password.length < 8 ? 'Password must be at least 8 characters.' : undefined}
+            required label={t('field_password')} placeholder={t('ph_corp_password')} value={password} onChangeText={setPassword}
+            error={password && password.length < 8 ? t('pwd_err_min') : undefined}
           />
         </View>
         <View className="mt-2.5 items-end">
@@ -56,10 +58,11 @@ export default function CorporateLogin() {
             <Text className="text-[14px] leading-5 text-muted">I agree to the {link(t('terms_title'), '/terms')} and {link(t('privacy_title'), '/privacy')}</Text>
           </Consent>
           <Consent on={consents[1]} onToggle={() => toggle(1)}>
-            <Text className="text-[14px] leading-5 text-muted">I confirm I am authorized to submit and manage cases for this organization.</Text>
+            <Text className="text-[14px] leading-5 text-muted">{t('corp_confirm_authorized')}</Text>
           </Consent>
         </View>
-        <Button large title={t('btn_sign_in')} dimmed={!ready} onPress={submit} className="mt-[26px]" />
+        <Button large title={t('btn_sign_in')} dimmed={!ready} needsNetwork onPress={submit} className="mt-[26px]" />
+        <NeedsInternet />
         <Card className="mt-5">
           <Text className="text-[14px] leading-[22px] text-muted">
             <Text className="font-inter-bold text-navy">{t('lbl_new_corporate')}</Text> {t('corporate_contact_ops_text')} <Text className="text-primary">{OPS_EMAIL}</Text>

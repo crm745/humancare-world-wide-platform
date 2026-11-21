@@ -207,7 +207,7 @@ describe('LoadFailure: a short message and Try again', () => {
   const lf = comp('LoadFailure.js');
   test('message, a button that runs onRetry', () => {
     expect(lf).toContain("t('sk_load_failed')");
-    expect(lf).toContain("title={t('sk_try_again')} onPress={onRetry}");
+    expect(lf).toContain("retryLabel={onRetry ? t('sk_try_again') : undefined} onRetry={onRetry}");
   });
 });
 
@@ -253,7 +253,7 @@ describe('every data screen: skeleton while the first load runs, then content', 
       expect(src).toContain('onRetry=');
     });
     expect(app('tracking')).toContain('<LoadFailure');
-    expect(app('my-documents')).toContain("t('docs_try_again')");
+    expect(app('my-documents')).toContain('<LoadFailure titleKey="lf_title_documents"');
   });
   test('a failed pull keeps the content and says "Couldn\'t refresh. Pull down to try again."', () => {
     ['my-requests', 'home', 'request-tracking', 'request-details', 'notifications', 'corporate-dashboard', 'my-documents'].forEach((name) => {
@@ -324,7 +324,7 @@ describe('Profile and the forms', () => {
   test('personal details loads with a skeleton (and keeps its own Try again)', () => {
     const src = app('personal-details');
     expect(src).toContain('<FormSkeleton');
-    expect(src).toContain("t('pd_try_again')");
+    expect(src).toContain('<LoadFailure titleKey="lf_title_profile"');
   });
 });
 

@@ -3,7 +3,8 @@ import { FlatList, Modal, Pressable, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, ChevronDown, Search, X } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
-import { dialOf, nameOf, searchCountries } from '../lib/phoneCountry';
+import { dialOf } from '../lib/phoneCountry';
+import { displayNameOf, searchCountriesLocalized } from '../lib/countryNames';
 import { isValidMobileNumber } from '../lib/validators';
 import { FieldLabel, Input, Text } from './ui';
 import { COLORS } from '../theme/colors';
@@ -16,7 +17,7 @@ export function CountryPicker({ visible, title, selected, onPick, onClose }) {
   const { t, isRTL } = useApp();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
-  const results = useMemo(() => searchCountries(query), [query]);
+  const results = useMemo(() => searchCountriesLocalized(query), [query]);
   const close = () => { setQuery(''); onClose(); };
   const pick = (code) => { setQuery(''); onPick(code); };
 
@@ -47,10 +48,10 @@ export function CountryPicker({ visible, title, selected, onPick, onClose }) {
             return (
               <Pressable
                 onPress={() => pick(item.code)} accessibilityRole="button" accessibilityState={{ selected: on }}
-                accessibilityLabel={`${item.name}, ${item.dial}`}
+                accessibilityLabel={`${displayNameOf(item.code)}, ${item.dial}`}
                 className={`min-h-[48px] flex-row items-center gap-3 border-b border-divider px-[18px] py-2.5 active:bg-soft ${on ? 'bg-primary-soft' : ''}`}
               >
-                <Text className="flex-1 text-[15px] text-navy">{item.name}</Text>
+                <Text className="flex-1 text-[15px] text-navy">{displayNameOf(item.code)}</Text>
                 <Text className="text-[14px] text-muted">{item.dial}</Text>
                 {on ? <Check size={16} color={COLORS.primary} strokeWidth={2.6} /> : <View className="w-4" />}
               </Pressable>
@@ -78,10 +79,10 @@ export function NationalityPhoneFields({ nationality, phoneCountry, phone, onNat
         <FieldLabel large required>{t('field_nationality')}</FieldLabel>
         <Pressable
           onPress={() => setPicking('nationality')} accessibilityRole="button"
-          accessibilityLabel={`${t('field_nationality')}, ${nationality ? nameOf(nationality) : t('nationality_placeholder')}`}
+          accessibilityLabel={`${t('field_nationality')}, ${nationality ? displayNameOf(nationality) : t('nationality_placeholder')}`}
           className="min-h-[52px] flex-row items-center justify-between gap-2 rounded-[10px] border-[1.5px] border-field bg-input px-3 py-3 active:opacity-80"
         >
-          <Text className={`flex-1 text-[16.5px] ${nationality ? '' : 'text-faint'}`} numberOfLines={1}>{nationality ? nameOf(nationality) : t('nationality_placeholder')}</Text>
+          <Text className={`flex-1 text-[16.5px] ${nationality ? '' : 'text-faint'}`} numberOfLines={1}>{nationality ? displayNameOf(nationality) : t('nationality_placeholder')}</Text>
           <ChevronDown size={16} color="#97A4B8" />
         </Pressable>
         {showErrors && !nationality ? <Text className="mt-1 text-[12px] text-danger">{t('nationality_required')}</Text> : null}
@@ -92,13 +93,13 @@ export function NationalityPhoneFields({ nationality, phoneCountry, phone, onNat
         <View className="flex-row gap-2">
           <Pressable
             onPress={() => setPicking('phone')} accessibilityRole="button"
-            accessibilityLabel={`${t('country_code_label')}, ${nameOf(phoneCountry)} ${dial}`}
+            accessibilityLabel={`${t('country_code_label')}, ${displayNameOf(phoneCountry)} ${dial}`}
             className="min-h-[52px] min-w-[96px] flex-row items-center justify-center gap-1 rounded-[10px] border-[1.5px] border-field bg-input px-3 active:opacity-80"
           >
             <Text className="text-[16.5px]">{dial}</Text>
             <ChevronDown size={16} color="#97A4B8" />
           </Pressable>
-          <Input large className="flex-1" placeholder="Mobile number" keyboardType="phone-pad" accessibilityLabel={t('field_mobile_number')} value={phone} onChangeText={onPhone} />
+          <Input large className="flex-1" placeholder={t('field_mobile_number')} keyboardType="phone-pad" accessibilityLabel={t('field_mobile_number')} value={phone} onChangeText={onPhone} />
         </View>
         {phoneBad ? <Text className="mt-1 text-[12px] text-danger">{phone ? t('phone_invalid_for_country') : t('phone_required')}</Text> : null}
       </View>

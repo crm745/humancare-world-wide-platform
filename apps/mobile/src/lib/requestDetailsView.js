@@ -10,7 +10,7 @@
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import SERVICES from '../data/services.json';
 import { getDateLocale, formatDate, formatDayMonth, formatTime } from './dateFormat';
-import { nameOf } from './phoneCountry';
+import { displayNameOf } from './countryNames';
 import { careLevelText } from './requestShape';
 import { TRACKING_STEPS, trackingPosition } from './requestTracking';
 import { documentHistory, reviewBanner, reviewState } from './requestDocuments';
@@ -93,7 +93,7 @@ export function genderLabel(value, t) {
 // A country name as stored (non-Charter), or an ISO code ("AE", Charter) as its name.
 export function countryLabel(value) {
   const v = textOf(value);
-  if (/^[A-Za-z]{2}$/.test(v)) return nameOf(v.toUpperCase()) || v;
+  if (/^[A-Za-z]{2}$/.test(v)) return displayNameOf(v.toUpperCase()) || v;
   return v;
 }
 

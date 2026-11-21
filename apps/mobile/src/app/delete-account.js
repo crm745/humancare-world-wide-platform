@@ -3,6 +3,7 @@ import { Pressable, View } from 'react-native';
 import { Redirect, router } from 'expo-router';
 import { Check, TriangleAlert } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
+import { errorText } from '../lib/errorText';
 import { apiPost } from '../lib/api';
 import { codeStepFrom, setAuthStep } from '../lib/authFlow';
 import { Body, Screen, TopBar } from '../components/layout';
@@ -38,8 +39,8 @@ export default function DeleteAccount() {
       router.push('/delete-account-otp');
     } catch (err) {
       if (err.code === 'active_requests') setBlocked((err.data && err.data.activeRequests) || 1);
-      else if (err.status && err.status < 500) setError(err.message);
-      else toast(err.message);
+      else if (err.status && err.status < 500) setError(errorText(err, t));
+      else toast(errorText(err, t));
     } finally {
       setBusy(false);
     }
@@ -94,7 +95,7 @@ export default function DeleteAccount() {
             <Text className="flex-1 text-[14px] leading-[20px] text-ink">{t('del_confirm_check')}</Text>
           </Pressable>
 
-          <Button title={t('del_continue')} variant="danger" large dimmed={!ready} loading={busy} onPress={submit} />
+          <Button title={t('del_continue')} variant="danger" large dimmed={!ready} loading={busy} needsNetwork onPress={submit} />
           <Button title={t('del_cancel')} variant="ghost" onPress={() => router.back()} />
         </View>
       </Body>

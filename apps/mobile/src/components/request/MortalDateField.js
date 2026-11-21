@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Platform, Pressable, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar } from 'lucide-react-native';
+import { useApp } from '../../state/AppContext';
 import { FieldLabel, Text } from '../ui';
 import { Sheet } from '../widgets';
 import { dateToString, stringToDate } from '../../lib/teleConsultation';
@@ -12,6 +13,7 @@ import { todayDate, todayString } from '../../lib/mortalRemains';
 // own picker dialog; iOS wraps the spinner in the existing Sheet with a Done button; the browser has a native date input (its min/max is not
 // enforced on typing, so the form's own rule judges the value too). The other date fields of the request form are left exactly as they are.
 export function MortalDateField({ label, required, value, onChange, error, past = false }) {
+  const { t } = useApp();
   const [open, setOpen] = useState(false);
   const today = todayDate();
   const limits = past ? { maximumDate: today } : { minimumDate: today };
@@ -47,10 +49,10 @@ export function MortalDateField({ label, required, value, onChange, error, past 
     <View>
       <FieldLabel required={required}>{label}</FieldLabel>
       <Pressable
-        onPress={() => setOpen(true)} accessibilityRole="button" accessibilityLabel={`${label}, ${value || 'Select a date'}`}
+        onPress={() => setOpen(true)} accessibilityRole="button" accessibilityLabel={`${label}, ${value || t('ph_select_date')}`}
         className="min-h-[48px] flex-row items-center justify-between gap-1 rounded-[10px] border-[1.5px] border-field bg-input px-3 py-3"
       >
-        <Text className={`text-[15px] ${value ? 'text-ink' : 'text-faint'}`}>{value || 'Select a date'}</Text>
+        <Text className={`text-[15px] ${value ? 'text-ink' : 'text-faint'}`}>{value || t('ph_select_date')}</Text>
         <Calendar size={16} color="#97A4B8" />
       </Pressable>
       {error ? <Text className="mt-1 text-[12px] text-danger">{error}</Text> : null}

@@ -431,7 +431,7 @@ describe('the form screens', () => {
     const review = read('app/request/review.js');
     const start = review.indexOf('if (isCorporateService(d.service)) {');
     const branch = review.slice(start, review.indexOf('if (isPrivateCharter(d.service)) {'));
-    expect(branch).toContain("apiPost('/requests', buildCorporatePayload(d))");
+    expect(branch).toContain('guardedSend(buildCorporatePayload(d))'); // send() adds the idempotency key (Phase 4)
     expect(branch).not.toContain('apiUpload');
   });
   test('the draft has the new keys, and changing service clears them / clears what Corporate Medical does not take', () => {

@@ -29,13 +29,13 @@ describe('the My Documents screen', () => {
     expect(screen).toContain("<TopBar title={t('my_documents')} />");
     expect(screen).toContain('countLabel(shown.length, docs.length)');
     expect(screen).toContain('filterDocuments(docs, query)');
-    expect(screen).toContain("onPress={retry}");
+    expect(screen).toContain('onRetry={retry}');
     expect(screen).toContain("t('docs_empty_title')");
     expect(screen).toContain("t('docs_no_match')");
     expect(screen).toContain("t('docs_clear_search')");
   });
   test('a double tap opens one preview (the guard is lib/documentPreview.js); the loading and the failure are shown by the preview screen', () => {
-    expect(screen).toContain('const start = (doc) => { openDocumentPreview(router.push, doc); };');
+    expect(screen).toContain("const start = (doc) => { if (isOffline) return; openDocumentPreview(router.push, doc); };"); // offline: nothing starts (the bottom message says why)
     expect(read('../../app/document-preview.js')).toContain('downloadErrorInfo(file.error).key');
   });
   test('the date is never presented as an upload date', () => {
@@ -87,21 +87,21 @@ describe('translations', () => {
 describe('what was left alone', () => {
   test('the shared DocRow is exactly as it was', () => {
     const doc = widgets.slice(widgets.indexOf('export function DocRow'), widgets.indexOf('export function Toast'));
-    expect(doc).toContain("export function DocRow({ label, meta, onPress, className = '' }) {");
+    expect(doc).toContain("export function DocRow({ label, meta, onPress, className = '', offline = false }) {"); // (offline: pale, with the reason)
     expect(doc).toContain('<FileText size={16} color="#D64545" />');
     expect(doc).toContain('<Download size={15} color={COLORS.primary} />');
-    expect(doc).toContain('className={`mb-2.5 flex-row items-center gap-2.5 rounded-[14px] border border-line bg-white p-3 active:opacity-80 ${className}`}');
+    expect(doc).toContain("rounded-[14px] border border-line bg-white p-3 ${offline ? 'opacity-45' : 'active:opacity-80'} ${className}");
   });
-  test('the corporate tracking page still uses DocRow and downloadAndShare', () => {
+  test('the corporate tracking page still uses DocRow, and downloads through the authenticated downloadDocument', () => {
     const tracking = read('../../app/tracking.js');
     expect(tracking).toContain("import { DocRow } from '../components/widgets'");
-    expect(tracking).toContain("import { downloadAndShare } from '../lib/download'");
-    expect(tracking).toMatch(/downloadAndShare\(`\/documents\/\$\{d\.id\}\/file`, d\.name\)/);
+    expect(tracking).toContain("import { downloadDocument, downloadErrorInfo } from '../lib/download'");
+    expect(tracking).toMatch(/downloadDocument\(`\/documents\/\$\{d\.id\}\/file`, d\.name\)/);
   });
-  test('Request Details still downloads its summary with downloadAndShare', () => {
+  test('Request Details downloads its summary with the authenticated downloadDocument', () => {
     const details = read('../../app/request-details.js');
-    expect(details).toContain("import { downloadAndShare } from '../lib/download'");
-    expect(details).toMatch(/downloadAndShare\(`\/requests\/me\/\$\{request\.id\}\/summary`/);
+    expect(details).toContain("import { downloadDocument, downloadErrorInfo } from '../lib/download'");
+    expect(details).toMatch(/downloadDocument\(`\/requests\/me\/\$\{request\.id\}\/summary`/);
   });
   test('no backend, session or guard file was touched by this feature (their markers are intact)', () => {
     const session = read('../session.js');

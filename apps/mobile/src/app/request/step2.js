@@ -6,7 +6,7 @@ import { Accessibility, Activity, BedDouble, PersonStanding } from 'lucide-react
 import { needsCareLevel, useApp } from '../../state/AppContext';
 import { AIRLINE_MODES, EQUIPMENT_OPTIONS, MOBILITY_OPTIONS, URGENCY_OPTIONS, isMortal } from '../../data/mock';
 import { firstAnchorOnStep, isPrivateCharter, needsDocument } from '../../lib/privateCharter';
-import { OXYGEN_LPM_MAX, TRAVEL_TYPE_LABELS, asksPatientMobility, careLevelOptionsFor, equipmentOptionsFor, isGroundService, needsOxygenRate, needsTravelType, oxygenLpmProblem, presentIssueMissing } from '../../lib/requestForm';
+import { OXYGEN_LPM_MAX, asksPatientMobility, careLevelOptionsFor, equipmentOptionsFor, isGroundService, needsOxygenRate, needsTravelType, oxygenLpmProblem, presentIssueMissing } from '../../lib/requestForm';
 import { Anchor, RequestFrame } from '../../components/request/RequestFrame';
 import { ChoiceChips, FieldError, FieldHeader, ReportTiles, SwitchRow } from '../../components/request/fields';
 import { CARE_LEVELS, Field } from '../../components/ui';
@@ -92,7 +92,7 @@ function GenericStep2() {
           <FieldHeader title={t('field_airline_mode')} required />
           <ChoiceChips
             columns={2} label={t('field_airline_mode')} value={draft.airlineMode} onChange={(airlineMode) => updateDraft({ airlineMode })}
-            options={AIRLINE_MODES.map((key) => ({ value: key, label: TRAVEL_TYPE_LABELS[key] }))}
+            options={AIRLINE_MODES.map((key) => ({ value: key, label: t(`rd_travel_${key}`) }))}
           />
           <FieldError>{attempted && !draft.airlineMode ? t('req_required') : null}</FieldError>
         </Anchor>
@@ -148,7 +148,7 @@ function GenericStep2() {
 
       <Anchor id="files">
         <ReportTiles title={t(mortal ? 'req_documents' : 'req_reports')} files={draft.files} onChange={(files) => updateDraft({ files })} />
-        <FieldError>{attempted && needsDocument(draft) ? 'Upload at least one document to submit this request.' : null}</FieldError>
+        <FieldError>{attempted && needsDocument(draft) ? t('req_err_need_doc') : null}</FieldError>
       </Anchor>
 
       <Anchor id="urgency">

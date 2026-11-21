@@ -22,9 +22,9 @@ const REQUEST_FIELDS = [
 const CASE_FIELDS = ['id', 'referenceNumber', 'status', 'urgency', 'createdAt', 'updatedAt'];
 // The note is written by staff and shown to the patient on Tracking and in the PDF timeline.
 const STAGE_EVENT_FIELDS = ['id', 'stage', 'note', 'occurredAt'];
-const CASE_DOCUMENT_FIELDS = ['id', 'type', 'name', 'fileSizeBytes', 'uploadedAt'];
+const CASE_DOCUMENT_FIELDS = ['id', 'type', 'name', 'fileSizeBytes', 'uploadedAt', 'clientUploadId'];
 const REQUEST_DOCUMENT_FIELDS = [
-  'id', 'originalName', 'sizeBytes', 'uploadedAt', 'replacesId', 'supersededAt', 'scanStatus', 'reviewStatus', 'rejectionReason',
+  'id', 'originalName', 'sizeBytes', 'uploadedAt', 'replacesId', 'supersededAt', 'scanStatus', 'reviewStatus', 'rejectionReason', 'clientUploadId',
 ];
 
 const isObject = (value) => value !== null && typeof value === 'object';
@@ -56,7 +56,12 @@ function toPatientRequest(request) {
   // included) returns exactly the fields it always did.
   if (request.equipOxygenLpm != null) out.equipOxygenLpm = request.equipOxygenLpm;
   if ('case' in request) out.case = toPatientCase(request.case);
-  if ('requestDocuments' in request) out.requestDocuments = pickEach(request.requestDocuments, REQUEST_DOCUMENT_FIELDS);
+  if ('requestDocuments' in request) {
+    out.requestDocuments = pickEach(request.requestDocuments, REQUEST_DOCUMENT_FIELDS);
+    // Phase 5: this server remembers the app's upload ids, so a document list WITHOUT an id for a file the app sent really means the server does not have it. An older server
+    // never sends this, and the app then treats the answer as incomplete (it never assumes an upload is missing).
+    out.clientUploadIdSupported = true;
+  }
   return out;
 }
 

@@ -14,6 +14,9 @@ const { bitrixInboundRouter } = require('./modules/bitrix/bitrix-inbound.control
 const { corporateRegistrationRouter } = require('./modules/corporate-registration/corporate-registration.routes');
 
 const app = express();
+// Two response-header basics for every route: do not announce the framework, and never let a browser guess a content type.
+app.disable('x-powered-by');
+app.use((_req, res, next) => { res.set('X-Content-Type-Options', 'nosniff'); next(); });
 
 // What a failed request is allowed to leave in the log: the error's name and code, the status and
 // the method and path - nothing else. Never the message, stack, query arguments (Prisma errors

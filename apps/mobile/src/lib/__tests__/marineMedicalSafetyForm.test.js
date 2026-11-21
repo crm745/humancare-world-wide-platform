@@ -302,10 +302,10 @@ describe('Step 2: Date of Service, Medical History, Critical Level, Oxygen, repo
       expect(step2).not.toContain('multiple=');
       expect(read('components/request/fields.js')).toMatch(/onChange\(files\.filter/);
     });
-    test('the files go up one by one after the request is saved, through the same upload call; a failed file does not undo the request and is counted', () => {
+    test('the files go up one by one after the request is saved, through the same upload call; a refused or unconfirmed file does not undo the request and is listed on the next screen (Phase 5)', () => {
       const review = read('app/request/review.js');
-      expect(review).toContain("await apiUpload(`/requests/me/${request.id}/documents`, d.files[i], false,");
-      expect(review).toContain("t('req_upload_failed').replace('{n}', failed)");
+      expect(review).toContain('apiUpload(`/requests/me/${sent.id}/documents`, file, false, onProgress, fieldsFor(file)');
+      expect(review).toContain('await sendWithDocuments(buildBody);');
     });
   });
 });
@@ -384,15 +384,15 @@ describe('what is sent', () => {
 
   test('submitting goes through this builder only for marine, placed after Medical Value Travel and before the generic body', () => {
     const review = read('app/request/review.js');
-    expect(review).toContain("isMarineService(d.service) ? await apiPost('/requests', buildMarinePayload(d))");
+    expect(review).toContain('isMarineService(d.service) ? buildMarinePayload(d)'); // send() adds the idempotency key (Phase 4); the body is built lazily and sent by sendWithDocuments (Phase 5)
     expect(review.indexOf('buildMvtPayload(d)')).toBeLessThan(review.indexOf('buildMarinePayload(d)'));
     expect(review.indexOf('buildMarinePayload(d)')).toBeLessThan(review.indexOf('patientLocation: d.location,'));
-    for (const keep of ['buildMortalPayload(d)', 'buildHomePayload(d)', 'buildMvtPayload(d)', 'buildTelePayload(d)', 'buildPrivateCharterPayload(d)']) expect(review).toContain(keep);
+    for (const keep of ['buildMortalPayload(d)', 'buildHomePayload(d)', 'buildMvtPayload(d)', 'buildTelePayload(d)', 'buildPrivateCharterPayload(charterDraft)']) expect(review).toContain(keep);
   });
   test('errors and success are handled by the existing submit code: a server refusal keeps the form and shows the message, success opens the confirmation with the reference', () => {
     const review = read('app/request/review.js');
     expect(review).toContain('const fields = fieldErrorsFromError(err);');
-    expect(review).toContain('toast(err.message);');
+    expect(review).toContain('toast(errorText(err, t));');
     expect(review).toContain("navReplace({ pathname: '/request/submitted', params: { id: request.referenceNumber, requestId: request.id, service: serviceTitle } });");
     expect(review).toContain('} finally {');
     expect(review).toContain('setBusy(false);');
@@ -650,7 +650,7 @@ describe('the Marine service page figures', () => {
   });
   test('the page code that draws the figures is unchanged: it draws whatever the service lists, in a row of equal cards', () => {
     const page = read('app/service/[key].js');
-    expect(page).toContain('{local.stats.map((st) => (');
+    expect(page).toContain('{content.stats.map((st) => ('); // the same cards, now from the translated content (its English is local.stats)
     expect(page).toContain('className="flex-1 items-center justify-center px-1.5 py-3"');
   });
 });

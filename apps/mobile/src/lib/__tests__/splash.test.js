@@ -156,13 +156,13 @@ describe('the screen', () => {
   });
   test('it navigates in one place only, from the resolved state, and only once', () => {
     expect((screen.match(/navReplace\(/g) || []).length).toBe(1);
-    expect(screen).toContain('splashDecision({ status: authStatus, minElapsed, timedOut, navigated: navigated.current })');
+    expect(screen).toContain('splashDecision({ status: authStatus, savedSession, minElapsed, timedOut, navigated: navigated.current })');
     expect(screen).toContain('navigated.current = true;');
     expect(screen).toContain('navReplace(route);');
     expect(screen).toContain('const navigated = useRef(false);');
   });
   test('it reads the authentication state the app already keeps (the server-checked one), not the saved token', () => {
-    expect(screen).toContain('const { t, authStatus } = useApp();');
+    expect(screen).toContain('const { t, authStatus, savedSession } = useApp();');
     expect(screen).not.toContain('getAccessToken');
     expect(screen).not.toContain("from '../lib/session'");
   });

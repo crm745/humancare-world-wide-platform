@@ -56,7 +56,7 @@ export const FORM_FIELDS = {
 };
 // Draft keys that are not answers the person gave (internal bookkeeping), so they are not shown.
 export const NOT_SHOWN = [
-  'service', 'sentRequest', 'uploaded', 'uploadErrors', 'originCity', 'destCity', 'countryIso', 'phoneCountry', 'ccEdited', 'changingService',
+  'service', 'sentRequest', 'uploaded', 'uploadErrors', 'uploadUnknown', 'originCity', 'destCity', 'countryIso', 'phoneCountry', 'ccEdited', 'changingService',
   'mortalTransfer', // the single "Transfer type" choice of older builds: no longer asked (Transfer Scope and Transport Mode replaced it)
   'corpOfficeCountryIso', // the ISO code of the Office Country, which is shown by its name (corpOfficeCountry)
 ];

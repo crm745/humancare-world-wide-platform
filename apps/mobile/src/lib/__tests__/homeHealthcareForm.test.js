@@ -455,8 +455,8 @@ describe('the draft, the submit and the service swap', () => {
   });
   test('the submit goes through the Home Healthcare payload, and the reports upload like any other service\'s', () => {
     const review = read('app/request/review.js');
-    expect(review).toContain("isHomeService(d.service) ? await apiPost('/requests', buildHomePayload(d))");
-    expect(review).toContain("await apiUpload(`/requests/me/${request.id}/documents`");
+    expect(review).toContain('isHomeService(d.service) ? buildHomePayload(d)'); // send() adds the idempotency key (Phase 4); the body is built lazily and sent by sendWithDocuments (Phase 5)
+    expect(review).toContain("apiUpload(`/requests/me/${sent.id}/documents`"); // every service's files go up through the one sendWithDocuments path (Phase 5)
     expect(read('lib/privateCharter.js')).not.toMatch(/homecare/);
   });
   test('the wrappers hand off only "homecare"; every other service keeps its page', () => {

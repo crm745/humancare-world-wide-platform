@@ -10,19 +10,37 @@ export const SESSION_TIMEOUT_MS = 4000;
 
 export const HOME_ROUTE = '/home';
 export const START_ROUTE = '/welcome'; // Getting Started
+// A returning person whose saved session the server could not validate (no connection, the server down, or no answer in time) waits here, NOT on Getting Started: their
+// session is still saved and is checked again by itself when the connection returns. A public, static screen: it shows no account data (app/cant-connect.js).
+export const CANT_CONNECT_ROUTE = '/cant-connect';
 
 // Where a resolved authentication state goes.
 export const destinationFor = (status) => (status === 'authed' ? HOME_ROUTE : START_ROUTE);
 
+// Where the splash goes once the state is known, given whether credentials are SAVED on this device (lib/authState.js savedSession).
+// Only `authed` goes Home. A saved session that could not be validated goes to the Can't Connect screen; a new or logged-out person (nothing saved), a refused
+// session and a storage error (kept apart: it is not a network problem) go where they always went.
+export function startupDestination({ status, savedSession } = {}) {
+  if (status === 'unreachable' && savedSession === true) return CANT_CONNECT_ROUTE;
+  return destinationFor(status);
+}
+
 // What the splash should do now.
 //   status        the authentication state: 'loading' (still checking), 'authed', 'anon', 'unreachable' or 'error'
+//   savedSession  true when credentials are saved on this device, false when there are none, null/undefined when not known (see authState.js)
 //   minElapsed    MIN_SPLASH_MS has passed
 //   timedOut      SESSION_TIMEOUT_MS has passed
 //   navigated     the splash has already gone somewhere (it never goes twice)
 // Returns null (keep waiting) or the route to go to.
-export function splashDecision({ status, minElapsed = false, timedOut = false, navigated = false } = {}) {
+export function splashDecision({ status, savedSession, minElapsed = false, timedOut = false, navigated = false } = {}) {
   if (navigated) return null;
   if (!minElapsed) return null; // never earlier than the minimum
-  if (status === 'loading' || status === undefined || status === null) return timedOut ? START_ROUTE : null; // still checking: wait, but not for ever
-  return destinationFor(status); // known: go at once (the splash is not stretched when the check was quick or the minimum was the slow part)
+  if (status === 'loading' || status === undefined || status === null) {
+    // A saved session is still being checked: the splash STAYS (there is no separate "Connecting…" screen). The check has its own time limit (lib/api.js), so it ends with an answer: Home when the
+    // server says yes, Login when it refuses, and Can't Connect only when the check failed (startupDestination below).
+    if (savedSession === true) return null;
+    if (!timedOut) return null; // still checking: wait, but not for ever
+    return START_ROUTE; // nothing saved (or not known) goes to Getting Started
+  }
+  return startupDestination({ status, savedSession }); // known: go at once (the splash is not stretched when the check was quick or the minimum was the slow part)
 }

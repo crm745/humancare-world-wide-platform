@@ -18,7 +18,7 @@ describe('service detail: the live-text lookup', () => {
 
   it('the screen uses it, so only a missing record is silent', () => {
     const screen = fs.readFileSync(path.join(__dirname, '..', '..', 'app', 'service', '[key].js'), 'utf8');
-    expect(screen).toMatch(/if \(!isMissingLiveService\(err\)\) toast\(err\.message\)/);
+    expect(screen).toMatch(/if \(!isMissingLiveService\(err\)\) \{ setLiveFailed\(true\); toast\(errorText\(err, t\)\); \}/);
   });
 
   it('none of the app\'s service keys is a backend slug, which is why every lookup 404s today', () => {

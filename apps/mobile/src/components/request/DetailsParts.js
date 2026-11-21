@@ -4,6 +4,7 @@ import { ChevronLeft } from 'lucide-react-native';
 import Svg, { Line } from 'react-native-svg';
 import { COLORS } from '../../theme/colors';
 import { useApp } from '../../state/AppContext';
+import { ConnectionBanner } from '../network/ConnectionBanner';
 
 // The building blocks of the Request Details screen, drawn to the design: a section label above a white card, and a
 // label-over-value field whose value always wraps (nothing runs off the screen, however long).
@@ -89,6 +90,7 @@ export function StatusLayout({ bg, fg, Icon, title, text, children }) {
 // The header of Request Details and Tracking Details: white, 76 tall, a 1px bottom line, a 48x48 back button and a title.
 export function ScreenHeader({ title, backLabel, isRTL, onBack }) {
   return (
+    <>
     <View style={{ height: 76, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: C.line }}>
       <Pressable
         accessibilityRole="button" accessibilityLabel={backLabel} onPress={onBack}
@@ -98,5 +100,7 @@ export function ScreenHeader({ title, backLabel, isRTL, onBack }) {
       </Pressable>
       <Text accessibilityRole="header" numberOfLines={2} style={{ flex: 1, minWidth: 0, fontFamily: FONT[800], fontSize: 18, lineHeight: 24, color: C.navy }}>{title}</Text>
     </View>
+    <ConnectionBanner />
+    </>
   );
 }

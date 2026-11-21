@@ -7,10 +7,12 @@ import { Button, Field, Heading, Text } from '../components/ui';
 import { NationalityPhoneFields } from '../components/NationalityPhone';
 import { GenderField } from '../components/GenderField';
 import { SignupConsents, consentsBody } from '../components/SignupConsents';
+import { errorText } from '../lib/errorText';
 import { apiPost } from '../lib/api';
 import { codeStepFrom, getAuthStep, setAuthStep } from '../lib/authFlow';
 import { INITIAL_PHONE_STATE, dialOf, pickNationality, pickPhoneCountry } from '../lib/phoneCountry';
 import { isValidMobileNumber, isValidName, isValidNamePart } from '../lib/validators';
+import { NeedsInternet } from '../components/network/NeedsInternet';
 
 // Sign-up for someone new who tapped Google/Apple on the Login screen: a short step for what
 // the provider cannot give us (gender, nationality, mobile number) and the consents. The name
@@ -37,7 +39,7 @@ export default function CompleteProfile() {
   const submit = async () => {
     if (!ready) {
       setAttempted(true);
-      toast('Enter your name, gender, nationality and a valid mobile number, and accept the Terms and Conditions and Privacy Policy.');
+      toast(t('complete_fill_all'));
       return;
     }
     setBusy(true);
@@ -49,11 +51,11 @@ export default function CompleteProfile() {
         gender, nationality: where.nationality,
         consents: consentsBody(agreed),
       });
-      toast('OTP sent');
+      toast(t('change_otp_sent'));
       setAuthStep('register-otp', codeStepFrom(data));
       router.push('/register-otp');
     } catch (err) {
-      toast(err.message);
+      toast(errorText(err, t));
       // The 15-minute sign-up ticket ran out: start again from the Google/Apple button.
       if (err.code === 'ticket_invalid') router.replace('/login');
     } finally {
@@ -77,12 +79,12 @@ export default function CompleteProfile() {
           {!nameKnown && (
             <View className="flex-row gap-2.5">
               <Field
-                large required className="flex-1" label={t('field_first_name')} placeholder="First name" value={firstName} onChangeText={setFirstName}
-                autoCapitalize="words" error={(attempted || firstName) && !isValidNamePart(firstName) ? 'Enter your first name.' : undefined}
+                large required className="flex-1" label={t('field_first_name')} placeholder={t('field_first_name')} value={firstName} onChangeText={setFirstName}
+                autoCapitalize="words" error={(attempted || firstName) && !isValidNamePart(firstName) ? t('pd_err_first') : undefined}
               />
               <Field
-                large required className="flex-1" label={t('field_last_name')} placeholder="Last name" value={lastName} onChangeText={setLastName}
-                autoCapitalize="words" error={(attempted || lastName) && !isValidNamePart(lastName) ? 'Enter your last name.' : undefined}
+                large required className="flex-1" label={t('field_last_name')} placeholder={t('field_last_name')} value={lastName} onChangeText={setLastName}
+                autoCapitalize="words" error={(attempted || lastName) && !isValidNamePart(lastName) ? t('pd_err_last') : undefined}
               />
             </View>
           )}
@@ -95,7 +97,8 @@ export default function CompleteProfile() {
           />
         </View>
         <SignupConsents value={agreed} onChange={setAgreed} />
-        <Button large title={t('send_otp_btn')} dimmed={!ready} loading={busy} onPress={submit} className="mt-[26px]" />
+        <Button large title={t('send_otp_btn')} dimmed={!ready} loading={busy} needsNetwork onPress={submit} className="mt-[26px]" />
+        <NeedsInternet />
       </Body>
     </Screen>
   );

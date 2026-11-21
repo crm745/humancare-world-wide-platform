@@ -76,7 +76,7 @@ describe('A. Personal Information', () => {
   test('a failed save keeps the typed values and the saved account, and says why', () => {
     const save = screen.slice(screen.indexOf('const save = async'), screen.indexOf('// Email and mobile change only'));
     expect(save.indexOf('setUser(updated)')).toBeGreaterThan(save.indexOf('await apiPatch'));
-    expect(save).toContain('setSaveError(err.message)');
+    expect(save).toContain('setSaveError(errorText(err, t))');
     expect(save).toContain('setSaving(false)');
     expect(save.slice(save.indexOf('catch (err)'), save.indexOf('finally'))).not.toContain('setUser');
   });
@@ -167,7 +167,7 @@ describe('screen states', () => {
     expect(screen).toContain("{loading && gate.visible ? <FormSkeleton label={t('sk_loading_profile')} fields={6} /> : null}");
     expect(screen).not.toContain('LoadingState');
     expect(screen).not.toContain('RefreshControl'); // a form is never pulled to refresh
-    expect(screen).toContain("t('pd_try_again')");
+    expect(screen).toContain('<LoadFailure titleKey="lf_title_profile"');
     expect(screen).toContain("t('pd_nothing_yet')");
   });
   test('no user-facing string is hard-coded in the screen', () => {

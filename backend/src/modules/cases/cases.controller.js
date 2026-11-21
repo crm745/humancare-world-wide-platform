@@ -4,6 +4,7 @@ const {
   createCaseByCorporate,
 } = require('./cases.service');
 const { addDocumentToCase } = require('../documents/documents.service');
+const { scanBeforeStore } = require('../documents/legacy-scan');
 const { toSafeDocument } = require('../documents/document-response');
 const { sendMedicalReportToBitrix } = require('../bitrix/bitrix.service');
 
@@ -48,11 +49,14 @@ async function uploadCaseDocument(req, res, next) {
     if (caseRecord.corporateId !== req.user.corporateId) {
       return res.status(403).json({ error: 'This case was not submitted by your organization.' });
     }
+    // Scan before store: the row exists only after a confirmed clean verdict (infected: 422, quarantined; scanner down or no verdict: 503, deleted; see documents/legacy-scan.js).
+    const scan = await scanBeforeStore(req.file);
     const document = await addDocumentToCase(caseRecord.id, {
       type: req.body.type,
       name: req.file.originalname,
       fileUrl: `/uploads/${req.file.filename}`,
       fileSizeBytes: req.file.size,
+      scan,
     });
     // Other document types (passport, ID…) have their own Bitrix fields; only the report is mapped so far.
     if (document.type === 'Medical Report') await sendMedicalReportToBitrix(caseRecord.bitrixLeadId, document);

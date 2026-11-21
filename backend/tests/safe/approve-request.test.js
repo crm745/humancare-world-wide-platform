@@ -115,3 +115,33 @@ describe('a request that has its Case', () => {
 test('none of the writes the approval could make is outside the list this suite watches', () => {
   expect(WRITES).toContain('case.create'); // keeps the list honest if a write is ever added to the fake
 });
+
+// Legacy document scan protection: the copy in `documents` inherits the source's scan record, but only a CONFIRMED one.
+describe('the document copied into the Case', () => {
+  const scannedAt = new Date('2030-01-01T10:00:00Z');
+  const digest = 'a'.repeat(64);
+
+  test('a clean, checksummed source passes its scan record (digest, status, engine, time) to the copy', async () => {
+    const tx = setUp({ request: inReview, documents: [{ ...goodDocument, sha256: digest, scanEngine: 'clamav', scannedAt }] });
+    await approveRequest({ requestId: 61, adminId: 3 });
+    expect(tx.document.create.mock.calls[0][0].data).toMatchObject({ caseId: 71, type: 'Medical Report', name: 'report.pdf', fileUrl: '/uploads/stored.pdf', sha256: digest, scanStatus: 'clean', scanEngine: 'clamav', scannedAt });
+  });
+
+  test('a source without the digest or the engine is copied with NO scan record (NULL = not clean), never as a clean legacy document', async () => {
+    for (const source of [{ ...goodDocument }, { ...goodDocument, sha256: digest }, { ...goodDocument, scanEngine: 'clamav' }]) {
+      const tx = setUp({ request: inReview, documents: [source] });
+      await approveRequest({ requestId: 61, adminId: 3 });
+      const data = tx.document.create.mock.calls[0][0].data;
+      expect(data).not.toHaveProperty('scanStatus');
+      expect(data).not.toHaveProperty('sha256');
+    }
+  });
+
+  test('a source that is not clean cannot be approved at all, so no copy is ever made from it', async () => {
+    for (const scanStatus of ['pending', 'error', 'infected', 'failed']) {
+      const tx = setUp({ request: inReview, documents: [{ ...goodDocument, scanStatus, sha256: digest, scanEngine: 'clamav' }] });
+      await expect(approveRequest({ requestId: 61, adminId: 3 })).rejects.toMatchObject({ publicCode: 'approval_blocked' });
+      expect(tx.document.create).not.toHaveBeenCalled();
+    }
+  });
+});

@@ -36,41 +36,14 @@ describe('places and times', () => {
     expect(V.whenText(null)).toBe('');
     expect(V.whenText('nonsense')).toBe('');
   });
-  test('"Updated" is the time of the latest stage event, whatever the order; none when there is no event', () => {
+  test('"Last updated" is the time of the latest stage event, whatever the order; else the case\'s / the request\'s own updatedAt; none when there is nothing', () => {
     const request = ground('in_progress', [ev('in_progress', '2026-11-15T06:45:00'), ev('submitted', '2026-11-13T17:37:00'), { stage: 'x', occurredAt: 'bad' }]);
-    expect(V.latestUpdate(request)).toBe('15 Nov, 06:45');
-    expect(V.latestUpdate(ground('submitted'))).toBe('');
-    expect(V.latestUpdate(null)).toBe('');
-  });
-});
-
-describe('the chip, the segments and the step the card talks about', () => {
-  test('the chip is at 0 at the first step and 1 at the last, in between by index / (steps - 1)', () => {
-    expect(V.chipPosition({ index: 0, total: 4 })).toBe(0);
-    expect(V.chipPosition({ index: 2, total: 4 })).toBeCloseTo(2 / 3, 5);
-    expect(V.chipPosition({ index: 3, total: 4 })).toBe(1);
-    expect(V.chipPosition({ index: 3, total: 6 })).toBeCloseTo(0.6, 5);
-    expect(V.chipPosition({ index: 0, total: 1 })).toBe(0);
-    expect(V.chipPosition({ index: 9, total: 4 })).toBe(1);
-  });
-  test('a cancelled request keeps the chip half way, as the generic page always did', () => {
-    expect(V.chipPosition({ index: 3, total: 4, cancelled: true })).toBe(0.5);
-  });
-  test('segments: one per step, up to and including the current lit; a cancelled request\'s reached ones are dimmer', () => {
-    expect(V.segmentsOf({ total: 4, index: 2 })).toEqual(['on', 'on', 'on', 'off']);
-    expect(V.segmentsOf({ total: 5, index: 4 })).toEqual(['on', 'on', 'on', 'on', 'on']);
-    expect(V.segmentsOf({ total: 4, index: 1, cancelled: true })).toEqual(['dim', 'dim', 'off', 'off']);
-    expect(V.segmentsOf({ total: 0, index: 0 })).toEqual([]);
-  });
-  test('the current step: the one under way, otherwise the last finished, otherwise the first; a cancelled stop wins', () => {
-    const s = (state, stopped = false) => ({ state, stopped });
-    expect(V.currentIndexOf([s('done'), s('done'), s('current'), s('pending')])).toBe(2);
-    expect(V.currentIndexOf([s('done'), s('pending'), s('pending')])).toBe(0);
-    expect(V.currentIndexOf([s('done'), s('done'), s('pending')])).toBe(1);
-    expect(V.currentIndexOf([s('done'), s('done'), s('done')])).toBe(2);
-    expect(V.currentIndexOf([s('pending'), s('pending')])).toBe(0);
-    expect(V.currentIndexOf([s('done'), s('pending', true), s('pending')])).toBe(1);
-    expect(V.currentIndexOf([])).toBe(0);
+    expect(V.latestUpdateAt(request)).toBe('2026-11-15T06:45:00');
+    expect(V.latestUpdateAt({ ...ground('submitted'), updatedAt: '2026-11-16T10:00:00' })).toBe('2026-11-16T10:00:00');
+    expect(V.latestUpdateAt({ ...ground('submitted'), case: { updatedAt: '2026-11-17T10:00:00', stageEvents: [] }, updatedAt: '2026-11-16T10:00:00' })).toBe('2026-11-17T10:00:00');
+    expect(V.latestUpdateAt({ ...ground('submitted'), updatedAt: 'bad' })).toBe('');
+    expect(V.latestUpdateAt(ground('submitted'))).toBe('');
+    expect(V.latestUpdateAt(null)).toBe('');
   });
 });
 
@@ -84,12 +57,8 @@ describe('a Private Charter request', () => {
     expect(d.steps.map((s) => s.description)).toEqual(['We have your request', 'Your flight has been scheduled', 'Your transfer is under way', 'The mission is complete']);
     expect(d.steps.map((s) => s.state)).toEqual(['done', 'done', 'current', 'pending']);
     expect(d.steps.map((s) => s.time)).toEqual(['13 Nov, 12:07', '14 Nov, 05:50', '15 Nov, 01:15', '']);
-    expect(d.total).toBe(4);
-    expect(d.index).toBe(2);
-    expect(d.currentTitle).toBe('Mission in progress');
-    expect(d.position).toBeCloseTo(2 / 3, 5);
-    expect(d.segments).toEqual(['on', 'on', 'on', 'off']);
-    expect(d.updated).toBe('15 Nov, 01:15');
+    expect(d.steps).toHaveLength(4);
+    expect(d.updatedAt).toBe('2026-11-15T01:15:00');
     expect(d.cancelled).toBe(false);
   });
   test('the header facts: reference, base service name, the app-wide status, the two cities, the icon\'s key', () => {
@@ -104,33 +73,25 @@ describe('a Private Charter request', () => {
   });
   test('the step count follows the model: three when scheduling was skipped, more in the review workflow', () => {
     const skipped = charter('in_progress', 'in_progress', [ev('submitted', '2026-11-13T12:07:00'), ev('in_progress', '2026-11-15T01:15:00')]);
-    expect(V.buildTrackingDetails(skipped, t).total).toBe(3);
+    expect(V.buildTrackingDetails(skipped, t).steps).toHaveLength(3);
     const review = charter('submitted', 'submitted', [ev('submitted', '2026-11-13T12:07:00')], { reviewStatus: 'approved', submittedAt: '2026-11-13T13:00:00', reviewedAt: '2026-11-13T14:00:00' });
     const model = buildPrivateCharterTracking(review);
     const d = V.buildTrackingDetails(review, t);
-    expect(d.total).toBe(model.milestones.filter((m) => m.state !== 'not_applicable').length);
-    expect(d.total).toBeGreaterThanOrEqual(5);
+    expect(d.steps).toHaveLength(model.milestones.filter((m) => m.state !== 'not_applicable').length);
+    expect(d.steps.length).toBeGreaterThanOrEqual(5);
     expect(d.steps.map((s) => s.key)).toEqual(expect.arrayContaining(['documents_review', 'request_approved']));
   });
   test('a request just received: no step is under way, so the last finished one is the current (its marker stays a check)', () => {
     const d = V.buildTrackingDetails(charter('submitted', 'submitted', [ev('submitted', '2026-11-13T12:07:00')]), t);
     expect(d.steps[0].state).toBe('done');
     expect(d.steps.some((s) => s.state === 'current')).toBe(false);
-    expect(d.index).toBe(0);
-    expect(d.currentTitle).toBe('Request received');
-    expect(d.position).toBe(0);
-    expect(d.segments[0]).toBe('on');
   });
   test('completed: every step done, the last is the current one, the chip at the end, every segment lit', () => {
     const done = charter('completed', 'completed', [ev('submitted', '2026-11-13T12:07:00'), ev('scheduled', '2026-11-14T05:50:00'), ev('in_progress', '2026-11-15T01:15:00'), ev('completed', '2026-11-15T09:00:00')]);
     const d = V.buildTrackingDetails(done, t);
     expect(d.steps.every((s) => s.state === 'done')).toBe(true);
-    expect(d.index).toBe(d.total - 1);
-    expect(d.currentTitle).toBe('Completed');
-    expect(d.position).toBe(1);
-    expect(d.segments.every((s) => s === 'on')).toBe(true);
     expect(d.badge.label).toBe('Completed');
-    expect(d.updated).toBe('15 Nov, 09:00');
+    expect(d.updatedAt).toBe('2026-11-15T09:00:00');
   });
   test('cancelled: the steps before are done, the stop step reads "Cancelled" with no ring and no check, later steps stay hidden', () => {
     const cancelled = charter('cancelled', 'cancelled', [ev('submitted', '2026-11-13T12:07:00'), ev('scheduled', '2026-11-14T05:50:00'), ev('cancelled', '2026-11-14T08:00:00')]);
@@ -142,11 +103,7 @@ describe('a Private Charter request', () => {
     expect(stop).toMatchObject({ title: 'Cancelled', state: 'pending', stopped: true });
     expect(d.steps.slice(0, -1).every((s) => s.state === 'done')).toBe(true);
     expect(d.steps.some((s) => s.state === 'current')).toBe(false);
-    expect(d.index).toBe(d.steps.length - 1);
-    expect(d.segments.every((s) => s === 'dim' || s === 'off')).toBe(true);
-    expect(d.segments.filter((s) => s === 'on')).toHaveLength(0);
     expect(d.badge.label).toBe('Cancelled');
-    expect(d.position).toBe(0.5);
     expect(stop.time).toBe('14 Nov, 08:00');
   });
   test('while changes are requested: the Admin\'s message and the way to the request are carried; otherwise neither', () => {
@@ -164,14 +121,11 @@ describe('a Private Charter request', () => {
 describe('any other request (the generic model)', () => {
   test('submitted: the model\'s five steps, the first current', () => {
     const request = ground('submitted', [ev('submitted', '2026-11-13T12:07:00')]);
-    const view = trackingView(request);
     const d = V.buildTrackingDetails(request, t);
     expect(d.steps.map((s) => s.key)).toEqual(TRACKING_STEPS.map((s) => s.key));
     expect(d.steps.map((s) => s.title)).toEqual(TRACKING_STEPS.map((s) => t(s.title)));
     expect(d.steps.map((s) => s.description)).toEqual(TRACKING_STEPS.map((s) => t(s.sub)));
     expect(d.steps.map((s) => s.state)).toEqual(['current', 'pending', 'pending', 'pending', 'pending']);
-    expect(d.index).toBe(view.index);
-    expect(d.total).toBe(5);
     expect(d.steps[0].time).toBe('13 Nov, 12:07');
     expect(d.steps[1].time).toBe('');
     expect(d.badge.label).toBe('Submitted');
@@ -182,19 +136,15 @@ describe('any other request (the generic model)', () => {
     const request = ground('in_progress', [ev('submitted', '2026-11-13T12:07:00'), ev('in_progress', '2026-11-14T08:15:00')]);
     const view = trackingView(request);
     const d = V.buildTrackingDetails(request, t);
-    expect(d.index).toBe(view.index);
+    const index = d.steps.findIndex((s) => s.state === 'current');
+    expect(index).toBe(view.index);
     expect(d.steps.map((s) => s.state)).toEqual(view.steps.map((s) => (s.state === 'done' ? 'done' : s.state === 'now' ? 'current' : 'pending')));
-    expect(d.steps[d.index].time).toBe('14 Nov, 08:15');
-    expect(d.currentTitle).toBe(t(TRACKING_STEPS[view.index].title));
-    expect(d.position).toBeCloseTo(view.index / 4, 5);
+    expect(d.steps[index].time).toBe('14 Nov, 08:15');
   });
   test('completed: every step done, the chip at the end, every segment lit', () => {
     const d = V.buildTrackingDetails(ground('completed', [ev('submitted', '2026-11-13T12:07:00'), ev('completed', '2026-11-15T09:00:00')]), t);
     expect(d.steps.every((s) => s.state === 'done')).toBe(true);
-    expect(d.index).toBe(4);
-    expect(d.position).toBe(1);
-    expect(d.segments).toEqual(['on', 'on', 'on', 'on', 'on']);
-    expect(d.currentTitle).toBe(t(TRACKING_STEPS[4].title));
+
   });
   test('cancelled: the reached step reads "Cancelled", the later steps stay pending, no ring, dimmed segments', () => {
     const request = ground('cancelled', [ev('submitted', '2026-11-13T12:07:00'), ev('payment', '2026-11-14T06:00:00')]);
@@ -204,10 +154,7 @@ describe('any other request (the generic model)', () => {
     expect(d.steps.map((s) => s.state)).toEqual(['done', 'done', 'pending', 'pending', 'pending']);
     expect(d.steps[2]).toMatchObject({ title: 'Cancelled', stopped: true });
     expect(d.steps.some((s) => s.state === 'current')).toBe(false);
-    expect(d.index).toBe(2);
-    expect(d.segments).toEqual(['dim', 'dim', 'dim', 'off', 'off']);
     expect(d.badge.label).toBe('Cancelled');
-    expect(d.position).toBe(0.5);
   });
   test('a long name wraps instead of being cut: the texts are passed whole', () => {
     const long = 'A'.repeat(150);
@@ -217,17 +164,14 @@ describe('any other request (the generic model)', () => {
 });
 
 describe('the route', () => {
-  test('one side missing: only the other side is kept, and the line is for the screen to hide', () => {
+  test('one side missing: there is no route (the banner is titled by the service); the one city that is known is the area', () => {
     const noTo = V.buildTrackingDetails(ground('submitted', [], { destination: '' }), t);
     expect(noTo.from).toBe('Pune');
     expect(noTo.to).toBe('');
-    expect(noTo.hasRoute).toBe(true);
+    expect(noTo.hasRoute).toBe(false);
+    expect(noTo.area).toBe('Pune, Maharashtra, India');
     const none = V.buildTrackingDetails(ground('submitted', [], { origin: '', destination: null }), t);
     expect(none.hasRoute).toBe(false);
-  });
-  test('the screen reader label: the route, the step and its name', () => {
-    expect(V.buildTrackingDetails(HALF_WAY, t).accessibilityLabel).toBe('Mumbai to Delhi, step 3 of 4, Mission in progress');
-    expect(V.buildTrackingDetails(ground('submitted', [], { destination: '' }), t).accessibilityLabel).toMatch(/^Pune, step 1 of 5, /);
   });
   test('no request: nothing', () => {
     expect(V.buildTrackingDetails(null, t)).toBeNull();

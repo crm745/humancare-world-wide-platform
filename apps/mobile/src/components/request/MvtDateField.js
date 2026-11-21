@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Platform, Pressable, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar } from 'lucide-react-native';
+import { useApp } from '../../state/AppContext';
 import { FieldLabel, Text } from '../ui';
 import { Sheet } from '../widgets';
 import { dateToString, stringToDate, todayDate, todayString } from '../../lib/medicalValueTravel';
@@ -12,6 +13,7 @@ import { dateToString, stringToDate, todayDate, todayString } from '../../lib/me
 // has a native date input (its min is not enforced on typing, so the form's own rule judges the value too).
 // Medical Value Travel's own component: the other services' date fields are left exactly as they are.
 export function MvtDateField({ label, hint, clearLabel, value, onChange, error }) {
+  const { t } = useApp();
   const [open, setOpen] = useState(false);
   const earliest = todayDate();
   const clear = value ? (
@@ -53,10 +55,10 @@ export function MvtDateField({ label, hint, clearLabel, value, onChange, error }
     <View>
       <FieldLabel>{label}</FieldLabel>
       <Pressable
-        onPress={() => setOpen(true)} accessibilityRole="button" accessibilityLabel={`${label}, ${value || 'Select a date'}`}
+        onPress={() => setOpen(true)} accessibilityRole="button" accessibilityLabel={`${label}, ${value || t('ph_select_date')}`}
         className="min-h-[48px] flex-row items-center justify-between gap-1 rounded-[10px] border-[1.5px] border-field bg-input px-3 py-3"
       >
-        <Text className={`text-[15px] ${value ? 'text-ink' : 'text-faint'}`}>{value || 'Select a date'}</Text>
+        <Text className={`text-[15px] ${value ? 'text-ink' : 'text-faint'}`}>{value || t('ph_select_date')}</Text>
         <Calendar size={16} color="#97A4B8" />
       </Pressable>
       {note}

@@ -1,14 +1,20 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Pressable, View } from 'react-native';
+import { RefreshCw } from 'lucide-react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../state/AppContext';
+import { useNetwork } from '../../state/NetworkContext';
 import { SERVICE_TILES } from '../../data/mock';
 import { goBack } from '../../lib/nav';
 import { Screen, TopBar } from '../layout';
 import { Button, Text } from '../ui';
 import { ServiceIconTile } from '../home/ServiceIcon';
 import { KeyboardBar, KeyboardScroll } from '../keyboard';
+import { ConnectionBanner } from '../network/ConnectionBanner';
+import { ProgressButton } from '../network/ProgressButton';
+import { Collapse } from '../network/Collapse';
+import { NETWORK_ICONS } from '../network/icons';
 
 // The New Request form: 1 Patient -> 2 Medical -> 3 Review. Every step shares this frame:
 // header with Save draft, the step bar, the chosen service, the scrolling fields and the
@@ -83,11 +89,17 @@ function ServiceCard() {
 // with an error scrolls to that field and runs `onInvalid` so the step starts showing errors.
 // `serverAnchor` is the id of the first field the server refused on this step (or null): when it
 // appears, the page scrolls to that field so the message is not left off screen.
+// `needsNetwork`: only the step that SENDS (the review's Submit) needs the internet. The earlier steps only collect information (and save the encrypted draft), so Continue works offline; the form never
+// asks the server to move on. `notice` (optional): a card shown above the button (components/network/StatusNotice.js), for what happened to the last send. `progress` (0..1, optional): while files upload the button itself is the
+// progress bar (components/network/ProgressButton.js). While offline, a line above the button says why it is pale.
 // `prepare()` (optional, async) runs first when Continue is tapped and may return a patch of draft values it has just settled (the step uses it to
 // match a city typed by hand to the verified list); `firstError(patch)` then judges the draft with that patch applied.
-export function RequestFrame({ step, children, firstError, onInvalid, onNext, prepare, nextKey, label, busy, buttonClassName, showService = true, serverAnchor = null }) {
-  const { t, toast, updateDraft } = useApp();
+export function RequestFrame({ step, children, firstError, onInvalid, onNext, prepare, nextKey, label, busy, buttonClassName, showService = true, serverAnchor = null, needsNetwork = false, notice = null, progress = null, refreshIcon = false }) {
+  const { t, toast, updateDraft, setFormStep } = useApp();
+  const { isOffline } = useNetwork();
+  const OfflineIcon = NETWORK_ICONS.wifiOff;
   const insets = useSafeAreaInsets();
+  useEffect(() => { setFormStep(step); }, [step, setFormStep]); // the draft (lib/draftStore.js) remembers which step the person was on
   // The Continue bar rides on top of the keyboard; the scroll area keeps a focused field above it.
   const [barHeight, setBarHeight] = useState(0);
   const [preparing, setPreparing] = useState(false);
@@ -132,8 +144,9 @@ export function RequestFrame({ step, children, firstError, onInvalid, onNext, pr
     <Screen bg="bg-canvas">
       {/* On a wide screen (tablet, browser) the form stays one centred column, like Home. */}
       <View style={{ flex: 1, width: '100%', maxWidth: 560, alignSelf: 'center' }}>
-        <TopBar title={t('req_title')} onBack={goBack} />
+        <TopBar title={t('req_title')} onBack={goBack} banner={false} />
         <StepBar step={step} />
+        <ConnectionBanner />
         <KeyboardScroll
           ref={scrollRef} className="flex-1" footerHeight={barHeight} showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 24 }}
@@ -145,7 +158,19 @@ export function RequestFrame({ step, children, firstError, onInvalid, onNext, pr
         </KeyboardScroll>
         <KeyboardBar onLayout={(e) => setBarHeight(Math.round(e.nativeEvent.layout.height))}>
           <View className="border-t border-line bg-white px-[18px] pt-3" style={{ paddingBottom: Math.max(insets.bottom, 12) }}>
-            <Button title={label ?? t(nextKey)} onPress={next} loading={busy || preparing} className={buttonClassName} />
+            {notice ? <View style={{ marginBottom: 12 }}>{notice}</View> : null}
+            {/* The line expands and fades in (180 ms) when the phone goes offline, and the reverse when the connection returns. */}
+            <Collapse show={!!(needsNetwork && isOffline)}>
+              <View style={{ paddingBottom: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <OfflineIcon size={16} color="#5B6B84" strokeWidth={2.2} />
+                <Text style={{ fontSize: 13, lineHeight: 18, color: '#5B6B84' }}>{t('net_submit_offline')}</Text>
+              </View>
+            </Collapse>
+            {progress !== null ? (
+              <ProgressButton title={label ?? t(nextKey)} progress={progress} />
+            ) : (
+              <Button title={label ?? t(nextKey)} onPress={next} loading={busy || preparing} needsNetwork={needsNetwork} className={buttonClassName} icon={refreshIcon ? <RefreshCw size={19} color="#FFFFFF" strokeWidth={2.4} /> : undefined} />
+            )}
           </View>
         </KeyboardBar>
       </View>

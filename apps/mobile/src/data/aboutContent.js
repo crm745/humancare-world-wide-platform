@@ -2,7 +2,8 @@
 //
 // The introduction is the official text approved by HumanCare senior management (the four paragraphs of "App Introduction"). It is shown EXACTLY as supplied:
 // the wording, punctuation, figures and terminology are not rewritten, shortened or added to (including "across the India", which is how the approved text reads).
-// It is the only content of the About page. English only for now: this text is not in the translation files (it is translated separately).
+// It is the only content of the About page. This English text is the approved original; the other languages are its translations in data/i18n.json (about_name, about_p1..about_p4), which
+// management must approve before release. The page shows t('about_p<n>'); a test keeps the English dictionary text identical to this file.
 
 // The approved text, one entry per paragraph, in order. Do not edit without new approval.
 export const ABOUT_INTRO = {

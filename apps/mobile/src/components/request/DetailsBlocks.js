@@ -173,8 +173,10 @@ export function Medical({ medical, t }) {
   return medicalRows(medical, t, false).length ? <Section title={t('rd_medical')}>{card}</Section> : null;
 }
 
-export function DocumentRow({ doc, first, t, onOpen }) {
+export function DocumentRow({ doc, first, t, onOpen, offline = false }) {
   const Icon = doc.isImage ? ImageIcon : FileText;
+  // Offline a document cannot be opened: its meta line says so ("PDF · 1.2 MB · Opens when you're online") and a tap does nothing.
+  const meta = [doc.meta, offline && doc.openable ? t('net_opens_online') : null].filter(Boolean).join(' · ');
   const body = (
     <>
       <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: doc.isImage ? '#E0F5F4' : COLORS.primarySoft, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -182,16 +184,16 @@ export function DocumentRow({ doc, first, t, onOpen }) {
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <AlignedText numberOfLines={1} ellipsizeMode="tail" style={{ fontFamily: FONT[600], fontSize: 14.5, lineHeight: 20, color: C.ink }}>{doc.name}</AlignedText>
-        {doc.meta ? <AlignedText style={[{ fontFamily: FONT[400], fontSize: 12.5, lineHeight: 17, color: C.muted }, WRAP]}>{doc.meta}</AlignedText> : null}
+        {meta ? <AlignedText style={[{ fontFamily: FONT[400], fontSize: 12.5, lineHeight: 17, color: C.muted }, WRAP]}>{meta}</AlignedText> : null}
         {doc.statusLabel ? <AlignedText style={{ marginTop: 2, fontFamily: FONT[700], fontSize: 12.5, lineHeight: 17, color: doc.status === 'approved' ? '#0B6564' : ['rejected', 'unsafe', 'scan_failed'].includes(doc.status) ? '#C53030' : C.blueText }}>{doc.statusLabel}</AlignedText> : null}
         {doc.reason ? <AlignedText style={[{ marginTop: 2, fontFamily: FONT[400], fontSize: 12.5, lineHeight: 18, color: '#C53030' }, WRAP]}>{doc.reason}</AlignedText> : null}
       </View>
-      {doc.openable ? <ChevronRight size={20} color="#8A97AB" /> : null}
+      {doc.openable && !offline ? <ChevronRight size={20} color="#8A97AB" /> : null}
     </>
   );
   const box = { minHeight: 66, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 16, borderTopWidth: first ? 0 : 1, borderTopColor: C.divider };
   if (!doc.openable) return <View style={box}>{body}</View>;
   return (
-    <PressBox accessibilityRole="button" accessibilityLabel={t('rd_open_document', { name: doc.name })} onPress={onOpen} style={({ pressed }) => [box, { opacity: pressed ? 0.8 : 1 }]}>{body}</PressBox>
+    <PressBox accessibilityRole="button" accessibilityState={{ disabled: offline }} accessibilityLabel={offline ? `${doc.name}, ${t('net_opens_online')}` : t('rd_open_document', { name: doc.name })} onPress={onOpen} style={({ pressed }) => [box, { opacity: pressed ? 0.8 : 1 }]}>{body}</PressBox>
   );
 }

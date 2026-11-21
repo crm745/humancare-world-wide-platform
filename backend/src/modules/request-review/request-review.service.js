@@ -17,6 +17,8 @@ const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
 const { URGENCY_TO_CASE } = require('../../common/constants/request.constants');
 const clamav = require('../../integrations/clamav/clamav');
 const { requestRecordData } = require('../requests/request-record');
+const { findOwnedByClientRequestId, isUniqueViolation } = require('../requests/client-request-id');
+const { sameReviewFile } = require('../requests/client-upload-id');
 const { enqueueDealCreation } = require('../bitrix/deal-outbox');
 const { appendAuditLog } = require('../../common/audit/business-audit');
 const {
@@ -110,32 +112,43 @@ async function createCaseForRequest(tx, request, { actorType, actorId, note }) {
 
 // `data` is what the Private Charter validator returned. Request, permanent reference, first event, Case, its
 // stage event and its Bitrix Deal-creation records are saved together or not at all. No Bitrix call is made here.
-async function createReviewRequest(userId, data) {
-  return prisma.$transaction(async (tx) => {
-    const created = await tx.serviceRequest.create({
-      data: {
-        ...requestRecordData(userId, data),
-        referenceNumber: `TEMP-${Date.now()}-${randomSuffix()}`,
-        status: 'submitted',
-        reviewStatus: REQUEST_STATUS.AWAITING_DOCUMENTS,
-      },
+// `clientRequestId` (optional): the same submission arriving again, or at the same moment twice, is saved once. The loser of the unique index rolls back everything it began
+// (request, events, Case, Deal records) and gets the first one back, so no second request, Case, event or Bitrix Deal record exists.
+async function createReviewRequest(userId, data, { clientRequestId } = {}) {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const created = await tx.serviceRequest.create({
+        data: {
+          ...requestRecordData(userId, data),
+          ...(clientRequestId && { clientRequestId }),
+          referenceNumber: `TEMP-${Date.now()}-${randomSuffix()}`,
+          status: 'submitted',
+          reviewStatus: REQUEST_STATUS.AWAITING_DOCUMENTS,
+        },
+      });
+      const request = await tx.serviceRequest.update({ where: { id: created.id }, data: { referenceNumber: `REQ-${1000 + created.id}` } });
+      await appendEvent(tx, {
+        serviceRequestId: request.id, action: ACTION.REQUEST_CREATED, toStatus: REQUEST_STATUS.AWAITING_DOCUMENTS,
+        actorType: 'patient', actorId: userId, detail: { referenceNumber: request.referenceNumber },
+      });
+      const caseRecord = await createCaseForRequest(tx, request, {
+        actorType: 'patient', actorId: userId, note: `Case opened automatically when ${request.referenceNumber} was submitted.`,
+      });
+      await appendEvent(tx, {
+        serviceRequestId: request.id, action: ACTION.CASE_CREATED, actorType: 'system',
+        detail: { caseId: caseRecord.id, caseReference: caseRecord.referenceNumber },
+      });
+      // The Bitrix Deal for this Case: recorded now, sent later by the worker (once it is switched on).
+      await enqueueDealCreation(tx, caseRecord, request);
+      return request;
     });
-    const request = await tx.serviceRequest.update({ where: { id: created.id }, data: { referenceNumber: `REQ-${1000 + created.id}` } });
-    await appendEvent(tx, {
-      serviceRequestId: request.id, action: ACTION.REQUEST_CREATED, toStatus: REQUEST_STATUS.AWAITING_DOCUMENTS,
-      actorType: 'patient', actorId: userId, detail: { referenceNumber: request.referenceNumber },
-    });
-    const caseRecord = await createCaseForRequest(tx, request, {
-      actorType: 'patient', actorId: userId, note: `Case opened automatically when ${request.referenceNumber} was submitted.`,
-    });
-    await appendEvent(tx, {
-      serviceRequestId: request.id, action: ACTION.CASE_CREATED, actorType: 'system',
-      detail: { caseId: caseRecord.id, caseReference: caseRecord.referenceNumber },
-    });
-    // The Bitrix Deal for this Case: recorded now, sent later by the worker (once it is switched on).
-    await enqueueDealCreation(tx, caseRecord, request);
-    return request;
-  });
+  } catch (err) {
+    if (clientRequestId && isUniqueViolation(err)) {
+      const existing = await findOwnedByClientRequestId(prisma, userId, clientRequestId);
+      if (existing) return existing;
+    }
+    throw err;
+  }
 }
 
 // ---- patient uploads --------------------------------------------------------------------------
@@ -145,14 +158,26 @@ async function createReviewRequest(userId, data) {
 // document as replaced; the earlier row is kept untouched apart from that mark. The first document
 // moves the request into review, and any upload while changes were requested puts it back into
 // review. The file is removed again if anything fails.
-async function addPatientDocument({ userId, requestId, file, replacesDocumentId }) {
+//
+// Phase 5: an optional `clientUploadId` (the app's id for this logical upload) makes the upload idempotent. It is looked up under the request's row lock, AFTER the owner check and
+// BEFORE anything else happens, so a repeat returns the original document ({ ...document, replayed: true }) without creating a second row, replacing anything, counting against the
+// limit, writing an event or changing the request's status. The caller must then NOT scan it again (the original's scan, or the worker's sweep, owns that). The newly uploaded file
+// of a repeat is deleted. Two repeats at the same instant are serialised by the lock, and the unique index is the final protection.
+async function addPatientDocument({ userId, requestId, file, replacesDocumentId, clientUploadId }) {
   try {
     const sha256 = await hashFile(file.path);
     const id = numericId(requestId, 'The request');
-    return await prisma.$transaction(async (tx) => {
+    const outcome = await prisma.$transaction(async (tx) => {
       const request = await lockRequest(tx, id);
       if (!request || request.userId !== userId) throw httpError(404, 'Request not found');
       if (request.reviewStatus == null) throw httpError(409, 'This request is not in the document review workflow.');
+      if (clientUploadId) {
+        const prior = await tx.requestDocument.findFirst({ where: { serviceRequestId: id, clientUploadId } });
+        if (prior) {
+          if (!sameReviewFile(prior, sha256)) throw httpError(409, 'That upload id was already used for a different file.', 'client_upload_id_reused');
+          return { ...prior, replayed: true };
+        }
+      }
       if (request.reviewStatus === REQUEST_STATUS.APPROVED) {
         throw httpError(409, 'This request has been approved. Please contact HumanCare to add more documents.', 'request_approved');
       }
@@ -172,6 +197,7 @@ async function addPatientDocument({ userId, requestId, file, replacesDocumentId 
         data: {
           serviceRequestId: id, originalName: cleanOriginalName(file.originalname), storageKey: file.filename, sizeBytes: file.size,
           mimeType: clip(file.mimetype, 191), sha256, uploadedByUserId: userId, replacesId: replaced ? replaced.id : null,
+          ...(clientUploadId && { clientUploadId }),
         },
       });
       if (replaced) await tx.requestDocument.update({ where: { id: replaced.id }, data: { supersededAt: new Date() } });
@@ -192,8 +218,18 @@ async function addPatientDocument({ userId, requestId, file, replacesDocumentId 
       }
       return document;
     });
+    if (outcome && outcome.replayed) await fs.promises.rm(file.path, { force: true }).catch(() => {}); // the original is kept; this copy is not (gone before the answer is sent)
+    return outcome;
   } catch (err) {
-    fs.rm(file.path, { force: true }, () => {});
+    if (clientUploadId && isUniqueViolation(err)) {
+      // Lost the race to the same upload (the lock above normally prevents this; the unique index is the last word): the original is the answer.
+      const prior = await prisma.requestDocument.findFirst({ where: { serviceRequestId: Number(requestId), clientUploadId } }).catch(() => null);
+      if (prior) {
+        await fs.promises.rm(file.path, { force: true }).catch(() => {});
+        return { ...prior, replayed: true };
+      }
+    }
+    await fs.promises.rm(file.path, { force: true }).catch(() => {}); // the file of a refused upload is gone before the refusal is sent
     throw err;
   }
 }
@@ -202,6 +238,7 @@ async function addPatientDocument({ userId, requestId, file, replacesDocumentId 
 const toUploadResponse = (document) => ({
   id: document.id, name: document.originalName, fileSizeBytes: document.sizeBytes, uploadedAt: document.uploadedAt,
   replacesId: document.replacesId, scanStatus: document.scanStatus, reviewStatus: document.reviewStatus,
+  ...(document.clientUploadId ? { clientUploadId: document.clientUploadId } : {}), // Phase 5: lets the app match the document to the file it sent
 });
 
 // ---- scanning ---------------------------------------------------------------------------------
@@ -718,8 +755,14 @@ async function approveRequest({ requestId, adminId }) {
     if (blockers.length) throw httpError(409, 'This request cannot be approved yet.', 'approval_blocked', { blockers });
 
     for (const d of documents) {
+      // The copy inherits the source's scan record, but ONLY a confirmed one: a clean verdict AND the digest the file was just verified against (fileProblem above). Anything less is copied
+      // with no scan record at all (NULL = not clean), never as a clean legacy document.
+      const verified = d.scanStatus === SCAN.CLEAN && !!d.sha256 && !!d.scanEngine;
       const row = await tx.document.create({
-        data: { caseId: caseRecord.id, type: 'Medical Report', name: d.originalName, fileUrl: `/uploads/${d.storageKey}`, fileSizeBytes: d.sizeBytes },
+        data: {
+          caseId: caseRecord.id, type: 'Medical Report', name: d.originalName, fileUrl: `/uploads/${d.storageKey}`, fileSizeBytes: d.sizeBytes,
+          ...(verified ? { sha256: d.sha256, scanStatus: SCAN.CLEAN, scanEngine: d.scanEngine, scannedAt: d.scannedAt || null } : {}),
+        },
       });
       await tx.requestDocument.update({ where: { id: d.id }, data: { caseDocumentId: row.id } });
     }

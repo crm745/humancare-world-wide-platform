@@ -1,14 +1,13 @@
-import { Image, View } from 'react-native';
+import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state/AppContext';
 import { ABOUT_INTRO } from '../data/aboutContent';
-import { LOGO } from '../data/images';
 import { fabClearance } from '../lib/sos';
 import { Body, Screen, TopBar } from '../components/layout';
 import { useSosFabVisible } from '../components/sos/hooks';
 import { Text } from '../components/ui';
 
-// About HumanCare (Profile > About HumanCare). It shows the app's logo and the company name, centred at the top, then the official introduction approved by HumanCare
+// About HumanCare (Profile > About HumanCare). It shows the company name, centred at the top (no logo), then the official introduction approved by HumanCare
 // senior management: four paragraphs, exactly as supplied (data/aboutContent.js), in an open layout on the app's own background (no card, box, border or shadow). There
 // is nothing else on the page: no contact details, legal links, version or other section. The title bar is the app's usual one (its back button and the translated "About" title). The introduction is English for now (translated separately).
 // The root layout flips the screen for Arabic.
@@ -33,13 +32,12 @@ export default function About() {
     <Screen>
       <TopBar title={t('prof_about')} />
       <Body contentClassName="p-[18px]">
-        {/* The branding: the app's own logo and the company name, centred above the introduction. */}
-        <View style={{ alignItems: 'center', gap: 10, marginBottom: 24 }}>
-          <Image source={LOGO} style={{ width: 200, height: 72 }} resizeMode="contain" accessibilityLabel="HumanCare Worldwide" />
-          <Text accessibilityRole="header" className="text-center font-inter-black text-[20px] text-navy">{ABOUT_INTRO.name}</Text>
+        {/* The company name, centred above the introduction (the page has no logo). */}
+        <View style={{ alignItems: 'center', marginBottom: 24 }}>
+          <Text accessibilityRole="header" className="text-center font-inter-black text-[20px] text-navy">{t('about_name')}</Text>
         </View>
-        {ABOUT_INTRO.paragraphs.map((paragraph) => (
-          <Text key={paragraph} className="mb-5 text-[13.5px] leading-[22px] text-muted" selectable>{paragraph}</Text>
+        {ABOUT_INTRO.paragraphs.map((paragraph, i) => (
+          <Text key={paragraph} className="mb-5 text-[13.5px] leading-[22px] text-muted" selectable>{t(`about_p${i + 1}`)}</Text>
         ))}
         <View style={{ height: reserve }} />
       </Body>

@@ -15,7 +15,7 @@ function server(reject = []) {
   const send = jest.fn(async (p, file, onProgress, fields) => {
     calls.push({ path: p, uri: file.uri, fields });
     onProgress?.(0.5);
-    if (reject.includes(file.uri)) throw new Error(`${file.name} was refused`);
+    if (reject.includes(file.uri)) throw Object.assign(new Error(`${file.name} was refused`), { status: 422 });
   });
   return { send, calls };
 }
@@ -80,7 +80,7 @@ describe('sendAdditionalDocuments: additional documents', () => {
     const result = await sendAdditionalDocuments({ requestId: 5, target: null, files: [A, B, C], uploaded: [], uploadErrors: {}, send });
     expect(order).toEqual([A.uri, B.uri, C.uri]);
     expect(s.calls.map((c) => c.path)).toEqual(new Array(3).fill('/requests/me/5/documents'));
-    expect(s.calls.every((c) => c.fields === undefined)).toBe(true);
+    expect(s.calls.every((c) => c.fields && Object.keys(c.fields).join() === 'clientUploadId')).toBe(true); // only the file's own upload id (Phase 5), never a replacement id
     expect(result.uploaded).toEqual([A.uri, B.uri, C.uri]);
     expect(result.uploadErrors).toEqual({});
     expect(result.sentRequest).toEqual({ id: 5 });
@@ -103,7 +103,7 @@ describe('sendAdditionalDocuments: additional documents', () => {
     const first = await sendAdditionalDocuments({ requestId: 5, files: [A, B, C], uploaded: [], uploadErrors: {}, send: server([B.uri]).send });
     const s = server();
     const retry = await sendAdditionalDocuments({ requestId: 5, files: [A, B, C], uploaded: first.uploaded, uploadErrors: first.uploadErrors, send: s.send });
-    expect(s.calls).toEqual([{ path: '/requests/me/5/documents', uri: B.uri, fields: undefined }]);
+    expect(s.calls).toEqual([{ path: '/requests/me/5/documents', uri: B.uri, fields: { clientUploadId: expect.any(String) } }]);
     expect(retry.uploaded.sort()).toEqual([A.uri, B.uri, C.uri].sort());
     expect(retry.uploadErrors).toEqual({});
     expect(pendingFiles([A, B, C], retry.uploaded)).toEqual([]);
@@ -133,7 +133,7 @@ describe('sendAdditionalDocuments: replacement', () => {
   test('sends replacesDocumentId with the file, to the same endpoint', async () => {
     const s = server();
     const result = await sendAdditionalDocuments({ requestId: 5, target: { id: 12, name: 'old.pdf' }, files: [A], uploaded: [], uploadErrors: {}, send: s.send });
-    expect(s.calls).toEqual([{ path: '/requests/me/5/documents', uri: A.uri, fields: { replacesDocumentId: 12 } }]);
+    expect(s.calls).toEqual([{ path: '/requests/me/5/documents', uri: A.uri, fields: { replacesDocumentId: 12, clientUploadId: expect.any(String) } }]);
     expect(result.uploaded).toEqual([A.uri]);
   });
 
@@ -148,12 +148,12 @@ describe('sendAdditionalDocuments: replacement', () => {
     expect(first.uploaded).toEqual([]);
     const s = server();
     const retry = await sendAdditionalDocuments({ requestId: 5, target: { id: 12 }, files: [A], uploaded: first.uploaded, uploadErrors: first.uploadErrors, send: s.send });
-    expect(s.calls).toEqual([{ path: '/requests/me/5/documents', uri: A.uri, fields: { replacesDocumentId: 12 } }]);
+    expect(s.calls).toEqual([{ path: '/requests/me/5/documents', uri: A.uri, fields: { replacesDocumentId: 12, clientUploadId: expect.any(String) } }]);
     expect(retry.uploaded).toEqual([A.uri]);
   });
 
   test('a refused replacement (server says the target is invalid) is reported on the file', async () => {
-    const send = jest.fn(async () => { throw new Error('The document to replace was not found on this request, or was already replaced.'); });
+    const send = jest.fn(async () => { throw Object.assign(new Error('The document to replace was not found on this request, or was already replaced.'), { status: 400 }); });
     const result = await sendAdditionalDocuments({ requestId: 5, target: { id: 99 }, files: [A], uploaded: [], uploadErrors: {}, send });
     expect(result.uploaded).toEqual([]);
     expect(result.uploadErrors[A.uri]).toMatch(/already replaced/);
@@ -166,7 +166,7 @@ describe('wiring (source checks)', () => {
   test('the request details screen shows the upload card and reloads after a run', () => {
     const screen = read('../../app/request-details.js');
     expect(screen).toMatch(/import AdditionalDocuments from '\.\.\/components\/request\/AdditionalDocuments'/);
-    expect(screen).toMatch(/<AdditionalDocuments request=\{request\} onUploaded=\{reload\} \/>/);
+    expect(screen).toMatch(/<AdditionalDocuments request=\{request\} onUploaded=\{reload\} pendingUploads=\{pendingUploads\} \/>/);
     expect(screen).toContain("fetcher: () => apiGet(`/requests/me/${id}`).then(({ request: r }) => r),"); // the reload after an upload is useResource's quiet refetch
   });
 
@@ -181,15 +181,15 @@ describe('wiring (source checks)', () => {
     expect(component).toMatch(/requestId: request\.id/);
   });
 
-  test('the card reloads once per run, after the run has finished', () => {
-    expect(component.match(/onUploaded\?\.\(\)/g)).toHaveLength(1);
-    expect(component.indexOf('finally')).toBeLessThan(component.indexOf('onUploaded?.()'));
+  test('the card reloads once per run, after the run has finished (and once after a status check that found files)', () => {
+    expect(component.match(/onUploaded\?\.\(\)/g)).toHaveLength(1); // one, at the end of run() (the post-restart check reloads through usePendingUploads)
+    expect(component.indexOf('finally', component.indexOf('const run = async'))).toBeLessThan(component.lastIndexOf('onUploaded?.()'));
   });
 
   test('the request form and its retry screen are not changed to use any of this', () => {
     for (const file of ['../../app/request/review.js', '../../app/request/submitted.js']) {
       const source = read(file);
-      expect(source).not.toMatch(/additionalUploads|AdditionalDocuments|replacesDocumentId/);
+      expect(source).not.toMatch(/AdditionalDocuments|replacesDocumentId/); // (they share fieldsFor() for the upload id since Phase 5, never the replacement field)
     }
   });
 

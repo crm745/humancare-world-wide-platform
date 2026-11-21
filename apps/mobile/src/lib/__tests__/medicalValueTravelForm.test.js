@@ -207,12 +207,12 @@ describe('what is sent', () => {
   });
   test('submitting goes through this builder only for medvalue; every other branch of the submit is the same', () => {
     const review = read('app/request/review.js');
-    expect(review).toContain("isMvtService(d.service) ? await apiPost('/requests', buildMvtPayload(d))");
+    expect(review).toContain('isMvtService(d.service) ? buildMvtPayload(d)'); // send() adds the idempotency key (Phase 4); the body is built lazily and sent by sendWithDocuments (Phase 5)
     expect(review.indexOf('buildHomePayload(d)')).toBeLessThan(review.indexOf('buildMvtPayload(d)'));
     expect(review.indexOf('buildMvtPayload(d)')).toBeLessThan(review.indexOf('patientLocation: d.location,')); // before the generic body
     expect(review).toContain('buildMortalPayload(d)');
     expect(review).toContain('buildTelePayload(d)');
-    expect(review).toContain('buildPrivateCharterPayload(d)');
+    expect(review).toContain('buildPrivateCharterPayload(charterDraft)');
   });
 });
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -16,6 +16,7 @@ import { openService } from '../components/ServiceGrid';
 import { ActiveRequestCard } from '../components/home/ActiveRequestCard';
 import { AppRefreshControl } from '../components/AppRefreshControl';
 import { LoadFailure } from '../components/LoadFailure';
+import { DraftNotice } from '../components/home/DraftNotice';
 import { Reveal } from '../components/skeleton/Reveal';
 import { useSkeletonGate } from '../components/skeleton/hooks';
 import { ActiveRequestSkeleton } from '../components/skeleton/screens';
@@ -26,6 +27,7 @@ import { HomeHeader } from '../components/home/HomeHeader';
 import { ServicesGrid } from '../components/home/ServicesGrid';
 import { SosBar } from '../components/home/SosBar';
 import { COLORS } from '../theme/colors';
+import { useRetryOnRestore } from '../lib/useRetryOnRestore';
 
 const TAB_BAR = 64;
 const MAX_WIDTH = 720;
@@ -64,9 +66,11 @@ export default function Home() {
   const hasUnread = home ? home.hasUnread : false;
   const requests = home ? home.requests : [];
 
-  useEffect(() => {
-    if (!isCorporate) registerForPushNotifications();
-  }, [isCorporate]);
+  // Push registration is best-effort, but if it failed for want of a connection it is tried once more when the connection returns (lib/pushNotifications.js says which).
+  const [pushFailed, setPushFailed] = useState(false);
+  const registerPush = useCallback(() => { registerForPushNotifications().then((result) => setPushFailed(result === 'retry'), () => setPushFailed(false)); }, []);
+  useEffect(() => { if (!isCorporate) registerPush(); }, [isCorporate, registerPush]);
+  useRetryOnRestore({ failed: pushFailed, retry: registerPush, enabled: !isCorporate });
 
   // The newest request that is still being worked on (the list comes newest first).
   const current = requests.find((r) => r.status === 'submitted' || r.status === 'in_progress');
@@ -115,9 +119,10 @@ export default function Home() {
             </Pressable>
           ) : (
             <>
+              <DraftNotice />
               <BannerCarousel width={contentW - 36} tablet={tablet} onRequest={() => navReplace('/all-services')} />
               {loading && gate.visible && <ActiveRequestSkeleton label={t('sk_loading_active')} />}
-              {error && !home && <LoadFailure onRetry={reload} />}
+              {error && !home && <LoadFailure titleKey="lf_title_home" error={error} onRetry={reload} />}
               {activeRequest && (
                 <Reveal animate={gate.wasShown}>
                   <ActiveRequestCard request={activeRequest} onTrack={() => router.push({ pathname: '/request-tracking', params: { id: current.id } })} />

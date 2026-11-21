@@ -203,9 +203,9 @@ describe('wiring (source checks)', () => {
     expect(tracking).toMatch(/item\.workflow \? \(/);
     expect(tracking).toMatch(/<DocumentHistory request=\{item\.request\} className="" \/>/);
     const workflowBranch = tracking.slice(tracking.indexOf('item.workflow ? ('), tracking.indexOf(') : ('));
-    expect(workflowBranch).not.toMatch(/DocRow|downloadAndShare|onPress/);
+    expect(workflowBranch).not.toMatch(/DocRow|downloadDocument|onPress/);
     const legacyBranch = tracking.slice(tracking.indexOf(') : ('), tracking.indexOf('<Spacer min={14} />'));
     expect(legacyBranch).toMatch(/item\.documents\.map\(\(d\) => \(/);
-    expect(legacyBranch).toMatch(/downloadAndShare\(`\/documents\/\$\{d\.id\}\/file`, d\.name\)/);
+    expect(legacyBranch).toMatch(/downloadCaseDocument\(d\)/); // (which calls the authenticated downloadDocument)
   });
 });

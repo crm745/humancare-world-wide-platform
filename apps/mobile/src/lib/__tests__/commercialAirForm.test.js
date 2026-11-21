@@ -45,7 +45,7 @@ describe('Step 2: the order and the fields', () => {
     expect(AIRLINE_MODES).toEqual(['stretcher', 'wheelchair']);
     // the chips say just Stretcher / Wheelchair; the labels that name the service in the request (below) keep their codes
     expect(AIRLINE_MODES.map((k) => TRAVEL_TYPE_LABELS[k])).toEqual(['Stretcher', 'Wheelchair']);
-    expect(step2).toContain('options={AIRLINE_MODES.map((key) => ({ value: key, label: TRAVEL_TYPE_LABELS[key] }))}');
+    expect(step2).toContain('options={AIRLINE_MODES.map((key) => ({ value: key, label: t(`rd_travel_${key}`) }))}'); // the chips read in the person's language (the values are unchanged)
     expect(step2).not.toContain('AIRLINE_MODE_LABELS');
     expect(AIRLINE_MODES.map((k) => AIRLINE_MODE_LABELS[k])).toEqual(['Stretcher (CAS)', 'Wheelchair (CAW)']);
   });

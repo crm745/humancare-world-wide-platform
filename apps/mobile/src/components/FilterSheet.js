@@ -49,7 +49,7 @@ function FilterForm({ services, value, onApply, onClose }) {
       />
       <View className="flex-row gap-2.5">
         <Button variant="outline" title={t('btn_reset')} className="flex-1" onPress={() => { setF(DEFAULT_FILTERS); onApply(DEFAULT_FILTERS); }} />
-        <Button title={t('btn_apply_filters')} className="flex-[2]" onPress={() => { onApply(f); toast('Filters applied'); onClose(); }} />
+        <Button title={t('btn_apply_filters')} className="flex-[2]" onPress={() => { onApply(f); toast(t('filters_applied')); onClose(); }} />
       </View>
     </>
   );

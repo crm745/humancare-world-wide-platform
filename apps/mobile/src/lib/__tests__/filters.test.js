@@ -1,3 +1,4 @@
+/* global describe, it, expect */
 const { applyFilters, DEFAULT_FILTERS } = require('../filters');
 
 const TODAY = '2026-09-25';

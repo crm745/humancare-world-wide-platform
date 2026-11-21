@@ -152,7 +152,7 @@ describe('CityField: inline, never a modal', () => {
   test('loading, empty, error with Retry, a height limit with scrolling, and the GeoNames credit', () => {
     expect(field).toContain('Searching…');
     expect(field).toContain('No matching city${inCountry}.');
-    expect(field).toContain('Retry city search');
+    expect(field).toContain("t('a11y_retry_city')"); // "Retry city search", in the person's language
     expect(field).toContain('maxHeight: listMax');
     expect(field).toContain('nestedScrollEnabled');
     expect(field).toContain('attribution.text');
@@ -174,8 +174,10 @@ describe('CityField: inline, never a modal', () => {
   });
   test('Continue matches a typed city to the verified list first (Private Charter only), and never guesses', () => {
     expect(step1).toContain('const prepare = charter ? async () => {');
-    expect(step1).toContain('resolveTypedCity(apiGet, draft.location, undefined, draft.countryIso)');
-    expect(step1).toContain('resolveTypedCity(apiGet, draft.dest)'); // the Destination may be in any country: matched among all verified cities
+    expect(step1).toContain('resolveCharterCities(apiGet, draft, toCityChoice)');
+    const lib = fs.readFileSync(path.join(__dirname, '../citySearch.js'), 'utf8');
+    expect(lib).toContain('resolveTypedCity(fetcher, d.location, undefined, d.countryIso)');
+    expect(lib).toContain('resolveTypedCity(fetcher, d.dest)'); // the Destination may be in any country: matched among all verified cities
     expect(step1).toContain('prepare={prepare}');
     expect(step1).toContain("const firstError = (patch) => problemsFor(patch ? { ...draft, ...patch } : draft)");
     const frame = read('components/request/RequestFrame.js');
@@ -184,7 +186,7 @@ describe('CityField: inline, never a modal', () => {
   });
   test('the validation itself is as it was: Private Charter needs a verified city, other services need some text', () => {
     // now judged by lib/locationRules.js (see locationRules.test.js): Private Charter needs a verified city, other services need some text
-    expect(step1).toContain("['location', locationProblems(d, charter).location !== null],");
-    expect(step1).toContain("['dest', locationProblems(d, charter).dest !== null],");
+    expect(step1).toContain("['location', locationProblems(d, charter, { offline: isOffline }).location !== null],");
+    expect(step1).toContain("['dest', locationProblems(d, charter, { offline: isOffline }).dest !== null],");
   });
 });

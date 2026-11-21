@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 import { Dimensions, Image, ImageBackground, Modal, Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, ChevronDown, Download, Eye, EyeOff, FileText, Search, X } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
+import { bannerPresenter } from '../lib/bannerPresenter';
+import { hideToastForBanner } from '../lib/networkUi';
 import { IMAGES } from '../data/images';
 import { IconButton } from './layout';
 import { FieldLabel, Input, Text } from './ui';
@@ -86,7 +88,7 @@ function Dropdown({ visible, onClose, title, header, children }) {
 const SEARCH_FROM = 12;
 const plain = (text) => String(text || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().trim();
 
-export function Select({ value, options, onChange, title, large, bare, labels, placeholder, className = '' }) {
+export function Select({ value, options, onChange, title, large, bare, labels, keepSize, placeholder, className = '' }) {
   const { t } = useApp();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -111,7 +113,7 @@ export function Select({ value, options, onChange, title, large, bare, labels, p
         onPress={() => setOpen(true)}
         className={`flex-row items-center justify-between gap-1 ${bare ? '' : 'rounded-[10px] border-[1.5px] border-field bg-input'} ${large ? 'px-3 py-3.5' : 'px-3 py-3'} ${className}`}
       >
-        <Text className={`${value ? '' : 'text-faint'} ${labels ? 'text-[13px]' : large ? 'text-[16.5px]' : 'text-[15px]'}`} numberOfLines={1}>{value ? show(value) : placeholder || title}</Text>
+        <Text className={`${value ? '' : 'text-faint'} ${labels && !keepSize ? 'text-[13px]' : large ? 'text-[16.5px]' : 'text-[15px]'}`} numberOfLines={1}>{value ? show(value) : placeholder || title}</Text>
         <ChevronDown size={16} color="#97A4B8" />
       </Pressable>
       <Dropdown visible={open} onClose={close} title={title} header={search}>
@@ -237,15 +239,20 @@ export function PhotoCard({ img, height, onPress, children, className = '' }) {
   );
 }
 
-export function DocRow({ label, meta, onPress, className = '' }) {
+// `offline`: the phone is known to be offline, so the file cannot be fetched: the row is pale, says so in its meta line ("Opens when you're online") and a screen reader hears that it is not available.
+export function DocRow({ label, meta, onPress, className = '', offline = false }) {
+  const { t } = useApp();
   return (
-    <Pressable onPress={onPress} className={`mb-2.5 flex-row items-center gap-2.5 rounded-[14px] border border-line bg-white p-3 active:opacity-80 ${className}`}>
+    <Pressable
+      onPress={onPress} disabled={offline} accessibilityRole="button" accessibilityState={{ disabled: offline }} accessibilityHint={offline ? t('net_opens_online') : undefined}
+      className={`mb-2.5 flex-row items-center gap-2.5 rounded-[14px] border border-line bg-white p-3 ${offline ? 'opacity-45' : 'active:opacity-80'} ${className}`}
+    >
       <View className="h-[34px] w-[34px] items-center justify-center rounded-[9px] bg-[#FDECEC]">
         <FileText size={16} color="#D64545" />
       </View>
       <View className="flex-1">
         <Text className="font-inter-bold text-[13.5px]">{label}</Text>
-        <Text className="text-[11.5px] text-faint">{meta}</Text>
+        <Text className="text-[11.5px] text-faint">{[meta, offline ? t('net_opens_online') : null].filter(Boolean).join(' · ')}</Text>
       </View>
       <Download size={15} color={COLORS.primary} />
     </Pressable>
@@ -255,7 +262,8 @@ export function DocRow({ label, meta, onPress, className = '' }) {
 export function Toast() {
   const { toastMsg } = useApp();
   const insets = useSafeAreaInsets();
-  if (!toastMsg) return null;
+  const bannerVisible = useSyncExternalStore(bannerPresenter.subscribeVisible, bannerPresenter.isVisible, bannerPresenter.isVisible);
+  if (!toastMsg || hideToastForBanner({ message: toastMsg, bannerVisible })) return null; // a banner on THIS screen already says it: one message, not two
   return (
     <View pointerEvents="none" className="absolute left-0 right-0 items-center" style={{ bottom: 90 + insets.bottom }}>
       <View className="rounded-full border border-[#223047] bg-ink px-[18px] py-2.5">

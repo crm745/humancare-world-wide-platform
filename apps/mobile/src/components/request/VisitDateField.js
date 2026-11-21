@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Platform, Pressable, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar } from 'lucide-react-native';
+import { useApp } from '../../state/AppContext';
 import { FieldLabel, Text } from '../ui';
 import { Sheet } from '../widgets';
 import { dateToString, stringToDate, tomorrowDate, tomorrowString } from '../../lib/teleConsultation';
@@ -10,6 +11,7 @@ import { dateToString, stringToDate, tomorrowDate, tomorrowString } from '../../
 // disabled). Android shows its own picker dialog; iOS wraps the spinner in the existing Sheet with a Done button; the browser has a native date
 // input. (Same ways as the request form's other date field, which allows today; this one is separate so that field is left exactly as it is.)
 export function VisitDateField({ label, required, value, onChange, error }) {
+  const { t } = useApp();
   const [open, setOpen] = useState(false);
   const earliest = tomorrowDate();
 
@@ -44,10 +46,10 @@ export function VisitDateField({ label, required, value, onChange, error }) {
     <View>
       <FieldLabel required={required}>{label}</FieldLabel>
       <Pressable
-        onPress={() => setOpen(true)} accessibilityRole="button" accessibilityLabel={`${label}, ${value || 'Select a date'}`}
+        onPress={() => setOpen(true)} accessibilityRole="button" accessibilityLabel={`${label}, ${value || t('ph_select_date')}`}
         className="min-h-[48px] flex-row items-center justify-between gap-1 rounded-[10px] border-[1.5px] border-field bg-input px-3 py-3"
       >
-        <Text className={`text-[15px] ${value ? 'text-ink' : 'text-faint'}`}>{value || 'Select a date'}</Text>
+        <Text className={`text-[15px] ${value ? 'text-ink' : 'text-faint'}`}>{value || t('ph_select_date')}</Text>
         <Calendar size={16} color="#97A4B8" />
       </Pressable>
       {error ? <Text className="mt-1 text-[12px] text-danger">{error}</Text> : null}

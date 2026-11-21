@@ -6,6 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BookOpen, Bell, Check, ChevronRight, CircleHelp, CreditCard, FileText, Globe, Info, LogOut, ShieldCheck, User, UserX } from 'lucide-react-native';
 import { initialsOf, useApp } from '../state/AppContext';
 import { LANGUAGES } from '../data/mock';
+import I18N from '../data/i18n.json';
+import { translate } from '../lib/translate';
 import { navReplace } from '../lib/nav';
 import { clearTokens } from '../lib/session';
 import { BottomNav, Screen, TopBar, useScrollToTopOnTabTap } from '../components/layout';
@@ -23,7 +25,7 @@ function LanguageSheet({ visible, onClose }) {
   const { t, lang, setLang, toast } = useApp();
   const choose = (l) => {
     setLang(l.code);
-    toast('Language set to ' + l.name);
+    toast(translate(I18N, l.code, 'lang_set_toast', { name: l.name }));
     setTimeout(onClose, 350);
   };
   return (
@@ -79,7 +81,7 @@ function Section({ label, rows }) {
 }
 
 export default function Profile() {
-  const { t, isCorporate, profile, toast, refreshProfile } = useApp();
+  const { t, isCorporate, profile, toast, refreshProfile, clearDraftEverywhere } = useApp();
   const [refreshing, setRefreshing] = useState(false);
   const insets = useSafeAreaInsets();
   // The scroll area ends above the tab bar; its bottom padding is its own (24) or the room the floating SOS button needs, whichever is more.
@@ -91,7 +93,8 @@ export default function Profile() {
   // Signed-out people already have an account, so they land on their login screen.
   // The destination is shown first, then the tokens are cleared: clearing them while this screen is still open
   // would let the auth gate send the person to Login before Getting Started opens.
-  const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/login'); await clearTokens(); };
+  // Logging out on purpose also deletes the saved request draft and its key (an expired session does not: the same account finds its draft when it signs in again).
+  const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/login'); await clearDraftEverywhere(); await clearTokens(); };
   const soon = () => toast(t('prof_soon'));
 
   // Pull-to-refresh: the account details come from the server (GET /auth/me). The profile stays on screen while it loads (no skeleton: it

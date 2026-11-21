@@ -10,6 +10,7 @@ import { Body, Screen, TopBar } from '../components/layout';
 import { Button, Card, Spacer, Text } from '../components/ui';
 import { AppRefreshControl } from '../components/AppRefreshControl';
 import { LoadFailure } from '../components/LoadFailure';
+import { CachedNote } from '../components/network/CachedNote';
 import { HighlightFill } from '../components/skeleton/HighlightFill';
 import { Reveal } from '../components/skeleton/Reveal';
 import { useSkeletonGate } from '../components/skeleton/hooks';
@@ -54,7 +55,7 @@ function AlertGroups({ items, onRead, t }) {
             <Pressable
               key={a.id}
               accessibilityRole="button"
-              accessibilityLabel={`${a.title}. ${a.unread ? 'Unread. ' : ''}${a.time}`}
+              accessibilityLabel={`${a.title}. ${a.unread ? `${t('notif_unread')}. ` : ''}${a.time}`}
               onPress={() => onRead(a.id)}
               className={`flex-row items-start gap-2.5 px-3.5 py-3 active:opacity-80 ${i > 0 ? 'border-t border-divider' : ''}`}
             >
@@ -100,7 +101,7 @@ export default function Notifications() {
         ) : (
           <>
             {loading && gate.visible && <RowsSkeleton label={t('sk_loading_notifications')} count={5} lines={2} />}
-            {error && !data && <LoadFailure onRetry={reload} />}
+            {error && !data && <LoadFailure titleKey="lf_title_notifications" error={error} onRetry={reload} />}
             {data ? <Reveal animate={gate.wasShown} style={{ gap: 10 }}>
             {items.map((n) => {
               const { bg, color, Icon } = KIND[n.kind] || KIND.system;
@@ -120,8 +121,9 @@ export default function Notifications() {
               );
             })}
             {items.length === 0 && (
-              <View className="items-center px-5 py-[50px]"><Text className="text-[12.5px] text-faint">No notifications yet.</Text></View>
+              <View className="items-center px-5 py-[50px]"><Text className="text-[12.5px] text-faint">{t('notif_empty')}</Text></View>
             )}
+            {items.length > 0 ? <CachedNote /> : null}
             </Reveal> : null}
           </>
         )}

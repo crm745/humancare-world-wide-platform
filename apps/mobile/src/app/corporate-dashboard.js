@@ -74,7 +74,7 @@ export default function CorporateDashboard() {
     <Screen>
       <TopBar title={t('lbl_all_cases')} />
       <SearchHeader
-        placeholder="Search by Case ID or Patient Name"
+        placeholder={t('ph_search_case')}
         query={query}
         onQuery={setQuery}
         onOpenFilters={() => setSheet(true)}
@@ -84,7 +84,7 @@ export default function CorporateDashboard() {
       />
       <Body withNav contentClassName="px-[18px] pt-4" refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {loading && gate.visible ? <RowsSkeleton label={t('sk_loading_cases')} count={5} lines={2} trailing /> : null}
-        {error && !data ? <LoadFailure onRetry={reload} /> : null}
+        {error && !data ? <LoadFailure titleKey="lf_title_cases" error={error} onRetry={reload} /> : null}
         {data ? (
         <Reveal animate={gate.wasShown}>
         <View className="mb-3.5 flex-row gap-2">

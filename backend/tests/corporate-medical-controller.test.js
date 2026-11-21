@@ -4,8 +4,8 @@ process.env.BITRIX_SYNC_ENABLED = 'false';
 process.env.PRIVATE_CHARTER_REVIEW_WORKFLOW = 'false';
 
 const mockStore = { rows: [], cases: [], events: [], nextCaseId: 0 };
-jest.mock('../src/db/prisma', () => ({
-  prisma: {
+jest.mock('../src/db/prisma', () => {
+  const prisma = {
     serviceRequest: {
       create: async ({ data }) => { const row = { id: 100 + mockStore.rows.length, createdAt: new Date('2026-11-18T10:00:00Z'), updatedAt: new Date('2026-11-18T10:00:00Z'), ...data }; mockStore.rows.push(row); return { ...row }; },
       update: async ({ where, data }) => { const row = mockStore.rows.find((r) => r.id === where.id); Object.assign(row, data); return { ...row }; },
@@ -16,8 +16,11 @@ jest.mock('../src/db/prisma', () => ({
       update: async ({ where, data }) => { const row = mockStore.cases.find((c) => c.id === where.id); Object.assign(row, data); return { ...row }; },
     },
     caseStageEvent: { create: async ({ data }) => { mockStore.events.push(data); return {}; } },
-  },
-}));
+  };
+  // createRequest saves the request, its Case and its first stage event in one transaction: the mock runs the callback on itself (the recorder keeps what each call would have written).
+  prisma.$transaction = async (callback) => callback(prisma);
+  return { prisma };
+});
 
 const { submitRequest, uploadRequestDocument } = require('../src/modules/requests/requests.controller');
 const { corporateFieldsOf } = require('../src/modules/requests/corporate-medical.validation');

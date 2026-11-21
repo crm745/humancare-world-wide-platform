@@ -1,5 +1,6 @@
 import { Clock } from 'lucide-react-native';
 import { Text, View } from 'react-native';
+import { useApp } from '../../state/AppContext';
 import { reviewBanner } from '../../lib/requestDocuments';
 import { C, FONT, StatusLayout, WRAP } from './DetailsParts';
 import { COLORS } from '../../theme/colors';
@@ -13,6 +14,7 @@ const TONE = {
 // the Admin), drawn as the screen's status card: the tile, where it stands, and what the Admin asked for while changes
 // are requested. Nothing for older requests and other services, and nothing once approved (the status card says so).
 export default function ReviewBanner({ request }) {
+  const { t } = useApp();
   const banner = reviewBanner(request);
   if (!banner) return null;
   if (banner.key === 'approved') return null;
@@ -21,7 +23,7 @@ export default function ReviewBanner({ request }) {
     <StatusLayout bg={tone.bg} fg={tone.fg} Icon={Clock} title={banner.title}>
       {banner.reason && (
         <View style={{ marginTop: 8 }}>
-          <Text style={{ fontFamily: FONT[600], fontSize: 12.5, lineHeight: 16, color: C.muted }}>What we need from you</Text>
+          <Text style={{ fontFamily: FONT[600], fontSize: 12.5, lineHeight: 16, color: C.muted }}>{t('rb_need_from_you')}</Text>
           <Text style={[{ marginTop: 2, fontFamily: FONT[500], fontSize: 13.5, lineHeight: 19, color: C.ink }, WRAP]}>{banner.reason}</Text>
         </View>
       )}

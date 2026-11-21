@@ -314,7 +314,7 @@ describe('the submission payload', () => {
   test('the submit uses it, uploads nothing, and the Private Charter and generic branches are not touched by it', () => {
     const review = read('app/request/review.js');
     const tele = review.slice(review.indexOf('if (isTeleService(d.service)) {'), review.indexOf('if (isPrivateCharter(d.service)) {'));
-    expect(tele).toContain("apiPost('/requests', buildTelePayload(d))");
+    expect(tele).toContain('guardedSend(buildTelePayload(d))'); // send() adds the idempotency key (Phase 4)
     expect(tele).not.toMatch(/apiUpload|runSubmission|files/);
     const charter = review.slice(review.indexOf('if (isPrivateCharter(d.service)) {'), review.indexOf('// Every other service keeps the body it has always sent.'));
     expect(charter).not.toMatch(/isTeleService|buildTelePayload/);

@@ -394,7 +394,7 @@ describe('the list and its states', () => {
   });
   test('the first load shows the shimmer skeleton (never a spinner), a failed first load shows Try again, and what arrives fades in', () => {
     expect(screen).toContain("{loading && gate.visible && <RequestsSkeleton label={t('sk_loading_requests')} />}");
-    expect(screen).toContain('{error && !rows && <LoadFailure onRetry={reload} />}');
+    expect(screen).toContain('{error && !rows && <LoadFailure titleKey="lf_title_requests" error={error} onRetry={reload} />}');
     expect(screen).toContain('<Reveal animate={gate.wasShown}');
     expect(screen).not.toContain('LoadingState');
   });

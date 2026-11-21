@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 import { ChevronDown, MapPin } from 'lucide-react-native';
+import { genderLabels } from '../../lib/genderLabels';
 import { useApp } from '../../state/AppContext';
-import { nameOf } from '../../lib/phoneCountry';
+import { displayNameOf, countryDisplay } from '../../lib/countryNames';
 import { pickRequestCountry, pickRequestPhoneCountry } from '../../lib/requestForm';
 import { isValidMobileNumber, isValidName } from '../../lib/validators';
 import {
@@ -42,21 +43,21 @@ export function HomeStep1() {
 
       <Anchor id="name">
         <Field
-          required label={t('field_patient_name')} placeholder="Enter patient's full name" value={draft.name} onChangeText={(name) => updateDraft({ name })}
-          error={(attempted || draft.name) && !isValidName(draft.name) ? 'Enter a valid name.' : undefined}
+          required label={t('field_patient_name')} placeholder={t('ph_patient_full_name')} value={draft.name} onChangeText={(name) => updateDraft({ name })}
+          error={(attempted || draft.name) && !isValidName(draft.name) ? t('pd_err_full') : undefined}
         />
       </Anchor>
 
       <Anchor id="age">
         <View className="flex-row gap-2.5">
           <Field
-            required className="flex-1" label={t('field_age')} placeholder="Age" keyboardType="number-pad" maxLength={3}
+            required className="flex-1" label={t('field_age')} placeholder={t('field_deceased_age')} keyboardType="number-pad" maxLength={3}
             value={draft.age} onChangeText={(age) => updateDraft({ age })}
             error={(attempted || draft.age) && !isValidHomeAge(draft.age) ? t('home_err_age', { min: AGE_MIN, max: AGE_MAX }) : undefined}
           />
           <View className="flex-1">
             <FieldLabel required>{t('field_gender')}</FieldLabel>
-            <Select value={draft.gender} options={GENDERS} onChange={(gender) => updateDraft({ gender })} title={t('field_gender')} placeholder="Select gender" />
+            <Select value={draft.gender} options={GENDERS} onChange={(gender) => updateDraft({ gender })} title={t('field_gender')} labels={genderLabels(t)} keepSize placeholder={t('gender_placeholder')} />
             {attempted && !draft.gender ? <Text className="mt-1 text-[12px] text-danger">{required}</Text> : null}
           </View>
         </View>
@@ -65,10 +66,10 @@ export function HomeStep1() {
       <Anchor id="country">
         <FieldLabel required>{t('field_country')}</FieldLabel>
         <Pressable
-          onPress={() => setPicking('country')} accessibilityRole="button" accessibilityLabel={`${t('field_country')}, ${draft.country || 'Select country'}`}
+          onPress={() => setPicking('country')} accessibilityRole="button" accessibilityLabel={`${t('field_country')}, ${countryDisplay(draft.countryIso, draft.country) || t('ph_select_country')}`}
           className="min-h-[48px] flex-row items-center justify-between gap-2 rounded-[10px] border-[1.5px] border-field bg-input px-3 py-3 active:opacity-80"
         >
-          <Text className={`flex-1 text-[15px] ${draft.country ? '' : 'text-faint'}`} numberOfLines={1}>{draft.country || 'Select country'}</Text>
+          <Text className={`flex-1 text-[15px] ${draft.country ? '' : 'text-faint'}`} numberOfLines={1}>{countryDisplay(draft.countryIso, draft.country) || t('ph_select_country')}</Text>
           <ChevronDown size={16} color="#97A4B8" />
         </Pressable>
         {attempted && !draft.country ? <Text className="mt-1 text-[12px] text-danger">{required}</Text> : null}
@@ -78,16 +79,16 @@ export function HomeStep1() {
         <FieldLabel required>{t('field_contact_number')}</FieldLabel>
         <View className="flex-row gap-2">
           <Pressable
-            onPress={() => setPicking('phone')} accessibilityRole="button" accessibilityLabel={`${t('phone_country_code_label')}, ${nameOf(draft.phoneCountry)} ${draft.cc}`}
+            onPress={() => setPicking('phone')} accessibilityRole="button" accessibilityLabel={`${t('phone_country_code_label')}, ${displayNameOf(draft.phoneCountry)} ${draft.cc}`}
             className="min-h-[48px] min-w-[96px] flex-row items-center justify-center gap-1 rounded-[10px] border-[1.5px] border-field bg-input px-3 active:opacity-80"
           >
             <Text className="text-[13px]">{draft.phoneCountry} {draft.cc}</Text>
             <ChevronDown size={16} color="#97A4B8" />
           </Pressable>
-          <Input className="flex-1" placeholder="Enter number" keyboardType="phone-pad" value={draft.phone} onChangeText={(phone) => updateDraft({ phone })} />
+          <Input className="flex-1" placeholder={t('ph_enter_number')} keyboardType="phone-pad" value={draft.phone} onChangeText={(phone) => updateDraft({ phone })} />
         </View>
         {(attempted || draft.phone) && !isValidMobileNumber(draft.phone, draft.cc)
-          ? <Text className="mt-1 text-[12px] text-danger">{draft.phone ? 'Enter a valid number for the selected country.' : required}</Text> : null}
+          ? <Text className="mt-1 text-[12px] text-danger">{draft.phone ? t('err_number_for_country') : required}</Text> : null}
       </Anchor>
 
       <Anchor id="address">

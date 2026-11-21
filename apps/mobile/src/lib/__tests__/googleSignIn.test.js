@@ -1,4 +1,4 @@
-/* global describe, test, expect, jest, __dirname */
+/* global describe, test, expect, jest, __dirname, Buffer */
 // Google sign-in on the web: the popup hand-over (which must work under Google's Cross-Origin-Opener-Policy) and one attempt from the tap to the
 // signed-in screen. These tests use FAKES for Google, the backend and the navigation: they prove the app's logic, not that real Google sign-in
 // works. The browser runs against a fake Google page that is served with the same COOP header are described in the report.
@@ -150,7 +150,7 @@ describe('6-7. the backend refuses, or the network fails: the error is shown and
   test('and the screen shows it', () => {
     const hook = read('lib/useSocialAuth.js');
     expect(hook).toContain('onFailed(err);');
-    expect(hook).toContain('toast(err.message);');
+    expect(hook).toContain("toast(isOfflineError(err) ? t('net_google_offline') : err.code === TIMEOUT_CODE ? t('net_social_timeout') : errorText(err, t));"); // the existing error message (the offline sentence when offline)
   });
 });
 

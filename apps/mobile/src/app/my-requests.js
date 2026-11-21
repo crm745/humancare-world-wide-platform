@@ -15,6 +15,7 @@ import { useFabScrollPad } from '../components/sos/hooks';
 import { FilterSheet } from '../components/FilterSheet';
 import { AppRefreshControl } from '../components/AppRefreshControl';
 import { LoadFailure } from '../components/LoadFailure';
+import { CachedNote } from '../components/network/CachedNote';
 import { Reveal } from '../components/skeleton/Reveal';
 import { useSkeletonGate } from '../components/skeleton/hooks';
 import { RequestsSkeleton } from '../components/skeleton/screens';
@@ -98,7 +99,7 @@ export default function MyRequests() {
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
         {loading && gate.visible && <RequestsSkeleton label={t('sk_loading_requests')} />}
-        {error && !rows && <LoadFailure onRetry={reload} />}
+        {error && !rows && <LoadFailure titleKey="lf_title_requests" error={error} onRetry={reload} />}
         {!loading && rows && (
         <Reveal animate={gate.wasShown} style={{ gap: L.listGap }}>
         {items.map((r) => (
@@ -115,6 +116,7 @@ export default function MyRequests() {
             <Text style={{ fontFamily: 'Inter_400Regular', fontSize: L.noMatch, color: '#5B6B84', textAlign: 'center' }}>{t('mr_no_match')}</Text>
           </View>
         )}
+        {requests.length > 0 ? <CachedNote /> : null}
         </Reveal>
         )}
       </ScrollView>

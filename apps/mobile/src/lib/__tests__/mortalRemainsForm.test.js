@@ -304,10 +304,11 @@ describe('the review page', () => {
       expect({ key, accounted: key in expected }).toEqual({ key, accounted: true });
     }
   });
-  test('the submit goes through the Mortal Remains payload and names the files that did not upload', () => {
+  test('the submit goes through the Mortal Remains payload; the files that did not upload are listed by name on the next screen (Phase 5)', () => {
     const review = read('app/request/review.js');
     expect(review).toContain('buildMortalPayload(d)');
-    expect(review).toContain("mortal_upload_failed_files");
+    expect(review).toContain('await sendWithDocuments(buildBody);');
+    expect(read('app/request/submitted.js')).toContain('<UploadStatusList'); // names every file with its state
   });
 });
 

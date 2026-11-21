@@ -1,3 +1,4 @@
+/* global describe, it, expect, __dirname */
 const { toUiStatus, formatDisplayDate, serviceKeyFromTitle, toListItem, isMortalRequest, careLevelText } = require('../requestShape');
 const I18N = require('../../data/i18n.json');
 const { requestService } = require('../../data/mock');

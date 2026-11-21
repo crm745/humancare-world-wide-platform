@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, ScrollView, View } from 'react-native';
+import { useApp } from '../../state/AppContext';
 import { apiGet } from '../../lib/api';
+import { useRetryOnRestore } from '../../lib/useRetryOnRestore';
 import {
   GEONAMES_ATTRIBUTION_FALLBACK, SEARCH_DEBOUNCE_MS, describeCityError, normaliseCityText, searchCitiesCached, searchableQuery,
 } from '../../lib/citySearch';
@@ -23,6 +25,7 @@ import { COLORS } from '../../theme/colors';
 //   - `structured` (Private Charter): the backend accepts a city only as a verified { geonameId }, so `city` holds the picked city; typing again
 //     clears it (the form clears it in onChangeText) until another is picked. Without `structured` (every other service) the text is the answer.
 export default function CityField({ label, required, value = '', city = null, onChangeText, onSelect, error, testID, structured = false, countryIso = '', countryName = '', restrictToCountry = false }) {
+  const { t } = useApp();
   const reveal = useReveal();
   // The list gets what is left above the keyboard, at most 220 px (the top bars, the label, the field and the Continue bar take the rest).
   const listMax = useListMaxHeight({ reserved: 300, min: 110, max: 220 });
@@ -76,6 +79,9 @@ export default function CityField({ label, required, value = '', city = null, on
     timer.current = setTimeout(() => run(text), SEARCH_DEBOUNCE_MS);
   };
 
+  // The connection came back after a search failed: the same text is searched once more (a read; nothing is sent).
+  useRetryOnRestore({ failed: state === 'error' && !!(problem && problem.retry), retry: () => { shown.current = ''; run(value); } });
+
   const onFocus = () => {
     clearTimeout(blurTimer.current);
     setOpen(true);
@@ -121,7 +127,7 @@ export default function CityField({ label, required, value = '', city = null, on
       <FieldLabel required={required}>{label}</FieldLabel>
       <Input
         value={value} onChangeText={onType} onFocus={onFocus} onBlur={onBlur}
-        placeholder="City, Country" autoCorrect={false} autoCapitalize="words" maxLength={80}
+        placeholder={t('ph_city_country')} autoCorrect={false} autoCapitalize="words" maxLength={80}
         accessibilityLabel={label} autoComplete="off"
       />
       {error ? <Text className="mt-1 text-[12px] text-danger">{error}</Text> : null}
@@ -133,7 +139,7 @@ export default function CityField({ label, required, value = '', city = null, on
           style={{ shadowColor: '#0D2340', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 }}
         >
           {state === 'loading' ? (
-            <View className="flex-row items-center gap-2.5 px-3.5 py-3" accessibilityRole="progressbar" accessibilityLabel="Searching cities">
+            <View className="flex-row items-center gap-2.5 px-3.5 py-3" accessibilityRole="progressbar" accessibilityLabel={t('a11y_searching_cities')}>
               <Spinner size={16} color={COLORS.primary} trackColor={COLORS.primarySoft} />
               <Text className="text-[13px] text-muted">Searching…</Text>
             </View>
@@ -148,10 +154,10 @@ export default function CityField({ label, required, value = '', city = null, on
               <Text className="text-[13px] leading-[19px] text-danger">{problem.message}</Text>
               {problem.retry ? (
                 <Pressable
-                  onPress={() => { shown.current = ''; run(value); }} accessibilityRole="button" accessibilityLabel="Retry city search"
+                  onPress={() => { shown.current = ''; run(value); }} accessibilityRole="button" accessibilityLabel={t('a11y_retry_city')}
                   className="mt-2 min-h-[44px] items-center justify-center rounded-xl border-[1.5px] border-primary active:opacity-80"
                 >
-                  <Text className="font-inter-bold text-[14px] text-primary">Retry</Text>
+                  <Text className="font-inter-bold text-[14px] text-primary">{t('btn_retry_generic')}</Text>
                 </Pressable>
               ) : null}
             </View>

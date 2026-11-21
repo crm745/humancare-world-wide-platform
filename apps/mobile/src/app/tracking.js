@@ -3,8 +3,11 @@ import { Pressable, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Check } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
+import { errorText } from '../lib/errorText';
 import { apiGet } from '../lib/api';
-import { downloadAndShare } from '../lib/download';
+import { downloadDocument, downloadErrorInfo } from '../lib/download';
+import { useNetwork } from '../state/NetworkContext';
+import { useRetryOnRestore } from '../lib/useRetryOnRestore';
 import { formatDisplayDate } from '../lib/requestShape';
 import { isRequestFor, trackingItemFromCase, trackingItemFromRequest } from '../lib/trackingItem';
 import { corporateText, programmeNames } from '../lib/corporateMedical';
@@ -83,7 +86,7 @@ export default function Tracking() {
     const path = isCase ? `/corporate/cases/${params.id}` : `/requests/me/${params.id}`;
     apiGet(path)
       .then((data) => setLoadedItem(isCase ? trackingItemFromCase(data.case) : trackingItemFromRequest(data.request)))
-      .catch((err) => { setFailed(true); toast(err.message); });
+      .catch((err) => { setFailed(true); toast(errorText(err, t)); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per id/kind
   }, [params.id, isCase]);
 
@@ -113,7 +116,7 @@ export default function Tracking() {
         .catch((err) => {
           if (!active) return;
           if (!loaded.current) setFailed(true);
-          toast(err.message);
+          toast(errorText(err, t));
         });
       return () => { active = false; };
       // eslint-disable-next-line react-hooks/exhaustive-deps -- reload per id and focus; toast does not change what is fetched
@@ -146,6 +149,15 @@ export default function Tracking() {
       .then((data) => setLoadedItem(isCase ? trackingItemFromCase(data.case) : trackingItemFromRequest(data.request)))
       .catch(() => setFailed(true));
   };
+  // The connection came back after a first load that failed: it is read again once (lib/useRetryOnRestore.js).
+  useRetryOnRestore({ failed, retry: params.id ? retry : null });
+  const { isOffline } = useNetwork();
+  // A case document goes through the app's authenticated download (it renews an expired session once and says in the person's language what went wrong). Offline the row is switched off, so this is only
+  // the safety net for a state that changed since the screen drew.
+  const downloadCaseDocument = async (d) => {
+    if (isOffline) { toast(t('net_opens_online')); return; }
+    try { await downloadDocument(`/documents/${d.id}/file`, d.name); } catch (err) { toast(t(downloadErrorInfo(err).key)); }
+  };
   const gate = useSkeletonGate(!item && !failed && Boolean(params.id));
   const refreshControl = <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />;
 
@@ -153,7 +165,7 @@ export default function Tracking() {
     return (
       <Screen>
         <TopBar title={t('tracking_details_title')} />
-        {failed || !params.id ? <LoadFailure message={t('trk_load_failed')} onRetry={params.id ? retry : undefined} /> : null}
+        {failed || !params.id ? <LoadFailure titleKey="lf_title_tracking" message={t('trk_load_failed')} onRetry={params.id ? retry : undefined} /> : null}
         {!failed && params.id && gate.visible ? <TrackingSkeleton label={t('sk_loading_tracking')} /> : null}
       </Screen>
     );
@@ -216,9 +228,9 @@ export default function Tracking() {
             <DocumentHistory request={item.request} className="" />
           ) : (
             <>
-              {item.documents.length === 0 && <Text className="py-6 text-center text-[13px] text-faint">No documents uploaded yet.</Text>}
+              {item.documents.length === 0 && <Text className="py-6 text-center text-[13px] text-faint">{t('rd_no_documents')}</Text>}
               {item.documents.map((d) => (
-                <DocRow key={d.id} label={d.name} meta={d.fileSizeBytes ? `${Math.round(d.fileSizeBytes / 1024)} KB` : ''} onPress={() => downloadAndShare(`/documents/${d.id}/file`, d.name).catch((err) => toast(err.message))} />
+                <DocRow key={d.id} label={d.name} meta={d.fileSizeBytes ? `${Math.round(d.fileSizeBytes / 1024)} KB` : ''} offline={isOffline} onPress={() => downloadCaseDocument(d)} />
               ))}
             </>
           )}

@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCached, setCached } from './screenCache';
 import { HIGHLIGHT_MS, newIds } from './newItems';
+import { useNetwork } from '../state/NetworkContext';
+import { retryOnRestoration } from './networkUi';
 
 // The one way a data screen loads what it shows (the same rules on every screen):
 //   - the FIRST load, with nothing to show yet, is `loading` (the screen draws its skeleton);
@@ -24,6 +26,10 @@ export function useResource({ key, fetcher, idsOf, onRefreshError, enabled = tru
   const refreshingRef = useRef(false);
   const failRef = useRef(onRefreshError);
   const idsRef = useRef(idsOf);
+  // A read that failed is read again ONCE when the connection comes back. useResource only ever loads data, so this can never resend a write.
+  const { restoredCount } = useNetwork();
+  const failedRef = useRef(false);
+  const restoredSeenRef = useRef(restoredCount);
   useEffect(() => { fetcherRef.current = fetcher; failRef.current = onRefreshError; idsRef.current = idsOf; });
   useEffect(() => { dataRef.current = data; }, [data]);
 
@@ -35,6 +41,7 @@ export function useResource({ key, fetcher, idsOf, onRefreshError, enabled = tru
     dataRef.current = next;
     setData(next);
     setError(null);
+    failedRef.current = false;
     return next;
   }, []);
 
@@ -42,7 +49,7 @@ export function useResource({ key, fetcher, idsOf, onRefreshError, enabled = tru
   const reload = useCallback(() => {
     const forKey = keyRef.current;
     if (dataRef.current === undefined) setError(null);
-    return run(forKey).catch((err) => { if (keyRef.current === forKey && dataRef.current === undefined) setError(err); });
+    return run(forKey).catch((err) => { failedRef.current = true; if (keyRef.current === forKey && dataRef.current === undefined) setError(err); });
   }, [run]);
 
   useEffect(() => {
@@ -52,6 +59,7 @@ export function useResource({ key, fetcher, idsOf, onRefreshError, enabled = tru
     setData(cached);
     setError(null);
     setHighlight([]);
+    failedRef.current = false;
     if (enabled) reload();
   }, [key, enabled, reload]);
 
@@ -70,12 +78,22 @@ export function useResource({ key, fetcher, idsOf, onRefreshError, enabled = tru
         }
       }
     } catch (err) {
+      failedRef.current = true; // what is on screen stays; it is refreshed once when the connection returns
       if (failRef.current) failRef.current(err);
     } finally {
       refreshingRef.current = false;
       setRefreshing(false);
     }
   }, [run]);
+
+  // Once per restoration: if the last read failed (a first load with nothing to show, or a quiet refresh that left older data on screen), read again ONCE.
+  // The flag is spent as it is used, so a second failure waits for the NEXT restoration: no loop, no timer, no polling.
+  useEffect(() => {
+    const next = retryOnRestoration({ restoredCount, seen: restoredSeenRef.current, enabled, failed: failedRef.current });
+    restoredSeenRef.current = next.seen;
+    failedRef.current = next.failed;
+    if (next.retry) reload();
+  }, [restoredCount, enabled, reload]);
 
   return { data, loading: data === undefined && !error, error, reload, refresh: onRefresh, onRefresh, refreshing, highlight };
 }

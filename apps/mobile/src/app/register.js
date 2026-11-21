@@ -9,10 +9,12 @@ import { NationalityPhoneFields } from '../components/NationalityPhone';
 import { GenderField } from '../components/GenderField';
 import { PasswordField } from '../components/widgets';
 import { LOGO } from '../data/images';
+import { errorText } from '../lib/errorText';
 import { apiPost } from '../lib/api';
 import { codeStepFrom, setAuthStep } from '../lib/authFlow';
 import { INITIAL_PHONE_STATE, dialOf, pickNationality, pickPhoneCountry } from '../lib/phoneCountry';
-import { PASSWORD_HINT, isValidEmail, isValidMobileNumber, isValidNamePart, passwordProblem } from '../lib/validators';
+import { isValidEmail, isValidMobileNumber, isValidNamePart, passwordProblemKey } from '../lib/validators';
+import { NeedsInternet } from '../components/network/NeedsInternet';
 
 const LOGO_W = 150;
 const LOGO_RATIO = 2440 / 1405;
@@ -35,8 +37,9 @@ export default function Register() {
   const [attempted, setAttempted] = useState(false);
   // The one consent: the Terms and Conditions and the Privacy Policy. Required.
   const [agreed, setAgreed] = useState(false);
-  const passwordError = password ? passwordProblem(password) : null;
-  const confirmError = confirm && confirm !== password ? 'Passwords do not match.' : null;
+  const passwordProblem = password ? passwordProblemKey(password) : null; // a dictionary key, or null
+  const passwordError = passwordProblem ? t(passwordProblem) : null;
+  const confirmError = confirm && confirm !== password ? t('err_pwd_mismatch') : null;
   const ready = isValidNamePart(firstName) && isValidNamePart(lastName) && gender && where.nationality && isValidMobileNumber(phone, dialOf(where.phoneCountry)) && isValidEmail(email)
     && password && !passwordError && confirm === password && agreed;
 
@@ -45,7 +48,7 @@ export default function Register() {
   const submit = async () => {
     if (!ready) {
       setAttempted(true);
-      toast('Enter your first and last name, gender, nationality, a valid mobile number, email and password, and accept the Terms and Conditions and Privacy Policy.');
+      toast(t('register_fill_all'));
       return;
     }
     setBusy(true);
@@ -57,11 +60,11 @@ export default function Register() {
         gender, nationality: where.nationality,
         consents: consentsBody(agreed),
       });
-      toast('OTP sent');
+      toast(t('change_otp_sent'));
       setAuthStep('register-otp', codeStepFrom(data));
       router.push('/register-otp');
     } catch (err) {
-      toast(err.message);
+      toast(errorText(err, t));
     } finally {
       setBusy(false);
     }
@@ -82,12 +85,12 @@ export default function Register() {
         <View className="gap-[18px]">
           <View className="flex-row gap-2.5">
             <Field
-              large required className="flex-1" label={t('field_first_name')} placeholder="First name" value={firstName} onChangeText={setFirstName}
-              autoCapitalize="words" error={firstName && !isValidNamePart(firstName) ? 'Enter your first name.' : undefined}
+              large required className="flex-1" label={t('field_first_name')} placeholder={t('field_first_name')} value={firstName} onChangeText={setFirstName}
+              autoCapitalize="words" error={firstName && !isValidNamePart(firstName) ? t('pd_err_first') : undefined}
             />
             <Field
-              large required className="flex-1" label={t('field_last_name')} placeholder="Last name" value={lastName} onChangeText={setLastName}
-              autoCapitalize="words" error={lastName && !isValidNamePart(lastName) ? 'Enter your last name.' : undefined}
+              large required className="flex-1" label={t('field_last_name')} placeholder={t('field_last_name')} value={lastName} onChangeText={setLastName}
+              autoCapitalize="words" error={lastName && !isValidNamePart(lastName) ? t('pd_err_last') : undefined}
             />
           </View>
           <GenderField value={gender} onChange={setGender} showError={attempted} />
@@ -99,19 +102,20 @@ export default function Register() {
           />
           <Field
             large required label={t('field_email_address')} placeholder="you@example.com" keyboardType="email-address" autoCapitalize="none" value={email} onChangeText={setEmail}
-            error={email && !isValidEmail(email) ? 'Enter a valid email address.' : undefined}
+            error={email && !isValidEmail(email) ? t('change_err_email') : undefined}
           />
           <PasswordField
-            required label={t('field_password')} placeholder="Create a password" value={password} onChangeText={setPassword}
-            error={passwordError} hint={PASSWORD_HINT}
+            required label={t('field_password')} placeholder={t('ph_create_password')} value={password} onChangeText={setPassword}
+            error={passwordError} hint={t('pwd_hint')}
           />
           <PasswordField
-            required label={t('field_confirm_password')} placeholder="Re-enter your password" value={confirm} onChangeText={setConfirm}
+            required label={t('field_confirm_password')} placeholder={t('ph_reenter_password')} value={confirm} onChangeText={setConfirm}
             error={confirmError}
           />
         </View>
         <SignupConsents value={agreed} onChange={setAgreed} />
-        <Button large title={t('register_btn')} dimmed={!ready} loading={busy} onPress={submit} className="mt-[26px]" textClassName="tracking-wide" />
+        <Button large title={t('register_btn')} dimmed={!ready} loading={busy} needsNetwork onPress={submit} className="mt-[26px]" textClassName="tracking-wide" />
+        <NeedsInternet />
         <Text className="mt-6 text-center text-[15px] text-muted">
           {t('register_login_q')} <Text className="font-inter-bold text-primary" onPress={() => router.push('/login')}>{t('cta_login')}</Text>
         </Text>

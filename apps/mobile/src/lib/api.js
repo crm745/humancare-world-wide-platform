@@ -4,8 +4,23 @@ import { getAccessToken, getRefreshToken, compareAndSaveTokens, compareAndClearT
 import { hasValidTokens } from './tokens';
 import { navReplace } from './nav';
 import { ensureAuthenticated, getCurrentPath, isPublicApiPath, loginRouteFor } from './authGuard';
+import { WRITE_TIMEOUT_MS, failureOf, startDeadline } from './apiErrors';
+import { reportApiOutcome } from './networkReporter';
+import { UPLOAD_STALL_MS, createStallWatch, uploadAnswered, uploadCancelled, uploadNoAnswer } from './uploadErrors';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+// The network service (lib/network.js) asks the same server's /health with this.
+export const API_BASE_URL = API_URL;
+
+// ---- network failures ---------------------------------------------------------------------------------------
+// A call that gets no answer ends in a user-safe error (lib/apiErrors.js: code 'network' or 'timeout', never a raw "Network request failed"), and every
+// call tells the network service what it came to (lib/networkReporter.js). None of this signs anyone out or resends anything: a network failure,
+// a timeout and a 5xx say nothing about the credentials. A WRITE (POST/PATCH) that gets no answer carries `outcomeUnknown: true`: it may have been
+// processed with only the answer lost, so nothing here, and no caller, may assume it failed or send it again by itself.
+// JSON writes (apiPost, apiPatch) give up waiting after WRITE_TIMEOUT_MS once sent; reads have GET_TIMEOUT_MS; uploads and downloads are not
+// cut off by size-independent timers (they can be large).
+let writeTimeoutMs = WRITE_TIMEOUT_MS;
+export const setWriteTimeoutForTests = (ms) => { writeTimeoutMs = ms; };
 
 // ---- how a failed renewal is told apart ---------------------------------------------------------------------
 // Only a refusal the server has confirmed ends the session. A network failure, a timeout, a 5xx or any other
@@ -18,8 +33,11 @@ let refreshTimeoutMs = REFRESH_TIMEOUT_MS;
 export const setRefreshTimeoutForTests = (ms) => { refreshTimeoutMs = ms; };
 
 const kinded = (kind, message, extra = {}) => Object.assign(new Error(message), { kind, ...extra });
-const sessionExpired = () => Object.assign(new Error('Your session expired. Please log in again.'), { status: 401, code: 'session_expired' });
-const unavailable = () => Object.assign(new Error('Could not reach the server. Please try again.'), { code: 'network' });
+// `notProcessed: true` marks the errors that CERTIFY the server did not process the call: it was refused before anything was sent, or the server's authentication check turned it away
+// (a 401 is answered before the request reaches any handler). A caller that must know whether a write may have taken effect (lib/requestSubmission.js) reads it.
+const sessionExpired = () => Object.assign(new Error('Your session expired. Please log in again.'), { status: 401, code: 'session_expired', notProcessed: true });
+// The renewal that followed a 401 could not reach the server: the call itself was already turned away by the 401, and no second attempt was made.
+const unavailable = () => Object.assign(new Error('Could not reach the server. Please try again.'), { code: 'network', notProcessed: true });
 
 // De-dupes concurrent refresh attempts: if three requests all hit an expired access
 // token at once, only one actual /auth/refresh call goes out; the other two just wait
@@ -128,10 +146,10 @@ const throwIfAborted = (signal) => {
   if (signal?.aborted) throw Object.assign(new Error('The request was cancelled.'), { name: 'AbortError', code: 'aborted' });
 };
 
-const notSignedIn = () => Object.assign(new Error('Please log in to continue.'), { status: 401, code: 'not_signed_in' });
+const notSignedIn = () => Object.assign(new Error('Please log in to continue.'), { status: 401, code: 'not_signed_in', notProcessed: true });
 
 async function apiFetch(path, options = {}, isRetry = false) {
-  const { validation, ...fetchOptions } = options;
+  const { validation, timeoutMs = 0, ...fetchOptions } = options;
   throwIfAborted(fetchOptions.signal);
   const needsSession = !isPublicApiPath(path);
   // A call that needs a signed-in person waits until the session has been checked and is sent only if it is
@@ -144,25 +162,50 @@ async function apiFetch(path, options = {}, isRetry = false) {
     throw notSignedIn();
   }
   throwIfAborted(fetchOptions.signal); // the waits above can outlast the caller's interest
-  const res = await fetch(`${API_URL}${path}`, {
-    ...fetchOptions,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...fetchOptions.headers,
-    },
-  });
+  // One attempt, with its own deadline (none for a read: apiGet has its own; a write has writeTimeoutMs). The deadline starts here, when the
+  // request is sent, so the wait for the session check above does not count against it. The caller's own signal (the session check) still wins.
+  const method = fetchOptions.method || 'GET';
+  const deadline = startDeadline(fetchOptions.signal, timeoutMs);
+  let res;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      ...fetchOptions,
+      signal: deadline.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...fetchOptions.headers,
+      },
+    });
+  } catch (err) {
+    deadline.clear();
+    const failure = failureOf(err, { method, deadline });
+    if (failure !== err) reportApiOutcome(failure.failure); // a caller's own cancel is not a network event
+    throw failure;
+  }
+  // Any answer, even a refusal, shows the server is reachable; a 5xx is told apart (one 5xx is not an outage, the network service decides).
+  reportApiOutcome(res.status >= 500 ? 'server' : 'ok');
 
   // Only an expired *access* token should trigger a silent refresh — `token` being
   // set means this was actually an authenticated call, not a login attempt that
   // failed for its own reason (wrong password/OTP), which also returns 401.
   if (res.status === 401 && token && !isRetry) {
+    deadline.clear();
     await renewSession(token);
     return apiFetch(path, options, true);
   }
-  if (res.status === 401 && token && isRetry) await endSessionIfInvalid(token);
+  if (res.status === 401 && token && isRetry) { deadline.clear(); await endSessionIfInvalid(token); }
 
-  const data = await res.json().catch(() => ({}));
+  let bodyUnread = false;
+  const data = await res.json().catch(() => { bodyUnread = true; return {}; });
+  const expired = deadline.expired();
+  deadline.clear();
+  // The answer began but the body never finished in time: for a write the outcome is unknown, so it is NOT reported as a success with an empty body.
+  if (bodyUnread && expired) {
+    const failure = failureOf(new Error('The answer did not finish'), { method, deadline });
+    reportApiOutcome('timeout');
+    throw failure;
+  }
   if (!res.ok) {
     // `code` / `secondsLeft` let auth screens show the specific inline
     // message (wrong vs expired OTP, account locked) instead of a generic toast.
@@ -171,6 +214,7 @@ async function apiFetch(path, options = {}, isRetry = false) {
     err.code = data.code;
     err.secondsLeft = data.secondsLeft;
     err.data = data;
+    if (res.status >= 500) err.failure = 'server';
     throw err;
   }
   return data;
@@ -190,18 +234,24 @@ export function apiGet(path, options) {
   const timer = timeoutMs > 0 ? setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs) : null;
   return apiFetch(path, { ...rest, signal: controller.signal })
     .catch((err) => {
-      if (timedOut) throw Object.assign(new Error('The server took too long to answer. Please try again.'), { code: 'timeout' });
+      if (timedOut) {
+        reportApiOutcome('timeout');
+        // A read: running it again is always safe (outcomeUnknown: false).
+        throw Object.assign(new Error('The server took too long to answer. Please try again.'), { code: 'timeout', failure: 'timeout', outcomeUnknown: false });
+      }
       throw err;
     })
     .finally(() => { if (timer) clearTimeout(timer); });
 }
 
+// Writes wait for their answer at most writeTimeoutMs once sent. A timeout, like a lost connection, is an UNKNOWN outcome (`outcomeUnknown: true`), never
+// "failed": the server may have processed it. Nothing resends it.
 export function apiPost(path, body) {
-  return apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch(path, { method: 'POST', body: JSON.stringify(body), timeoutMs: writeTimeoutMs });
 }
 
 export function apiPatch(path, body) {
-  return apiFetch(path, { method: 'PATCH', body: JSON.stringify(body) });
+  return apiFetch(path, { method: 'PATCH', body: JSON.stringify(body), timeoutMs: writeTimeoutMs });
 }
 
 // File uploads go through FormData, which needs its own multipart boundary in the
@@ -227,26 +277,53 @@ function formFields(fields) {
     .map(([key, value]) => [key, String(value)]);
 }
 
-export async function apiUpload(path, file, isRetry = false, onProgress, fields) {
+// `options` (optional, the sixth argument):
+//   signal         an AbortSignal: aborting it cancels the upload. Cancelled BEFORE the transfer began (while waiting for the session): nothing was sent (`notProcessed`). Cancelled once the
+//                  transfer began: some bytes may have reached the server, so the outcome is UNKNOWN (`outcomeUnknown`), never "failed" (lib/uploadErrors.js)
+//   stallTimeoutMs an upload that makes NO progress for this long ends as a timeout (default 60 s; 0 = never). No total duration is assumed. Once every byte has been sent the server
+//                  may still scan the file, so the wait for its answer is longer (UPLOAD_RESPONSE_WAIT_MS). A timeout is an UNKNOWN outcome, like a lost connection.
+// Nothing here retries or resends: a failure of any kind is thrown once, classified, and the caller decides (lib/uploadRecovery.js).
+export async function apiUpload(path, file, isRetry = false, onProgress, fields, options = {}) {
+  const { signal, stallTimeoutMs = UPLOAD_STALL_MS } = options || {};
   // Uploads always belong to a signed-in person: held until the session is known, and sent only if it is valid.
   if (!isRetry) await ensureAuthenticated();
+  if (signal && signal.aborted) throw uploadCancelled({ transmitted: false });
   const token = await getAccessToken();
   if (!token) {
     navReplace(loginRouteFor(getCurrentPath()));
     throw notSignedIn();
   }
+  if (signal && signal.aborted) throw uploadCancelled({ transmitted: false });
   const url = `${API_URL}${path}`;
   const extra = formFields(fields);
+  const again = () => apiUpload(path, file, true, onProgress, fields, options);
 
   if (Platform.OS === 'web') {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      let transmitted = false; // the transfer has begun: from here the server may have the file
+      let stalled = false;
+      let cancelled = false;
+      let settled = false;
+      const watch = createStallWatch({ stallMs: stallTimeoutMs, onStall: () => { stalled = true; xhr.abort(); } });
+      const onAbort = () => { cancelled = true; xhr.abort(); };
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        watch.stop();
+        if (signal) signal.removeEventListener('abort', onAbort);
+        fn(value);
+      };
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
       xhr.open('POST', url);
       xhr.setRequestHeader('Authorization', `Bearer ${token}`);
       xhr.upload.onprogress = (e) => {
-        if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total);
+        const fraction = e.lengthComputable && e.total > 0 ? e.loaded / e.total : null;
+        watch.touch(fraction !== null && fraction >= 1);
+        if (onProgress && fraction !== null) onProgress(fraction);
       };
       xhr.onload = async () => {
+        watch.stop();
         let data = {};
         try { data = JSON.parse(xhr.responseText); } catch { /* no/invalid body */ }
 
@@ -254,42 +331,59 @@ export async function apiUpload(path, file, isRetry = false, onProgress, fields)
           try {
             await renewSession(token);
           } catch (err) {
-            reject(err);
+            finish(reject, err);
             return;
           }
-          apiUpload(path, file, true, onProgress, fields).then(resolve, reject);
+          settled = true;
+          if (signal) signal.removeEventListener('abort', onAbort);
+          again().then(resolve, reject);
           return;
         }
         if (xhr.status === 401 && isRetry) {
           try {
             await endSessionIfInvalid(token);
           } catch (err) {
-            reject(err);
+            finish(reject, err);
             return;
           }
         }
 
-        if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-        else reject(new Error(data.error || 'Upload failed. Please try again.'));
+        reportApiOutcome(xhr.status >= 500 ? 'server' : 'ok');
+        if (xhr.status >= 200 && xhr.status < 300) finish(resolve, data);
+        else finish(reject, uploadAnswered(xhr.status, data));
       };
-      xhr.onerror = () => reject(new Error('Upload failed. Please try again.'));
+      xhr.onerror = () => { reportApiOutcome('network'); finish(reject, uploadNoAnswer({ transmitted })); };
+      xhr.onabort = () => {
+        if (stalled) { reportApiOutcome('timeout'); finish(reject, uploadNoAnswer({ timedOut: true, transmitted })); return; }
+        finish(reject, uploadCancelled({ transmitted: cancelled ? transmitted : true }));
+      };
       // A browser needs the file itself in the form: the { uri, name, type } object that React
       // Native accepts there turns into the text "[object Object]" and the server sees no file.
       // The picked file's uri is a blob: URL, so fetch it back into a Blob.
       fetch(file.uri)
         .then((res) => res.blob())
         .then((blob) => {
+          if (settled) return;
+          if (signal && signal.aborted) { finish(reject, uploadCancelled({ transmitted: false })); return; }
           const form = new FormData();
           for (const [key, value] of extra) form.append(key, value);
           const typed = blob.type ? blob : blob.slice(0, blob.size, file.mimeType || 'application/octet-stream');
           form.append('file', typed, file.name);
+          transmitted = true;
+          watch.start();
           xhr.send(form);
         })
-        .catch(() => reject(new Error('Upload failed. Please try again.')));
+        .catch(() => finish(reject, uploadNoAnswer({ transmitted: false }))); // the file itself could not be read: nothing was sent
     });
   }
 
-  const task = FileSystem.createUploadTask(
+  let transmitted = false;
+  let stalled = false;
+  let cancelled = false;
+  let task;
+  const watch = createStallWatch({ stallMs: stallTimeoutMs, onStall: () => { stalled = true; if (task && typeof task.cancelAsync === 'function') task.cancelAsync().catch(() => {}); } });
+  const onAbort = () => { cancelled = true; if (task && typeof task.cancelAsync === 'function') task.cancelAsync().catch(() => {}); };
+  task = FileSystem.createUploadTask(
     url,
     file.uri,
     {
@@ -301,23 +395,41 @@ export async function apiUpload(path, file, isRetry = false, onProgress, fields)
       ...(extra.length ? { parameters: Object.fromEntries(extra) } : {}),
     },
     (progress) => {
-      if (onProgress && progress.totalBytesExpectedToSend > 0) {
-        onProgress(progress.totalBytesSent / progress.totalBytesExpectedToSend);
-      }
+      const expected = progress.totalBytesExpectedToSend;
+      const fraction = expected > 0 ? progress.totalBytesSent / expected : null;
+      watch.touch(fraction !== null && fraction >= 1);
+      if (onProgress && fraction !== null) onProgress(fraction);
     },
   );
-
-  const result = await task.uploadAsync();
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
+  transmitted = true; // the transfer starts now: from here the server may have the file
+  watch.start();
+  let result = null;
+  try {
+    result = await task.uploadAsync();
+  } catch {
+    result = null; // no answer: told apart below
+  } finally {
+    watch.stop();
+    if (signal) signal.removeEventListener('abort', onAbort);
+  }
+  if (!result) {
+    if (stalled) { reportApiOutcome('timeout'); throw uploadNoAnswer({ timedOut: true, transmitted }); }
+    if (cancelled) throw uploadCancelled({ transmitted });
+    reportApiOutcome('network');
+    throw uploadNoAnswer({ transmitted });
+  }
   let data = {};
   try { data = JSON.parse(result.body); } catch { /* no/invalid body */ }
 
   if (result.status === 401 && !isRetry) {
     await renewSession(token);
-    return apiUpload(path, file, true, onProgress, fields);
+    return again();
   }
   if (result.status === 401 && isRetry) await endSessionIfInvalid(token);
 
-  if (result.status < 200 || result.status >= 300) throw new Error(data.error || 'Upload failed. Please try again.');
+  reportApiOutcome(result.status >= 500 ? 'server' : 'ok');
+  if (result.status < 200 || result.status >= 300) throw uploadAnswered(result.status, data);
   return data;
 }
 

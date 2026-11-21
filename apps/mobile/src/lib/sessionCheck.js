@@ -29,7 +29,10 @@ function withTimeout(promiseOrValue, ms) {
   return Promise.race([Promise.resolve(promiseOrValue), timeout]).finally(() => clearTimeout(timer));
 }
 
-export async function checkSession({ getToken, fetchMe, signal, tokenTimeoutMs = TOKEN_TIMEOUT_MS, meTimeoutMs = ME_TIMEOUT_MS }) {
+// `onToken(hasSavedSession)` (optional) is told, as soon as the saved credentials have been read, whether there are any. It changes nothing about the
+// check or its result: it only lets the app tell "a saved session that is still being (or could not be) validated" from "no saved session at all"
+// (a new or logged-out person) while the server is being asked. It is NOT called when the saved session could not be read (a storage error: nothing is known).
+export async function checkSession({ getToken, fetchMe, signal, tokenTimeoutMs = TOKEN_TIMEOUT_MS, meTimeoutMs = ME_TIMEOUT_MS, onToken }) {
   // A check that has already been cancelled starts nothing: no token read, no /auth/me.
   if (signal?.aborted) return { status: 'aborted' };
   let token;
@@ -38,6 +41,7 @@ export async function checkSession({ getToken, fetchMe, signal, tokenTimeoutMs =
   } catch {
     return { status: 'error' };
   }
+  if (onToken && !signal?.aborted) onToken(!!token);
   if (!token) return { status: 'anon' };
   if (signal?.aborted) return { status: 'aborted' }; // cancelled while the token was being read
 

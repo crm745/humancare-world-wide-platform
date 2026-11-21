@@ -34,7 +34,7 @@ const TAGLINE_STYLE = { marginTop: 14, paddingHorizontal: 28, textAlign: 'center
 // ('authed'), Getting Started for everything else (a new person, a logged-out person, a refused or unreadable session, a server that could not be asked). A check that has
 // not answered by SESSION_TIMEOUT_MS (4 s) also goes to Getting Started, so the splash is never stuck. It never goes twice.
 export default function Splash() {
-  const { t, authStatus } = useApp();
+  const { t, authStatus, savedSession } = useApp();
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = useWindowDimensions();
   const [intro] = useState(() => new Animated.Value(0));
@@ -53,11 +53,11 @@ export default function Splash() {
 
   // Goes once, from the resolved authentication state (lib/splash.js splashDecision): never earlier than the minimum, never on a guess.
   useEffect(() => {
-    const route = splashDecision({ status: authStatus, minElapsed, timedOut, navigated: navigated.current });
+    const route = splashDecision({ status: authStatus, savedSession, minElapsed, timedOut, navigated: navigated.current });
     if (!route) return;
     navigated.current = true;
     navReplace(route);
-  }, [authStatus, minElapsed, timedOut]);
+  }, [authStatus, savedSession, minElapsed, timedOut]);
 
   useEffect(() => {
     let cancelled = false;

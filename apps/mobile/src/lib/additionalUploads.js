@@ -6,7 +6,7 @@
 //                `replacesDocumentId`; the server keeps the old version in the history
 // Neither creates a request or a Case: the request id is the one the screen is already showing.
 import { MAX_DOCUMENTS_PER_REQUEST } from './requestDocuments';
-import { runSubmission } from './requestUploads';
+import { recoverUploads, runSubmission } from './requestUploads';
 
 export const uploadPath = (requestId) => `/requests/me/${requestId}/documents`;
 
@@ -27,8 +27,14 @@ export function filesToSend(target, files) {
   });
 }
 
-// The extra multipart fields for one file: only a replacement has any.
-export const fieldsFor = (file) => (file && file.replacesDocumentId != null && file.replacesDocumentId !== '' ? { replacesDocumentId: file.replacesDocumentId } : undefined);
+// The extra multipart fields for one file: the file's own upload id (Phase 5: the server recognises a retry of this file by it), and, for a replacement only, the id of the document it
+// replaces. A file with neither has none.
+export function fieldsFor(file) {
+  const fields = {};
+  if (file && file.replacesDocumentId != null && file.replacesDocumentId !== '') fields.replacesDocumentId = file.replacesDocumentId;
+  if (file && typeof file.clientUploadId === 'string' && file.clientUploadId) fields.clientUploadId = file.clientUploadId;
+  return Object.keys(fields).length ? fields : undefined;
+}
 
 // Uploads the files not yet accepted, one at a time, to the existing request. A failed file never stops
 // the others, a file already accepted is never sent again, and the request is never created or changed.
@@ -36,14 +42,30 @@ export const fieldsFor = (file) => (file && file.replacesDocumentId != null && f
 // another call with those values.
 //   send(path, file, onProgress, fields) -> resolves when the server has the file, throws when it has not
 //   onProgress({ index, total, progress })
-export function sendAdditionalDocuments({ requestId, target, files, uploaded, uploadErrors, send, onProgress }) {
+export function sendAdditionalDocuments({ requestId, target, files, uploaded, uploadErrors, uploadUnknown, send, onProgress, onFile, generateId, adoptIds, journal }) {
   if (requestId === undefined || requestId === null || requestId === '') throw new Error('No request to add documents to.');
   return runSubmission({
     sentRequest: { id: requestId },
     uploaded,
     uploadErrors,
+    uploadUnknown,
     files: filesToSend(target, files),
     upload: (file, report, sent) => send(uploadPath(sent.id), file, report, fieldsFor(file)),
     onProgress,
+    onFile,
+    generateId,
+    adoptIds,
+    journal,
+  });
+}
+
+// "Check status" + "Retry missing" for the same panel (lib/requestUploads.js recoverUploads): the request's document list is read first and matched by upload id; only files confirmed
+// missing (or never sent, or refused) are sent again. `fetchRequest(requestId)` resolves the API's { request }.
+export function recoverAdditionalDocuments({ requestId, target, files, uploaded, uploadErrors, uploadUnknown, fetchRequest, send, onProgress, onFile, generateId, adoptIds, journal }) {
+  if (requestId === undefined || requestId === null || requestId === '') throw new Error('No request to add documents to.');
+  return recoverUploads({
+    requestId, files: filesToSend(target, files), uploaded, uploadErrors, uploadUnknown, fetchRequest,
+    upload: (file, report, sent) => send(uploadPath(sent.id), file, report, fieldsFor(file)),
+    onProgress, onFile, generateId, adoptIds, journal,
   });
 }

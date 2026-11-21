@@ -314,10 +314,27 @@ describe('Edit and Change go to the right step; Submit is unchanged', () => {
     // Re-recorded once more for Corporate Medical Solutions: the only change to this block is one extra branch before the Private Charter one,
     // `if (isCorporateService(d.service)) { ... await apiPost('/requests', buildCorporatePayload(d)) ... }` (checked in corporateMedicalForm.test.js). Every other branch is untouched.
     // The Private Charter branch itself is untouched.
-    expect(crypto.createHash('sha256').update(review.slice(a, b)).digest('hex')).toBe('77f512b9119555cf8f8f639da4dabc46a1c8b80d7d53bfffb250df8604ab55bc');
+    // Re-recorded for Phase 4 (idempotent submission): every send now goes through `send(...)`, which adds the submission's idempotency key (lib/requestSubmission.js) and confirms
+    // the key once the server has saved the request; the catch starts with the unknown-outcome check (an answer that never arrived is not shown as a failure); the
+    // "Check status" function sits before the upload label. The payload builders, the generic body, the uploads and the field-error handling are untouched
+    // (requestIdempotency.test.js checks all of this).
+    // Re-recorded again for the Phase 4 follow-up (recovery safety): a retry sends the ORIGINAL payload, so `send` passes `sendOriginal`; the catch tells an edited form (nothing sent)
+    // apart from an unconfirmed outcome and a confirmed refusal; and the explicit choices (send the original again, submit the changes as a new request, keep the original) sit next to
+    // "Check status". The payload builders and every service's body are untouched.
+    // Re-recorded for the simplified offline experience: the recovery cards and their handlers (Check status, send the original, keep the original, submit changes) are gone from submit();
+    // a lost answer is one short message and the same Submit button is the retry (same key, original payload). The payload builders and every other line are as before.
+    // Re-recorded for Phase 5: submit() now sends every service's documents through sendWithDocuments (runSubmission with per-file upload ids, a Cancel button, and unknown outcomes kept apart
+    // from refusals); the payload builders themselves, and every other line of the block, are as before (uploadRecovery.test.js).
+    // Re-recorded for the new network design: a lost or already-sent answer sets a notice (setNotice) shown above the button instead of a toast (components/network/StatusNotice.js).
+    // Re-recorded for the offline fixes: a Private Charter place typed offline is matched to the verified city list, online, before anything is sent (charterDraft; lib/citySearch.js resolveCharterCities).
+    // Re-recorded for the restart-protection fix: guardedSend (lib/submissionGate.js) asks the server about an unresolved earlier submission before any send, send() passes the service, and a blocked or lost answer sets the Try again label (submissionRestart.test.js).
+    // Re-recorded for the Phase 4 final safety fix: a refusal of a LATER attempt (session expired or unverified, a 4xx) while an earlier attempt is unconfirmed no longer ends the
+    // pending state: Review tells the person about the refusal and keeps the unconfirmed card (requestUnknownState.test.js).
+    // Re-recorded for the localization pass: the one toast of this block ("Upload at least one document ...") now reads t('req_err_need_doc') and the error toast reads errorText(err, t) (lib/errorText.js: the app's own errors in the person's language); nothing else in the block changed.
+    expect(crypto.createHash('sha256').update(review.slice(a, b)).digest('hex')).toBe('fdef15532305a357509e29b0c36452f133c851e60872cdf1d9ff967b2ff9a8eb');
   });
   test('the payload bodies are still there', () => {
-    expect(review).toContain('buildPrivateCharterPayload(d)');
+    expect(review).toContain('buildPrivateCharterPayload(charterDraft)');
     expect(review).toContain("patientLocation: d.location,");
     // (Mortal Remains' own body, lib/mortalRemains.js buildMortalPayload, replaced the generic body's deceased fields)
     expect(review).toContain('buildMortalPayload(d)');
@@ -347,7 +364,7 @@ describe('the pieces', () => {
   test('the document row: one line with an ellipsis, a chevron only when it opens, primarySoft / #E0F5F4 tiles', () => {
     const blocks = read('components/request/DetailsBlocks.js');
     expect(blocks).toContain("backgroundColor: doc.isImage ? '#E0F5F4' : COLORS.primarySoft");
-    expect(blocks).toContain('{doc.openable ? <ChevronRight size={20}');
+    expect(blocks).toContain('{doc.openable && !offline ? <ChevronRight size={20}');
     expect(blocks).toContain('if (!doc.openable) return <View style={box}>{body}</View>;');
   });
   test('the care level and mobility sit side by side on the review page', () => {

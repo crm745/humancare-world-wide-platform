@@ -1,14 +1,16 @@
 import { LegalScreen } from '../components/LegalScreen';
 
+// Each section is [heading key, body key]: the text is in the dictionary (data/i18n.json), in every language. The legal wording in a language other than English is a translation that
+// a legal reviewer must approve before release (the English text is the approved original).
 const SECTIONS = [
-  ['Acceptance of Terms', 'By creating an account or using the HumanCare World Wide app, you agree to be bound by these Terms & Conditions. If you do not agree, please do not use the platform.'],
-  ['Nature of Services', 'HumanCare World Wide facilitates medical assistance services including air and ground ambulance coordination, hospitalization assistance, teleconsultation, home healthcare, and related support. We act as a coordinator between you and licensed medical providers — we do not ourselves provide direct medical treatment through this app.'],
-  ['Not a Substitute for Emergency Services', 'This app is not a replacement for local emergency services. In a life-threatening emergency, contact your local emergency number immediately in addition to using this app.'],
-  ['Account Responsibilities', 'You are responsible for the accuracy of information you submit, including patient details, medical history, and contact information. Inaccurate information may delay or affect the assistance provided.'],
-  ['Payments & Insurance', 'Where services are billed directly or coordinated through an insurance provider or corporate account, applicable charges, coverage limits, and payment terms will be communicated prior to service confirmation.'],
-  ['Limitation of Liability', 'HumanCare World Wide coordinates with third-party medical providers and transport operators. While we vet our partner network, we are not liable for the independent actions of third-party providers beyond our reasonable coordination responsibilities.'],
-  ['Changes to These Terms', 'We may update these Terms from time to time. Continued use of the app after changes are posted constitutes acceptance of the revised Terms.'],
-  ['Contact Us', 'For questions about these Terms, contact us at '],
+  ['terms_s1_h', 'terms_s1_b'],
+  ['terms_s2_h', 'terms_s2_b'],
+  ['terms_s3_h', 'terms_s3_b'],
+  ['terms_s4_h', 'terms_s4_b'],
+  ['terms_s5_h', 'terms_s5_b'],
+  ['terms_s6_h', 'terms_s6_b'],
+  ['terms_s7_h', 'terms_s7_b'],
+  ['legal_contact_h', 'terms_s8_b'],
 ];
 
 export default function Terms() {

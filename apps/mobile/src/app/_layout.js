@@ -13,7 +13,9 @@ import { Inter_600SemiBold } from '@expo-google-fonts/inter/600SemiBold';
 import { Inter_700Bold } from '@expo-google-fonts/inter/700Bold';
 import { Inter_800ExtraBold } from '@expo-google-fonts/inter/800ExtraBold';
 import { AppProvider, useApp } from '../state/AppContext';
+import { NetworkProvider } from '../state/NetworkContext';
 import { Toast } from '../components/widgets';
+import { BannerDriver } from '../components/network/BannerDriver';
 import { AuthGate } from '../components/AuthGate';
 import { SosFab } from '../components/sos/SosFab';
 import { RecaptchaBadgeGate } from '../components/RecaptchaBadgeGate';
@@ -31,6 +33,7 @@ function Shell() {
       <SosFab />
       <RecaptchaBadgeGate />
       <AuthGate />
+      <BannerDriver />
       <Toast />
       <SystemBack />
     </View>
@@ -45,9 +48,11 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <KeyboardRoot>
-        <AppProvider>
-          <Shell />
-        </AppProvider>
+        <NetworkProvider>
+          <AppProvider>
+            <Shell />
+          </AppProvider>
+        </NetworkProvider>
       </KeyboardRoot>
     </SafeAreaProvider>
   );

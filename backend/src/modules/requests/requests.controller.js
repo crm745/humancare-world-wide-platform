@@ -1,11 +1,12 @@
 const fs = require('fs');
 const {
   createRequest,
+  findRequestByClientRequestId,
   listRequestsForUser,
   getRequestForUser,
   listDocumentsForUser,
 } = require('./requests.service');
-const { addDocumentToCase } = require('../documents/documents.service');
+const { addDocumentToCase, findCaseDocumentByClientUploadId } = require('../documents/documents.service');
 const { toSafeDocument } = require('../documents/document-response');
 const { addPatientDocument, scanRequestDocument, toUploadResponse } = require('../request-review/request-review.service');
 const { sendMedicalReportToBitrix } = require('../bitrix/bitrix.service');
@@ -17,6 +18,11 @@ const {
   isCommercialAirKey, isGroundKey, usesCriticalLevelPage, oxygenLpmProblem, commercialAirCareLevelProblem,
 } = require('../../common/constants/request.constants');
 const { validatePrivateCharterRequest, isObject } = require('./private-charter.validation');
+const { parseClientRequestId } = require('./client-request-id');
+const { parseClientUploadId, isUniqueViolation } = require('./client-upload-id');
+const { scanBeforeStore, sameStoredContent, withUploadLock } = require('../documents/legacy-scan');
+const { hashFile } = require('../request-review/request-review.files');
+const { isScanClean } = require('../documents/document-scan');
 const { resolveCityRefs, getVerifiedCity } = require('../geo/geo.service');
 const { isTeleStructuredRequest, isStructuredTeleRow, validateTeleRequest } = require('./tele-consultation.validation');
 const { toPatientRequest, toPatientRequests } = require('./request-response');
@@ -117,6 +123,28 @@ async function submitRequest(req, res, next) {
     if (!isObject(req.body)) {
       return res.status(400).json({ error: 'The request body must be a JSON object.', fields: {} });
     }
+    // Idempotent submission: the app sends one UUID (`clientRequestId`) per logical submission and reuses it for every retry. It is OPTIONAL (an older app build sends none and is
+    // handled exactly as before). It is taken out of the body here, so no service validator ever sees it, and it is looked up BEFORE anything else: a retry of a submission that
+    // was already saved gets the ORIGINAL request back (HTTP 200) without being validated, resolved or saved again, so a rule that changed in between (a date that has since
+    // passed, a city lookup that is down) can never turn a saved request into an error. The database's unique index (user, key) is the final guard for the race this lookup cannot see.
+    const idKey = parseClientRequestId(req.body.clientRequestId);
+    if (idKey.present && !idKey.valid) {
+      return res.status(400).json({ error: FIELD_ERRORS_MESSAGE, fields: { clientRequestId: 'clientRequestId must be a UUID.' } });
+    }
+    let clientRequestId;
+    if (idKey.present) {
+      clientRequestId = idKey.id;
+      const { clientRequestId: _key, ...bodyWithoutKey } = req.body;
+      req.body = bodyWithoutKey;
+      const existing = await findRequestByClientRequestId(req.user.id, clientRequestId);
+      if (existing) {
+        // A key belongs to ONE submission of ONE service: reusing it for another service is a bug in the caller, never a replay.
+        if (typeof req.body.serviceKey === 'string' && existing.serviceKey && req.body.serviceKey !== existing.serviceKey) {
+          return res.status(409).json({ error: 'This request ID was already used for a different service.', code: 'client_request_id_reused' });
+        }
+        return res.status(200).json({ request: toPatientRequest(existing) });
+      }
+    }
     // The Private Charter name belongs to that service key alone: a request that uses it with
     // another (or no) key, such as the app's old "air" default, is refused, never relabelled.
     if (req.body.serviceType === PRIVATE_CHARTER_SERVICE_TYPE && req.body.serviceKey !== PRIVATE_CHARTER_KEY) {
@@ -134,7 +162,7 @@ async function submitRequest(req, res, next) {
       if (Object.keys(fields).length) return res.status(400).json({ error: FIELD_ERRORS_MESSAGE, fields });
       // Which legacy formats are still arriving, by field name only: never the values.
       if (legacy.length) console.info('[legacy-format] privatecharter:', legacy.join(', '));
-      const request = await createRequest(req.user.id, data);
+      const request = await createRequest(req.user.id, data, { clientRequestId });
       return res.status(201).json({ request: toPatientRequest(request) });
     }
     // Teleconsultation in its structured format has its own validator (isolated in tele-consultation.validation.js): it derives the address
@@ -143,7 +171,7 @@ async function submitRequest(req, res, next) {
     if (isTeleStructuredRequest(req.body)) {
       const { error, data } = validateTeleRequest(req.body);
       if (error) return res.status(400).json({ error });
-      const request = await createRequest(req.user.id, data);
+      const request = await createRequest(req.user.id, data, { clientRequestId });
       return res.status(201).json({ request: toPatientRequest(request) });
     }
     // Mortal Remains has its own validator (isolated in mortal-remains.validation.js); it derives the description, the address copy and the stored
@@ -154,7 +182,7 @@ async function submitRequest(req, res, next) {
     if (isMortalKey(req.body.serviceKey)) {
       const { error, data } = validateMortalRequest(req.body);
       if (error) return res.status(400).json({ error });
-      const request = await createRequest(req.user.id, data);
+      const request = await createRequest(req.user.id, data, { clientRequestId });
       return res.status(201).json({ request: toPatientRequest(request) });
     }
     // Home Healthcare has its own validator (isolated in home-healthcare.validation.js): it enforces the new format only (the older generic body, with
@@ -162,7 +190,7 @@ async function submitRequest(req, res, next) {
     if (isHomeKey(req.body.serviceKey)) {
       const { error, data } = validateHomeRequest(req.body);
       if (error) return res.status(400).json({ error });
-      const request = await createRequest(req.user.id, data);
+      const request = await createRequest(req.user.id, data, { clientRequestId });
       return res.status(201).json({ request: toPatientRequest(request) });
     }
     // Medical Value Travel in its structured format has its own validator (isolated in medical-value-travel.validation.js). It is chosen by the fields it
@@ -176,7 +204,7 @@ async function submitRequest(req, res, next) {
       }
       const { error, data } = validateMvtRequest(req.body, { cities });
       if (error) return res.status(400).json({ error });
-      const request = await createRequest(req.user.id, data);
+      const request = await createRequest(req.user.id, data, { clientRequestId });
       return res.status(201).json({ request: toPatientRequest(request) });
     }
     // Marine Medical Safety in its structured format has its own validator (isolated in marine-medical-safety.validation.js), chosen by the fields it carries
@@ -191,7 +219,7 @@ async function submitRequest(req, res, next) {
       }
       const { error, data } = validateMarineRequest(req.body, { cities });
       if (error) return res.status(400).json({ error });
-      const request = await createRequest(req.user.id, data);
+      const request = await createRequest(req.user.id, data, { clientRequestId });
       return res.status(201).json({ request: toPatientRequest(request) });
     }
     // Corporate Medical Solutions in its structured, patient-side format has its own validator (isolated in corporate-medical.validation.js), chosen by the fields it
@@ -200,7 +228,7 @@ async function submitRequest(req, res, next) {
     if (isCorporateStructuredRequest(req.body)) {
       const { error, data } = validateCorporateRequest(req.body);
       if (error) return res.status(400).json({ error });
-      const request = await createRequest(req.user.id, data);
+      const request = await createRequest(req.user.id, data, { clientRequestId });
       return res.status(201).json({ request: toPatientRequest(request) });
     }
     const missing = REQUIRED_FIELDS.filter((field) => !req.body[field]);
@@ -222,7 +250,7 @@ async function submitRequest(req, res, next) {
     const { error: genericError, data: genericData, unknownFields } = validateGenericRequest(req.body);
     if (genericError) return res.status(400).json({ error: genericError });
     if (unknownFields.length) console.info(unknownFieldsLogLine(req.body.serviceKey, unknownFields, SERVICE_KEYS));
-    const request = await createRequest(req.user.id, genericData);
+    const request = await createRequest(req.user.id, genericData, { clientRequestId });
     res.status(201).json({ request: toPatientRequest(request) });
   } catch (err) {
     next(err);
@@ -246,6 +274,19 @@ async function listMyRequests(req, res, next) {
 async function getMyRequestById(req, res, next) {
   try {
     const request = await getRequestForUser(req.user.id, req.params.id);
+    res.json({ request: toPatientRequest(request) });
+  } catch (err) {
+    next(err);
+  }
+}
+//
+// "Check status" after a submission's answer was lost: the patient's own request for a client request ID, or 404 (not saved, YET: an answer can arrive late). Owner only.
+async function getMyRequestByClientRequestId(req, res, next) {
+  try {
+    const idKey = parseClientRequestId(req.params.clientRequestId);
+    if (!idKey.present || !idKey.valid) return res.status(400).json({ error: 'clientRequestId must be a UUID.' });
+    const request = await findRequestByClientRequestId(req.user.id, idKey.id);
+    if (!request) return res.status(404).json({ error: 'Request not found', code: 'not_found' });
     res.json({ request: toPatientRequest(request) });
   } catch (err) {
     next(err);
@@ -294,6 +335,13 @@ async function uploadRequestDocument(req, res, next) {
     // The file is already on disk (multer). If the request is not found or is not the patient's, or
     // has nothing to attach it to, it must not be left behind unreferenced.
     const discardFile = () => fs.promises.rm(req.file.path, { force: true }).catch(() => {});
+    // Phase 5: the app's id for this logical upload (optional; an older app sends none). A malformed one is refused, never guessed at.
+    const uploadId = parseClientUploadId(req.body && req.body.clientUploadId);
+    if (uploadId.present && !uploadId.valid) {
+      await discardFile();
+      return res.status(400).json({ error: 'clientUploadId must be a UUID.' });
+    }
+    const clientUploadId = uploadId.present ? uploadId.id : undefined;
     let request;
     try {
       request = await getRequestForUser(req.user.id, req.params.id);
@@ -316,8 +364,10 @@ async function uploadRequestDocument(req, res, next) {
     // "replacesDocumentId" field marks an earlier document as replaced.
     if (request.reviewStatus != null) {
       const stored = await addPatientDocument({
-        userId: req.user.id, requestId: request.id, file: req.file, replacesDocumentId: req.body && req.body.replacesDocumentId,
+        userId: req.user.id, requestId: request.id, file: req.file, replacesDocumentId: req.body && req.body.replacesDocumentId, clientUploadId,
       });
+      // A repeat of an upload the server already has: the original is the answer. No second scan, replacement or count (and its new file was deleted).
+      if (stored.replayed) return res.status(200).json({ document: toUploadResponse(stored) });
       // Fail closed: if the scanner is down the document is saved but stays "error" (unusable)
       // until the worker's next sweep scans it.
       const scanned = await scanRequestDocument(stored.id).catch(() => null);
@@ -331,32 +381,72 @@ async function uploadRequestDocument(req, res, next) {
     // certificate, so every file is stored as a neutral "Supporting Document" (never "Death Certificate", never "Medical Report") and none is ever
     // sent to Bitrix (only "Medical Report" documents are, by this upload and by the retry sweep). Checked first: at most 10 files, and the file's
     // content must be what its type and name claim.
+    // The file's SHA-256, taken now: it is the identity of the CONTENT (a repeat is the same upload only if its digest equals the stored original's) and the scan below is bound to it, so
+    // "clean" describes exactly the bytes that are kept. Never the name or the size.
+    let sha256;
+    try {
+      sha256 = await hashFile(req.file.path);
+    } catch {
+      await discardFile();
+      return res.status(400).json({ error: 'The uploaded file could not be read.' });
+    }
+    // A repeat of an upload this case already has returns the original BEFORE anything else (after the owner check above): no limit check, no scan, no second document, no Bitrix message.
+    // Its new file is deleted. Same id with different content is refused, never answered with a document that does not match.
+    const replayLegacy = async (prior) => {
+      await discardFile();
+      if (!(await sameStoredContent(prior, sha256))) return res.status(409).json({ error: 'That upload id was already used for a different file.', code: 'client_upload_id_reused' });
+      return res.status(200).json({ document: { ...toSafeDocument(prior), clientUploadId: prior.clientUploadId } });
+    };
     const mortal = isMortalRequestKey(request.serviceKey);
-    if (mortal) {
-      const problem = await mortalUploadProblem(request, req.file);
-      if (problem) {
-        await discardFile();
-        return res.status(400).json({ error: problem });
+    const accept = async () => {
+      if (clientUploadId) {
+        const prior = await findCaseDocumentByClientUploadId(request.case.id, clientUploadId);
+        if (prior) return replayLegacy(prior);
       }
-    }
-    const document = await addDocumentToCase(request.case.id, {
-      type: mortal ? MORTAL_DOCUMENT_TYPE : 'Medical Report',
-      name: req.file.originalname,
-      fileUrl: `/uploads/${req.file.filename}`,
-      fileSizeBytes: req.file.size,
-    });
-    if (!mortal && request.bitrixLeadId) {
-      // The request form takes several reports, and the lead's Medical Report field may only
-      // keep one of them: the lead comment lists the names of all of them.
-      const reports = await prisma.document.findMany({
-        where: { caseId: request.case.id, type: 'Medical Report' },
-        orderBy: { uploadedAt: 'asc' },
-      });
-      const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-      const comments = commentWithReports(leadInputFromRequest(request, user).comments, reports.map((r) => r.name));
-      await sendMedicalReportToBitrix(request.bitrixLeadId, document, { comments });
-    }
-    res.status(201).json({ document: toSafeDocument(document) });
+      if (mortal) {
+        const problem = await mortalUploadProblem(request, req.file);
+        if (problem) {
+          await discardFile();
+          return res.status(400).json({ error: problem });
+        }
+      }
+      // SCAN BEFORE STORE (documents/legacy-scan.js): the row below is created only after a confirmed clean verdict, so nothing (the patient's download, the corporate portal, the Bitrix24
+      // message and its retry sweep) can ever see a document that was not scanned. Infected: 422 and quarantined. Scanner down, timeout or any other non-verdict: 503, deleted, FAIL CLOSED.
+      const scan = await scanBeforeStore(req.file, { expectedSha256: sha256 }); // { sha256, engine, scannedAt }: stored with the row as its clean scan record
+      let document;
+      try {
+        document = await addDocumentToCase(request.case.id, {
+          type: mortal ? MORTAL_DOCUMENT_TYPE : 'Medical Report',
+          name: req.file.originalname,
+          fileUrl: `/uploads/${req.file.filename}`,
+          fileSizeBytes: req.file.size,
+          clientUploadId,
+          scan,
+        });
+      } catch (err) {
+        // The same upload arrived at the same instant in another process and won: the unique index is the final protection. Return the original; nothing else happens for this copy.
+        if (clientUploadId && isUniqueViolation(err)) {
+          const prior = await findCaseDocumentByClientUploadId(request.case.id, clientUploadId).catch(() => null);
+          if (prior) return replayLegacy(prior);
+        }
+        throw err;
+      }
+      if (!mortal && request.bitrixLeadId) {
+        // The request form takes several reports, and the lead's Medical Report field may only
+        // keep one of them: the lead comment lists the names of all of them.
+        const reports = await prisma.document.findMany({
+          where: { caseId: request.case.id, type: 'Medical Report' },
+          orderBy: { uploadedAt: 'asc' },
+        });
+        const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+        // Only documents with a confirmed clean scan are named (and, by the shared sender, only those are ever forwarded).
+        const comments = commentWithReports(leadInputFromRequest(request, user).comments, reports.filter(isScanClean).map((r) => r.name));
+        await sendMedicalReportToBitrix(request.bitrixLeadId, document, { comments });
+      }
+      return res.status(201).json({ document: { ...toSafeDocument(document), ...(document.clientUploadId ? { clientUploadId: document.clientUploadId } : {}) } });
+    };
+    // One copy of the same upload at a time (per process): a second copy waits, then finds the document and is answered from it: no second scan and no second Bitrix message.
+    return clientUploadId ? await withUploadLock(`${request.case.id}:${clientUploadId}`, accept) : await accept();
   } catch (err) {
     next(err);
   }
@@ -375,6 +465,7 @@ module.exports = {
   submitRequest,
   listMyRequests,
   getMyRequestById,
+  getMyRequestByClientRequestId,
   listMyDocuments,
   uploadRequestDocument,
   downloadRequestSummary,

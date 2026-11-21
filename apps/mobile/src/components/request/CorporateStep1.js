@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 import { Building2, ChevronDown } from 'lucide-react-native';
+import { genderLabels } from '../../lib/genderLabels';
 import { useApp } from '../../state/AppContext';
 import { nameOf } from '../../lib/phoneCountry';
+import { displayNameOf, countryDisplay } from '../../lib/countryNames';
 import { pickRequestPhoneCountry } from '../../lib/requestForm';
 import { isValidMobileNumber, isValidName } from '../../lib/validators';
 import {
@@ -77,7 +79,7 @@ export function CorporateStep1() {
 
       <Anchor id="gender">
         <FieldLabel required>{t('field_gender')}</FieldLabel>
-        <Select value={draft.gender} options={GENDERS} onChange={(gender) => updateDraft({ gender })} title={t('field_gender')} placeholder="Select gender" />
+        <Select value={draft.gender} options={GENDERS} onChange={(gender) => updateDraft({ gender })} title={t('field_gender')} labels={genderLabels(t)} keepSize placeholder={t('gender_placeholder')} />
         {attempted && !draft.gender ? <Text className="mt-1 text-[12px] text-danger">{required}</Text> : serverError('patientGender') ? <Text className="mt-1 text-[12px] text-danger">{serverError('patientGender')}</Text> : null}
       </Anchor>
 
@@ -85,13 +87,13 @@ export function CorporateStep1() {
         <FieldLabel required>{text('corp_patient_contact')}</FieldLabel>
         <View className="flex-row gap-2">
           <Pressable
-            onPress={() => setPicking('phone')} accessibilityRole="button" accessibilityLabel={`${t('phone_country_code_label')}, ${nameOf(draft.phoneCountry)} ${draft.cc}`}
+            onPress={() => setPicking('phone')} accessibilityRole="button" accessibilityLabel={`${t('phone_country_code_label')}, ${displayNameOf(draft.phoneCountry)} ${draft.cc}`}
             className="min-h-[48px] min-w-[96px] flex-row items-center justify-center gap-1 rounded-[10px] border-[1.5px] border-field bg-input px-3 active:opacity-80"
           >
             <Text className="text-[13px]">{draft.phoneCountry} {draft.cc}</Text>
             <ChevronDown size={16} color="#97A4B8" />
           </Pressable>
-          <Input className="flex-1" placeholder="Enter number" keyboardType="phone-pad" value={draft.phone} onChangeText={(phone) => updateDraft({ phone })} />
+          <Input className="flex-1" placeholder={t('ph_enter_number')} keyboardType="phone-pad" value={draft.phone} onChangeText={(phone) => updateDraft({ phone })} />
         </View>
         {(attempted || draft.phone) && !isValidMobileNumber(draft.phone, draft.cc)
           ? <Text className="mt-1 text-[12px] text-danger">{draft.phone ? text('corp_err_contact') : required}</Text>
@@ -131,10 +133,10 @@ export function CorporateStep1() {
         <FieldLabel required>{text('corp_office_country')}</FieldLabel>
         <Pressable
           onPress={() => setPicking('country')} accessibilityRole="button"
-          accessibilityLabel={`${text('corp_office_country')}, ${draft.corpOfficeCountry || text('corp_office_country_placeholder')}`}
+          accessibilityLabel={`${text('corp_office_country')}, ${countryDisplay(draft.corpOfficeCountryIso, draft.corpOfficeCountry) || text('corp_office_country_placeholder')}`}
           className="min-h-[48px] flex-row items-center justify-between gap-2 rounded-[10px] border-[1.5px] border-field bg-input px-3 py-3 active:opacity-80"
         >
-          <Text className={`flex-1 text-[15px] ${draft.corpOfficeCountry ? '' : 'text-faint'}`} numberOfLines={1}>{draft.corpOfficeCountry || text('corp_office_country_placeholder')}</Text>
+          <Text className={`flex-1 text-[15px] ${draft.corpOfficeCountry ? '' : 'text-faint'}`} numberOfLines={1}>{countryDisplay(draft.corpOfficeCountryIso, draft.corpOfficeCountry) || text('corp_office_country_placeholder')}</Text>
           <ChevronDown size={16} color="#97A4B8" />
         </Pressable>
         {attempted && !isValidOfficeCountry(draft.corpOfficeCountryIso) ? <Text className="mt-1 text-[12px] text-danger">{required}</Text> : serverError('officeCountry') ? <Text className="mt-1 text-[12px] text-danger">{serverError('officeCountry')}</Text> : null}

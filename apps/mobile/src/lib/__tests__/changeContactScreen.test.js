@@ -79,8 +79,8 @@ describe('the "Current:" line', () => {
 
 describe('errors and states', () => {
   test('a refusal about the value (in use, wrong format, too soon) shows under the form; a server failure is a toast', () => {
-    expect(screen).toContain('if (err.status && err.status < 500) setFormError(err.message);');
-    expect(screen).toContain('else toast(err.message);');
+    expect(screen).toContain('if (err.status && err.status < 500) setFormError(errorText(err, t));');
+    expect(screen).toContain('else toast(errorText(err, t));');
   });
   test('the primary action says a code goes to the new number or email', () => {
     expect(screen).toContain("t(isMobile ? 'change_send_mobile_btn' : 'change_send_email_btn')");

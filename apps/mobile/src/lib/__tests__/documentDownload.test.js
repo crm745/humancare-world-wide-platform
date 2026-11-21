@@ -18,7 +18,7 @@ const FileSystem = require('expo-file-system/legacy');
 const Sharing = require('expo-sharing');
 const session = require('../session');
 const { apiDownload } = require('../api');
-const { downloadAndShare, downloadDocument, safeDownloadName, downloadErrorInfo } = require('../download');
+const { downloadDocument, safeDownloadName, downloadErrorInfo } = require('../download');
 
 const realFetch = global.fetch;
 let anchor;
@@ -128,31 +128,20 @@ describe('downloadDocument on a phone', () => {
   });
 });
 
-describe('downloadAndShare is unchanged (Request Details, corporate tracking)', () => {
-  test('web: still a plain authenticated fetch with the saved token; apiDownload is not involved', async () => {
-    global.fetch.mockResolvedValue({ ok: true, blob: async () => new Blob(['x']) });
-    await downloadAndShare('/requests/me/5/summary', 'REQ-1005-summary.pdf');
-    expect(global.fetch).toHaveBeenCalledWith(expect.stringMatching(/\/requests\/me\/5\/summary$/), { headers: { Authorization: 'Bearer tok' } });
-    expect(anchor.download).toBe('REQ-1005-summary.pdf');
-    expect(apiDownload).not.toHaveBeenCalled();
-  });
-  test('web: a failed answer is still the plain "Download failed."', async () => {
-    global.fetch.mockResolvedValue({ ok: false });
-    await expect(downloadAndShare('/x', 'a.pdf')).rejects.toThrow('Download failed.');
-  });
-  test('phone: still downloads into the cache with the token and shares', async () => {
-    Platform.OS = 'ios';
-    FileSystem.downloadAsync.mockResolvedValue({ uri: 'file:///cache/a.pdf', status: 200 });
-    await downloadAndShare('/x', 'a.pdf');
-    expect(FileSystem.downloadAsync).toHaveBeenCalledWith(expect.stringMatching(/\/x$/), 'file:///cache/a.pdf', { headers: { Authorization: 'Bearer tok' } });
-    expect(Sharing.shareAsync).toHaveBeenCalledWith('file:///cache/a.pdf');
-  });
-  test('its source is the code it was before this change (the new code is only added after it)', () => {
+describe('every download is the authenticated one (Request Details summary, corporate case documents, My Documents)', () => {
+  test('the old unauthenticated downloadAndShare is gone: no raw fetch with a hand-made token, no download without a session renewal', () => {
     const source = fs.readFileSync(path.join(__dirname, '../download.js'), 'utf8');
-    const original = source.slice(source.indexOf('export async function downloadAndShare'), source.indexOf('// ---- documents:'));
-    expect(original).toContain("const token = await getAccessToken();");
-    expect(original).toContain("if (!res.ok) throw new Error('Download failed.');");
-    expect(original).toContain("if (status !== 200) throw new Error('Download failed.');");
-    expect(original).not.toMatch(/apiDownload/);
+    expect(source).not.toContain('downloadAndShare');
+    expect(source).not.toMatch(/\bfetch\(/);
+    expect(source).not.toContain('getAccessToken');
+    expect(source).toContain('apiDownload');
+  });
+  test('the callers use downloadDocument and say what went wrong in the person\'s language', () => {
+    for (const file of ['../../app/request-details.js', '../../app/tracking.js']) {
+      const code = fs.readFileSync(path.join(__dirname, file), 'utf8');
+      expect(code).toContain('downloadDocument(');
+      expect(code).toContain('downloadErrorInfo(err).key');
+      expect(code).not.toContain('downloadAndShare');
+    }
   });
 });

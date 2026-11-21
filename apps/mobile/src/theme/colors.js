@@ -18,4 +18,16 @@ const primaryAlpha = (alpha) => `rgba(48,58,143,${alpha})`;
 // Loading skeletons (components/skeleton): a block, the highlight that sweeps across it, and the colour a new item flashes from.
 const SKELETON = { block: '#E3E9F2', highlight: '#F5F8FC', newItem: '#E2E3EF' };
 
-module.exports = { COLORS, SKELETON, primaryAlpha };
+// Notices (network banner, warning / success / info cards): the one set of colours every network-related message uses.
+//   warning  something to be careful about (no internet, a request that may not have gone through)
+//   success  all good (back online, the saved session is safe, a request was received)
+//   info     neutral information (a request that was already sent, a note after a check)
+//   slow     the quiet look of the "slow connection" banner
+const NOTICE = {
+  warning: { bg: '#FDF0DA', border: '#F1D9AE', title: '#6B3A06', text: '#8F4C08' },
+  success: { bg: '#E0F5F4', border: '#BFE8E4', text: '#0B6564' },
+  info: { bg: '#EAEBF4', border: '#D6D9EE', title: '#0D2340', text: '#5B6B84' },
+  slow: { bg: '#EEF2FB', border: '#DCE3F5', title: '#0D2340', text: '#5B6B84' },
+};
+
+module.exports = { COLORS, SKELETON, NOTICE, primaryAlpha };

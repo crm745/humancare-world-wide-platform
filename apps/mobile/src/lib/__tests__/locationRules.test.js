@@ -69,7 +69,8 @@ describe('Private Charter still needs a verified city (the backend takes { geona
     expect(body.destination).toEqual({ geonameId: 1275339 });
   });
   test('the message says what is needed and why', () => {
-    expect(read('app/request/step1.js')).toContain("const CHOOSE_CITY = 'Pick a city from the suggestions: Private Charter needs a verified city.';");
+    expect(read('app/request/step1.js')).toContain("t('req_pick_city')");
+    expect(require('../../data/i18n.json').EN.req_pick_city).toBe('Pick a city from the suggestions: Private Charter needs a verified city.');
   });
 });
 
@@ -144,7 +145,7 @@ describe('Destination: any country (international transfers), and only the Curre
   });
   test('only the Current Location is country-restricted: the Destination is never compared with the Country, anywhere in the code', () => {
     const rules = read('lib/locationRules.js');
-    expect(rules).toContain('structured: charter, checkCountry: false }),');
+    expect(rules).toContain('structured, checkCountry: false }),');
     expect(rules).not.toContain('DESTINATION_MUST_MATCH_COUNTRY');
     const step1 = read('app/request/step1.js');
     expect(step1).not.toContain('DESTINATION_MUST_MATCH_COUNTRY');
@@ -190,7 +191,7 @@ describe('8. the destination keeps its OWN country and identifier (it is never g
   });
   test('a destination in another country is still the destination of the request (international transfers: Mortal Remains too)', () => {
     const review = read('app/request/review.js');
-    const body = review.slice(review.indexOf("apiPost('/requests', {"), review.indexOf('// The request is saved, so a file that fails'));
+    const body = review.slice(review.indexOf('const buildBody = () =>'), review.indexOf('await sendWithDocuments(buildBody);'));
     expect(body).toContain('origin: d.location,');
     expect(body).toContain('destination: d.dest,');
     // Mortal Remains sends its own structured body (lib/mortalRemains.js buildMortalPayload: origin = Current Location, destination = Destination);
@@ -232,12 +233,12 @@ describe('the suggestions follow the country', () => {
 describe('what the person is told, and when', () => {
   const step1 = read('app/request/step1.js');
   test('a city from another country is said at once (it is a conflict), naming the country; the other messages wait for Continue', () => {
-    expect(step1).toContain("if (problem === 'wrong_country') return `This city is not in ${draft.country}. Pick a city in ${draft.country}, or change the country.`;");
+    expect(step1).toContain("if (problem === 'wrong_country') return t('err_wrong_country', { country: countryDisplay(draft.countryIso, draft.country) });");
     expect(step1).toContain('if (problem && !attempted) return undefined;');
   });
   test('Continue is blocked by a wrong-country city, like any other wrong field', () => {
-    expect(step1).toContain("['location', locationProblems(d, charter).location !== null],");
-    expect(step1).toContain("['dest', locationProblems(d, charter).dest !== null],");
+    expect(step1).toContain("['location', locationProblems(d, charter, { offline: isOffline }).location !== null],");
+    expect(step1).toContain("['dest', locationProblems(d, charter, { offline: isOffline }).dest !== null],");
   });
   test('a tapped suggestion keeps its verified city for EVERY service (so the country can be checked); typing drops it', () => {
     expect(step1).toContain('onSelect={(city) => updateDraft({ originCity: city, location: city.label })}');
@@ -254,7 +255,7 @@ describe('the payloads: unchanged for every service', () => {
   });
   test('the verified city kept for the country check is not sent by those services', () => {
     const review = read('app/request/review.js');
-    const body = review.slice(review.indexOf("apiPost('/requests', {"), review.indexOf('// The request is saved, so a file that fails'));
+    const body = review.slice(review.indexOf('const buildBody = () =>'), review.indexOf('await sendWithDocuments(buildBody);'));
     expect(body).not.toMatch(/originCity|destCity|geonameId/);
   });
 });

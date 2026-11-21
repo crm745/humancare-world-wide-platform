@@ -4,16 +4,19 @@ process.env.BITRIX_SYNC_ENABLED = 'false';
 process.env.PRIVATE_CHARTER_REVIEW_WORKFLOW = 'false';
 
 const mockStore = { rows: [], cases: [], nextId: 100, creates: 0 };
-jest.mock('../src/db/prisma', () => ({
-  prisma: {
+jest.mock('../src/db/prisma', () => {
+  const prisma = {
     serviceRequest: {
       create: async ({ data }) => { mockStore.creates += 1; const row = { id: mockStore.nextId++, createdAt: new Date('2026-11-18T10:00:00Z'), updatedAt: new Date('2026-11-18T10:00:00Z'), ...data }; mockStore.rows.push(row); return { ...row }; },
       update: async ({ where, data }) => { const row = mockStore.rows.find((r) => r.id === where.id); Object.assign(row, data); return { ...row }; },
     },
     case: { create: async ({ data }) => { const row = { id: mockStore.cases.length + 1, ...data }; mockStore.cases.push(row); return row; } },
     caseStageEvent: { create: async () => ({}) },
-  },
-}));
+  };
+  // createRequest saves the request, its Case and its first stage event in one transaction: the mock runs the callback on itself (the recorder keeps what each call would have written).
+  prisma.$transaction = async (callback) => callback(prisma);
+  return { prisma };
+});
 const mockCities = {
   1: { geonameId: 1, name: 'Mumbai', label: 'Mumbai, Maharashtra, India', countryCode: 'IN', timezone: 'Asia/Kolkata' },
   3: { geonameId: 3, name: 'Dubai', label: 'Dubai, Dubai, United Arab Emirates', countryCode: 'AE', timezone: 'Asia/Dubai' },

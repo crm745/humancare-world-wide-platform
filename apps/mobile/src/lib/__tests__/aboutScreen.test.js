@@ -47,12 +47,12 @@ describe('nothing else is on the page', () => {
       expect({ gone, present: screen.includes(gone) }).toEqual({ gone, present: false });
     }
     expect(imports.join('\n')).not.toMatch(/expo-constants|PressBox|lucide/);
-    expect(imports.filter((line) => /data\/images/.test(line))).toEqual(["import { LOGO } from '../data/images';"]); // the logo, and only the logo
+    expect(imports.filter((line) => /data\/images/.test(line))).toEqual([]); // no logo, no image of any kind
   });
   test('the only text on the page is the company name and the four paragraphs', () => {
     expect((screen.match(/<Text\b/g) || []).length).toBe(2); // the name, and the one Text drawn once per paragraph
-    expect(screen).toContain('ABOUT_INTRO.paragraphs.map((paragraph) => (');
-    expect(screen).toContain('{paragraph}</Text>');
+    expect(screen).toContain('ABOUT_INTRO.paragraphs.map((paragraph, i) => (');
+    expect(screen).toContain('{t(`about_p${i + 1}`)}</Text>'); // each paragraph in the person's language (the English dictionary text is the approved text: translationParity / areasTranslated tests)
     expect(screen).not.toContain('.slice('); // no paragraph is cut short
     expect(screen).not.toMatch(/numberOfLines/); // and none is truncated with an ellipsis
   });
@@ -62,34 +62,24 @@ describe('nothing else is on the page', () => {
   });
 });
 
-describe('the branding at the top: the app\'s logo and the company name', () => {
+describe('the heading at the top: the company name, and no logo', () => {
   const screen = code('app/about.js');
   const block = screen.slice(screen.indexOf('<View style={{ alignItems'), screen.indexOf('ABOUT_INTRO.paragraphs.map'));
-  test('the existing logo asset is shown (the same LOGO the app uses everywhere), not a new or replaced file', () => {
-    expect(screen).toContain("import { LOGO } from '../data/images';");
-    expect(block).toContain('<Image source={LOGO}');
-    expect(block).not.toMatch(/require\(|uri:/);
-    const images = read('data/images.js');
-    const file = /LOGO\s*=\s*require\('([^']+)'\)/.exec(images);
-    expect(file).not.toBeNull();
-    expect(fs.existsSync(path.join(__dirname, '../../data', file[1]))).toBe(true);
+  test('the logo is gone from this page: no image and no logo import (the logo file itself stays for the rest of the app)', () => {
+    expect(screen).not.toMatch(/LOGO|<Image|\bImage\b|require\(|uri:/);
+    expect(read('data/images.js')).toMatch(/LOGO\s*=\s*require\(/);
   });
-  test('the logo is the size it had before (200 by 72, whole logo visible), with a screen-reader label', () => {
-    expect(block).toContain("style={{ width: 200, height: 72 }} resizeMode=\"contain\" accessibilityLabel=\"HumanCare Worldwide\"");
-  });
-  test('the company name is shown under the logo, as a heading, centred, in the app\'s brand style', () => {
+  test('the company name is shown at the top, as a heading, centred, in the app\'s brand style', () => {
     expect(block).toContain('accessibilityRole="header"');
-    expect(block).toContain('className="text-center font-inter-black text-[20px] text-navy">{ABOUT_INTRO.name}</Text>');
+    expect(block).toContain('className="text-center font-inter-black text-[20px] text-navy">{t(\'about_name\')}</Text>');
     expect(content.ABOUT_INTRO.name).toBe('HumanCare Worldwide');
   });
-  test('both are centred at the top, with space between the logo and the name and before the introduction', () => {
+  test('the name is centred at the top, with space before the introduction', () => {
     expect(block).toContain("alignItems: 'center'");
-    expect(block).toContain('gap: 10');
     expect(block).toContain('marginBottom: 24');
-    expect(screen.indexOf('<Image source={LOGO}')).toBeLessThan(screen.indexOf('{ABOUT_INTRO.name}'));
     expect(screen.indexOf('{ABOUT_INTRO.name}')).toBeLessThan(screen.indexOf('ABOUT_INTRO.paragraphs.map'));
   });
-  test('open layout: no card, border, shadow or background around the branding either', () => {
+  test('open layout: no card, border, shadow or background around the name either', () => {
     for (const boxed of ['Card', 'backgroundColor', 'bg-', 'border', 'shadow', 'elevation', 'rounded']) expect({ boxed, present: block.includes(boxed) }).toEqual({ boxed, present: false });
   });
 });
@@ -125,7 +115,7 @@ describe('the layout: open text, styled exactly like the Privacy Policy page', (
     expect(13.5 / 22).toBeLessThan(0.62); // 22 / 13.5 = 1.63 times the size, as the Privacy page reads
   });
   test('the same space between paragraphs as the Privacy page has between its sections (mb-5)', () => {
-    expect(legal).toContain('<Text key={heading} className="mb-5">'); // each section is followed by mb-5 (20)
+    expect(legal).toContain('<Text key={headingKey} className="mb-5">'); // each section is followed by mb-5 (20)
     expect(screen).toContain('className="mb-5 text-[13.5px]');
     expect(paragraphSource(screen)).not.toMatch(/gap:/);
   });

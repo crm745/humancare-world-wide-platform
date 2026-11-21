@@ -44,7 +44,7 @@ describe('Profile: About HumanCare, Delete account, Log out', () => {
     expect(profile).toMatch(/<UserX[^>]*color="#C53030"/);
   });
   test('Log out is unchanged', () => {
-    expect(profile).toContain("const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/login'); await clearTokens(); };");
+    expect(profile).toContain("const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/login'); await clearDraftEverywhere(); await clearTokens(); };");
     expect(profile).toContain('onPress={signOut}');
   });
 });
@@ -111,9 +111,9 @@ describe('About HumanCare', () => {
   const body = code('app/about.js');
   // (The About page now shows only the approved introduction, in an open layout: its content and layout are checked in aboutScreen.test.js. What stays checked here is
   // what this work must not break: the route, the title bar and the legal screens, which are still reachable from elsewhere.)
-  test('shows the logo and name, then the approved introduction: no Terms, Privacy or version', () => {
+  test('shows the name, then the approved introduction (no logo): no Terms, Privacy or version', () => {
     expect(body).toContain("from '../data/aboutContent';");
-    expect(body).toContain("import { LOGO } from '../data/images';");
+    expect(body).not.toContain('LOGO'); // the logo was removed from this page
     expect(body).not.toContain("t('terms_title')");
     expect(body).not.toContain("t('privacy_title')");
     expect(body).not.toContain('prof_footer');

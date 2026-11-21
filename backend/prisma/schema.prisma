@@ -589,6 +589,11 @@ model ServiceRequest {
   updatedAt         DateTime  @updatedAt @map("updated_at")
   case              Case?
 
+  // Idempotent submission (migration 20261119130000_service_request_client_request_id): the random UUID the app sends once per logical submission and reuses for
+  // every retry of it. NULL on every request saved before this and on every request from an older app build (MySQL allows many NULLs in a unique index).
+  // Unique per patient, so a submission that arrives twice, or at the same moment twice, is saved once. Never shown to anyone but its owner.
+  clientRequestId        String?   @map("client_request_id") @db.VarChar(36)
+
   // Request-first review workflow (Private Charter only; see backend/REQUEST-REVIEW-WORKFLOW.md).
   // NULL on every older request and on every other service: those keep the original flow, where a
   // Case is created together with the request. Otherwise one of: "awaiting_documents" (nothing
@@ -603,6 +608,7 @@ model ServiceRequest {
   requestDocuments       RequestDocument[]
   requestEvents          RequestEvent[]
 
+  @@unique([userId, clientRequestId], map: "uq_service_requests_user_client_request")
   @@index([reviewStatus, createdAt])
   @@map("service_requests")
 }
@@ -647,7 +653,11 @@ model RequestDocument {
   // on a document the patient uploaded unprompted. Never required: an upload is valid without it.
   documentRequestId Int?     @map("document_request_id")
   documentRequest   DocumentRequest? @relation(fields: [documentRequestId], references: [id], onDelete: Restrict)
+  // Phase 5: the app's random id for this logical upload, reused by every retry of it (see src/modules/requests/client-upload-id.js). NULL for every older row and every older
+  // app build; MySQL's unique index allows any number of NULLs.
+  clientUploadId    String?  @map("client_upload_id") @db.VarChar(36)
 
+  @@unique([serviceRequestId, clientUploadId], map: "uq_request_documents_request_client_upload")
   @@index([documentRequestId])
   @@index([serviceRequestId])
   @@index([scanStatus])
@@ -1334,8 +1344,22 @@ model Document {
   fileUrl       String   @map("file_url")
   fileSizeBytes Int?     @map("file_size_bytes")
   uploadedAt    DateTime @default(now()) @map("uploaded_at")
+  // Phase 5: the app's random id for this logical upload, reused by every retry of it (see src/modules/requests/client-upload-id.js). NULL for every older row and every older
+  // app build; MySQL's unique index allows any number of NULLs.
+  clientUploadId String? @map("client_upload_id") @db.VarChar(36)
+  // Phase 5 (legacy scan protection): the scan record of this file (see src/modules/documents/document-scan.js). scan_status NULL = a document from before scanning existed: never scanned,
+  // treated as NOT clean. New uploads are stored only after a confirmed clean ClamAV verdict and carry it.
+  sha256            String?   @db.Char(64)
+  scanStatus        String?   @map("scan_status") @db.VarChar(16)
+  scanEngine        String?   @map("scan_engine") @db.VarChar(40)
+  scanDetail        String?   @map("scan_detail") @db.VarChar(255)
+  scannedAt         DateTime? @map("scanned_at")
+  scanAttempts      Int       @default(0) @map("scan_attempts")
+  scanNextAttemptAt DateTime? @map("scan_next_attempt_at")
 
+  @@unique([caseId, clientUploadId], map: "uq_documents_case_client_upload")
   @@index([caseId])
+  @@index([scanStatus, scanNextAttemptAt], map: "idx_documents_scan_status")
   @@map("documents")
 }
 

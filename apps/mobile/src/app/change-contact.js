@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp } from '../state/AppContext';
 import { COUNTRY_CODES, COUNTRY_CODE_LABELS } from '../data/mock';
+import { errorText } from '../lib/errorText';
 import { apiPost } from '../lib/api';
 import { codeStepFrom, setAuthStep } from '../lib/authFlow';
 import { isValidEmail, isValidMobileNumber } from '../lib/validators';
@@ -39,8 +40,8 @@ export default function ChangeContact() {
       router.push('/change-contact-otp');
     } catch (err) {
       // A refusal about the value typed (in use, wrong format, too soon for another code) shows under the form.
-      if (err.status && err.status < 500) setFormError(err.message);
-      else toast(err.message);
+      if (err.status && err.status < 500) setFormError(errorText(err, t));
+      else toast(errorText(err, t));
     } finally {
       setBusy(false);
     }
@@ -79,7 +80,7 @@ export default function ChangeContact() {
         </View>
         {formError ? <Text className="mt-4 text-center text-[13.5px] text-danger">{formError}</Text> : null}
         <Spacer />
-        <Button large title={t(isMobile ? 'change_send_mobile_btn' : 'change_send_email_btn')} disabled={!ready} loading={busy} onPress={submit} />
+        <Button large title={t(isMobile ? 'change_send_mobile_btn' : 'change_send_email_btn')} disabled={!ready} loading={busy} needsNetwork onPress={submit} />
       </Body>
     </Screen>
   );

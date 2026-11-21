@@ -6,9 +6,11 @@ import { ChevronLeft, FileText, House, LayoutGrid, User } from 'lucide-react-nat
 import { useApp } from '../state/AppContext';
 import { emitTabReselect, goBack, navReplace, onTabReselect } from '../lib/nav';
 import { Text, cx } from './ui';
-import { useFabScrollPad } from './sos/hooks';
+import { useFabScrollPad, useSosFabVisible } from './sos/hooks';
+import { fabClearance, scrollPadFor } from '../lib/sos';
 import { KeyboardScroll, useKeyboardOpen } from './keyboard';
 import { COLORS } from '../theme/colors';
+import { ConnectionBanner } from './network/ConnectionBanner';
 
 // Full-height screen with safe-area padding. `bg` is a Tailwind background class.
 export function Screen({ children, bg = 'bg-canvas', padded, className = '', style }) {
@@ -29,11 +31,18 @@ const BOTTOM_GAP = 32;
 // field when validation fails) can call scrollTo on the underlying ScrollView.
 // `bottomEdge`: how far the bottom of this scroll area is above the bottom of the screen, when the screen has a fixed bar of its own under it.
 // `footerHeight`: the height of a bar that rides on top of the keyboard under this scroll area (see components/keyboard).
-export const Body = forwardRef(function Body({ children, className = '', contentClassName = '', withNav, grow = true, bottomEdge = 0, refreshControl, footerHeight = 0 }, ref) {
+// `clearSos`: where the floating SOS button shows, the end of the scroll is at least `sosMinPad` (96) and at least the button's clearance (lib/sos.js), so the last item scrolls fully above it.
+export const SOS_MIN_PAD = 96;
+export const Body = forwardRef(function Body({ children, className = '', contentClassName = '', withNav, grow = true, bottomEdge = 0, refreshControl, footerHeight = 0, clearSos = false }, ref) {
   const insets = useSafeAreaInsets();
   const inner = useRef(null);
   // The bottom padding: the screen's own, or the room the floating SOS button needs where it shows, whichever is more (lib/sos.js).
-  const { paddingBottom, scrollProps } = useFabScrollPad({ ownPad: (withNav ? 64 : 0) + BOTTOM_GAP + insets.bottom, edge: bottomEdge });
+  const own = (withNav ? 64 : 0) + BOTTOM_GAP + insets.bottom;
+  const { paddingBottom: ownPadding, scrollProps } = useFabScrollPad({ ownPad: own, edge: bottomEdge });
+  const sosVisible = useSosFabVisible();
+  const paddingBottom = clearSos
+    ? scrollPadFor({ ownPad: Math.max(ownPadding, SOS_MIN_PAD), visible: sosVisible, clearance: fabClearance({ edge: bottomEdge, insetBottom: insets.bottom }) })
+    : ownPadding;
   // Tapping the active tab again scrolls this screen back to the top.
   useEffect(() => (withNav ? onTabReselect(() => inner.current?.scrollTo({ y: 0, animated: true })) : undefined), [withNav]);
   return (
@@ -74,9 +83,11 @@ export function BackButton({ onPress = goBack, className = '' }) {
 // The one header bar for every screen that has one (All Services, Tracking, Requests, Documents, ...): white, a
 // 44 px soft back button, the title next to it, and an optional right-hand element. Keep every screen on this
 // component so the header looks the same everywhere.
-export function TopBar({ title, onBack, right, left }) {
+// The connection banner (components/network/ConnectionBanner.js) sits directly under it; the request form turns it off (`banner={false}`) and shows it under its step bar instead.
+export function TopBar({ title, onBack, right, left, banner = true }) {
   const { t, isRTL } = useApp();
   return (
+    <>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 12, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E4E9F2' }}>
       {left || (
         <Pressable
@@ -93,6 +104,8 @@ export function TopBar({ title, onBack, right, left }) {
       {title ? <Text className="font-inter-black" accessibilityRole="header" style={{ flex: 1, fontSize: 16, color: '#0D2340' }}>{title}</Text> : <View style={{ flex: 1 }} />}
       {right}
     </View>
+    {banner ? <ConnectionBanner /> : null}
+    </>
   );
 }
 

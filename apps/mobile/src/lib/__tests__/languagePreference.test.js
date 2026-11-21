@@ -133,7 +133,7 @@ describe('regression: Profile, the language sheet and the other screens still re
   test('the session start is untouched by the language work', () => {
     const source = read('../../state/AppContext.js');
     // the same two calls as before; the only addition is that what the screens had loaded is forgotten first (lib/screenCache.js)
-    expect(source).toContain('const unsubscribe = onSessionChange((signedIn) => { clearCache(); return signedIn ? authStore.signedIn() : authStore.signedOut(); });');
+    expect(source).toContain('const unsubscribe = onSessionChange((signedIn) => { clearCache(); trackerSession(signedIn); return signedIn ? authStore.signedIn() : authStore.signedOut(); });');
     expect(source).toContain('fetchMe: (signal) => apiGet(\'/auth/me\', { signal, validation: true }),');
   });
 });

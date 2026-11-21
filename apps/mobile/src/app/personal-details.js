@@ -3,9 +3,10 @@ import { Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 import { ChevronDown, IdCard, Phone, ShieldCheck, User } from 'lucide-react-native';
 import { initialsOf, useApp } from '../state/AppContext';
+import { errorText } from '../lib/errorText';
 import { apiGet, apiPatch } from '../lib/api';
 import { GENDER_OPTIONS } from '../data/mock';
-import { nameOf } from '../lib/phoneCountry';
+import { displayNameOf } from '../lib/countryNames';
 import { profileFromUser } from '../lib/profile';
 import { buildPatch, formFrom, personalRows, validateForm, viewOf } from '../lib/personalDetails';
 import { Body, Screen, TopBar } from '../components/layout';
@@ -13,6 +14,8 @@ import { Button, Card, Field, FieldLabel, InfoRow, Text } from '../components/ui
 import { Select } from '../components/widgets';
 import { CountryPicker } from '../components/NationalityPhone';
 import { useSkeletonGate } from '../components/skeleton/hooks';
+import { LoadFailure } from '../components/LoadFailure';
+import { useRetryOnRestore } from '../lib/useRetryOnRestore';
 import { FormSkeleton } from '../components/skeleton/screens';
 import { COLORS } from '../theme/colors';
 
@@ -74,11 +77,11 @@ export default function PersonalDetails() {
 
   const fetchMe = useCallback(() => apiGet('/auth/me')
     .then(({ user: me }) => {
-      if (!me) throw new Error('No personal details for this account.'); // a corporate account answers with corporateUser
+      if (!me) throw new Error(t('err_no_personal')); // a corporate account answers with corporateUser
       setUser(me);
     })
-    .catch((err) => { setFailed(true); toast(err.message); })
-    .finally(() => setLoading(false)), [toast]);
+    .catch((err) => { setFailed(true); toast(errorText(err, t)); })
+    .finally(() => setLoading(false)), [toast, t]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once on mount
   useEffect(() => { fetchMe(); }, []);
@@ -88,6 +91,8 @@ export default function PersonalDetails() {
     setFailed(false);
     fetchMe();
   };
+  // The connection came back after the first load failed: it is read again once (a read: nothing is saved by this).
+  useRetryOnRestore({ failed, retry, enabled: !isCorporate });
 
   const view = user ? viewOf(user) : null;
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
@@ -125,8 +130,8 @@ export default function PersonalDetails() {
       toast(t('pd_saved'));
     } catch (err) {
       // Nothing is lost: the form keeps what was typed and the account shown is still the saved one.
-      setSaveError(err.message);
-      toast(err.message);
+      setSaveError(errorText(err, t));
+      toast(errorText(err, t));
     } finally {
       setSaving(false);
     }
@@ -153,12 +158,7 @@ export default function PersonalDetails() {
       <Body contentClassName="px-[18px] py-4">
         {loading && gate.visible ? <FormSkeleton label={t('sk_loading_profile')} fields={6} /> : null}
 
-        {!loading && failed ? (
-          <View className="items-center px-5 py-[50px]">
-            <Text className="text-center font-inter-bold text-[14px] text-navy">{t('pd_load_failed')}</Text>
-            <Button title={t('pd_try_again')} onPress={retry} className="mt-4 min-h-[44px] px-6" />
-          </View>
-        ) : null}
+        {!loading && failed ? <LoadFailure titleKey="lf_title_profile" message={t('pd_load_failed')} onRetry={retry} /> : null}
 
         {view ? (
           <>
@@ -185,7 +185,7 @@ export default function PersonalDetails() {
                 rows.length ? rows.map((row, i) => (
                   <InfoRow
                     key={row.key} last={i === rows.length - 1} label={t(row.labelKey)}
-                    value={row.valueKey ? t(row.valueKey) : row.nationality ? (nameOf(row.nationality) || row.nationality) : row.value}
+                    value={row.valueKey ? t(row.valueKey) : row.nationality ? (displayNameOf(row.nationality) || row.nationality) : row.value}
                   />
                 )) : <Text className="py-2 text-[13px] text-faint">{t('pd_nothing_yet')}</Text>
               ) : (
@@ -211,14 +211,14 @@ export default function PersonalDetails() {
                       accessibilityRole="button" accessibilityLabel={t('field_nationality')} onPress={() => setPicker(true)}
                       className="min-h-[46px] flex-row items-center justify-between rounded-[10px] border-[1.5px] border-field bg-input px-3"
                     >
-                      <Text className={`text-[15px] ${form.nationality ? 'text-ink' : 'text-faint'}`}>{form.nationality ? nameOf(form.nationality) || form.nationality : t('pd_select_nationality')}</Text>
+                      <Text className={`text-[15px] ${form.nationality ? 'text-ink' : 'text-faint'}`}>{form.nationality ? displayNameOf(form.nationality) || form.nationality : t('pd_select_nationality')}</Text>
                       <ChevronDown size={16} color="#97A4B8" />
                     </Pressable>
                   </View>
                   {saveError ? <Text className="text-[12.5px] text-danger">{saveError}</Text> : null}
                   <View className="flex-row gap-2.5">
                     <Button variant="ghost" title={t('pd_cancel')} onPress={cancel} disabled={saving} className="flex-1" />
-                    <Button title={t('btn_save_changes')} onPress={save} loading={saving} className="flex-1" />
+                    <Button title={t('btn_save_changes')} onPress={save} loading={saving} needsNetwork className="flex-1" />
                   </View>
                 </View>
               )}

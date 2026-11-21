@@ -20,6 +20,7 @@ const REQUEST_FLOW = ['/request/step1', '/request/step2', '/request/review', '/r
 const AUTH_ONBOARDING = [
   '/', '/welcome', '/login', '/login-otp', '/choose-login', '/register', '/register-otp', '/complete-profile',
   '/forgot-password', '/forgot-password-otp', '/reset-password', '/set-password',
+  '/cant-connect', // the offline startup screen: its own emergency button, no floating one
 ];
 const PREVIEW = ['/document-preview']; // a full-screen preview: no button over the document
 const CORPORATE = ['/corporate-dashboard', '/corporate-new-case', '/corporate-login', '/corporate-otp'];
@@ -205,9 +206,9 @@ describe('the same flow as the Home banner', () => {
     expect(bar).toContain("t('sos_sub')");
   });
   test('the modal dials the same number, after the same question and two buttons', () => {
-    expect(modal).toContain('Linking.openURL(emergencyUrl(EMERGENCY_TEL))');
+    expect(modal).toContain('open(emergencyUrl(EMERGENCY_TEL))'); // (useOpenLink: Linking.openURL, with a message if the phone cannot dial)
     expect(modal).toContain("import { EMERGENCY_DISPLAY, EMERGENCY_TEL } from '../../data/mock';");
-    expect(modal).toContain('onClose(); Linking.openURL');
+    expect(modal).toContain('onClose(); open(');
     expect(S.emergencyUrl('+919699999065')).toBe('tel:+919699999065');
   });
   test('Services has no red banner of its own any more; Home keeps it', () => {
@@ -215,7 +216,8 @@ describe('the same flow as the Home banner', () => {
     expect(read('../../app/home.js')).toContain('<SosBar bottom={TAB_BAR + insets.bottom}');
   });
   test('every scrolling screen uses the one rule (useFabScrollPad), and the scroll area of a tab screen ends above the tab bar', () => {
-    expect(read('../../components/layout.js')).toContain('useFabScrollPad({ ownPad: (withNav ? 64 : 0) + BOTTOM_GAP + insets.bottom, edge: bottomEdge })');
+    expect(read('../../components/layout.js')).toContain('const own = (withNav ? 64 : 0) + BOTTOM_GAP + insets.bottom;');
+    expect(read('../../components/layout.js')).toContain('useFabScrollPad({ ownPad: own, edge: bottomEdge })');
     expect(read('../../components/layout.js')).toContain('contentContainerStyle={{ paddingBottom }}');
     for (const [file, own] of [['all-services', '16'], ['profile', '24'], ['my-requests', 'L.listPadBottom']]) {
       const source = read('../../app/' + file + '.js');

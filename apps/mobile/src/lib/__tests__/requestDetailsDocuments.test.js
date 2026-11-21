@@ -122,8 +122,8 @@ describe('isolation', () => {
   test('the document components and the upload rules are not touched: only the screen\'s use of them is gated', () => {
     const screen = read('app/request-details.js');
     expect(screen).toContain("import { openDocumentPreview } from");
-    expect(screen).toContain('onOpen={() => openDocumentPreview(router.push, doc)}');
-    expect(screen).toContain('<AdditionalDocuments request={request} onUploaded={reload} />');
+    expect(screen).toContain("onOpen={() => { if (isOffline) return; openDocumentPreview(router.push, doc); }}"); // offline: nothing starts (the bottom message says why)
+    expect(screen).toContain('<AdditionalDocuments request={request} onUploaded={reload} pendingUploads={pendingUploads} />');
     // the gate is the flag the pure view computes, and the flag is false only for a new-format Teleconsultation
     expect(read('lib/requestDetailsView.js')).toContain('showDocuments: !tele && !corporate,');
     expect(read('lib/requestDetailsView.js')).toContain('const tele = isNewTeleRequest(request);');

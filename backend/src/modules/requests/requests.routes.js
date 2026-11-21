@@ -5,6 +5,7 @@ const {
   submitRequest,
   listMyRequests,
   getMyRequestById,
+  getMyRequestByClientRequestId,
   listMyDocuments,
   uploadRequestDocument,
   downloadRequestSummary,
@@ -16,6 +17,8 @@ requestsRouter.post('/', requireAuth(['patient']), submitRequest);
 requestsRouter.get('/me', requireAuth(['patient']), listMyRequests);
 // Must come before /me/:id, or Express would try to parse "documents" as an id.
 requestsRouter.get('/me/documents', requireAuth(['patient']), listMyDocuments);
+// "Check status" by the idempotency key (before /me/:id, which would read "by-client-request" as an id).
+requestsRouter.get('/me/by-client-request/:clientRequestId', requireAuth(['patient']), getMyRequestByClientRequestId);
 requestsRouter.get('/me/:id', requireAuth(['patient']), getMyRequestById);
 requestsRouter.get('/me/:id/summary', requireAuth(['patient']), downloadRequestSummary);
 requestsRouter.post('/me/:id/documents', requireAuth(['patient']), upload.single('file'), uploadRequestDocument);

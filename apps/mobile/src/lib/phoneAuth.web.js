@@ -6,6 +6,7 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, getIdToken, RecaptchaVerifier, signInWithPhoneNumber, signOut } from 'firebase/auth';
 import { phoneAuthError } from './phoneAuthErrors';
+import { withConfirmTimeout, withSendTimeout } from './phoneAuthTimeout';
 
 const config = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
@@ -39,26 +40,33 @@ async function readyVerifier(auth) {
   return verifier;
 }
 
-// Returns a handle to pass to confirmPhoneCode.
+// Returns a handle to pass to confirmPhoneCode. The whole step (reCAPTCHA and the SMS request) has a time limit (lib/phoneAuthTimeout.js); a handle that arrives after it is dropped.
 export async function sendPhoneCode(phoneNumber) {
-  try {
-    const auth = firebaseAuth();
-    return await signInWithPhoneNumber(auth, phoneNumber, await readyVerifier(auth));
-  } catch (err) {
-    if (err.code === 'phone_auth_not_configured') throw err;
-    throw phoneAuthError(err, "We couldn't send the code. Please try again.");
-  }
+  const step = (async () => {
+    try {
+      const auth = firebaseAuth();
+      return await signInWithPhoneNumber(auth, phoneNumber, await readyVerifier(auth));
+    } catch (err) {
+      if (err.code === 'phone_auth_not_configured') throw err;
+      throw phoneAuthError(err, "We couldn't send the code. Please try again.");
+    }
+  })();
+  return withSendTimeout(step);
 }
 
 // Returns Firebase's ID token (the proof our backend checks).
+// The step has a time limit; if it finishes later, its own clean-up (dropping Firebase's session) still runs and the token is simply not used.
 export async function confirmPhoneCode(confirmation, code) {
-  try {
-    const auth = firebaseAuth();
-    const { user } = await confirmation.confirm(code);
-    const token = await getIdToken(user);
-    await signOut(auth);
-    return token;
-  } catch (err) {
-    throw phoneAuthError(err);
-  }
+  const step = (async () => {
+    try {
+      const auth = firebaseAuth();
+      const { user } = await confirmation.confirm(code);
+      const token = await getIdToken(user);
+      await signOut(auth);
+      return token;
+    } catch (err) {
+      throw phoneAuthError(err);
+    }
+  })();
+  return withConfirmTimeout(step);
 }

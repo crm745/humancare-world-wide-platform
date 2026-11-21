@@ -21,7 +21,7 @@ const HIDDEN_FROM_READER = { accessibilityElementsHidden: true, importantForAcce
 
 // state: { status: 'idle' | 'downloading' | 'error', progress (0..1), message }
 // `isNew`: a document that was not in the list before the last pull-to-refresh (a brief highlight, 1.8 s).
-export function DocumentCard({ doc, state = { status: 'idle' }, onPress, t, isNew = false }) {
+export function DocumentCard({ doc, state = { status: 'idle' }, onPress, t, isNew = false, offline = false }) {
   // A change of the download's state (started, failed, finished) is announced once; progress ticks are not.
   const previous = useRef(state);
   useEffect(() => {
@@ -33,13 +33,15 @@ export function DocumentCard({ doc, state = { status: 'idle' }, onPress, t, isNe
   const { Icon, color, bg } = ICON[fileTypeOf(doc.name).kind];
   const downloading = state.status === 'downloading';
   const added = documentDate(doc.uploadedAt);
-  const meta = [fileMeta(doc), doc.case && doc.case.referenceNumber].filter(Boolean).join(' · ');
+  // Offline a document cannot be opened (nothing is kept on the phone to show), and the card says so in its own line instead of a message after the tap.
+  const meta = [fileMeta(doc), doc.case && doc.case.referenceNumber, offline ? t('net_opens_online') : null].filter(Boolean).join(' · ');
   const percent = Math.round((state.progress || 0) * 100);
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={documentAccessibilityLabel(doc, state, t)}
-      accessibilityState={{ busy: downloading, disabled: downloading }}
+      accessibilityState={{ busy: downloading, disabled: downloading || offline }}
+      accessibilityHint={offline ? t('net_opens_online') : undefined}
       disabled={downloading}
       onPress={onPress}
       className="mb-2.5 overflow-hidden rounded-2xl border border-line bg-white active:opacity-80"
@@ -50,11 +52,11 @@ export function DocumentCard({ doc, state = { status: 'idle' }, onPress, t, isNe
           <Icon size={19} color={color} />
         </View>
         <View className="flex-1">
-          <Text numberOfLines={2} className="font-inter-bold text-[14px] text-navy">{doc.name}</Text>
+          <Text numberOfLines={offline ? 1 : 2} ellipsizeMode="tail" className="font-inter-bold text-[14px] text-navy">{doc.name}</Text>
           {meta ? <Text className="mt-0.5 text-[12px] text-muted">{meta}</Text> : null}
           {added ? <Text className="mt-0.5 text-[12px] text-faint">{added}</Text> : null}
         </View>
-        <View className="h-11 w-11 items-center justify-center">
+        {offline && !downloading ? null : <View className="h-11 w-11 items-center justify-center">
           {downloading ? (
             <View className="items-center gap-0.5">
               <Spinner size={18} color={P.brand} trackColor={P.brandSoft} />
@@ -63,7 +65,7 @@ export function DocumentCard({ doc, state = { status: 'idle' }, onPress, t, isNe
           ) : (
             <Download size={18} color={P.brand} />
           )}
-        </View>
+        </View>}
       </View>
       {downloading ? (
         <View style={{ height: 3, backgroundColor: P.line }} {...HIDDEN_FROM_READER}>
