@@ -40,18 +40,74 @@ describe('a body the generic path has always taken', () => {
     }
   });
 
-  test('every key the mobile app\'s generic body builds is a kept key (read from the app\'s source, so a new key there cannot be dropped unnoticed)', () => {
-    const source = fs.readFileSync(path.join(__dirname, '../../apps/mobile/src/app/request/review.js'), 'utf8').replace(/\r\n/g, '\n');
-    const start = source.indexOf("await apiPost('/requests', {\n        serviceType: serviceTitle,");
-    const end = source.indexOf('urgency: d.urgency || undefined,', start);
-    expect(start).toBeGreaterThan(-1);
+  // The keys of the body the mobile app builds for the generic services (Ground Ambulance, Commercial Air, Hospitalization, the older "air" key): the object literal that buildBody() in
+  // apps/mobile/src/app/request/review.js returns in its last branch, read from the app's SOURCE so a field added there cannot reach the server unnoticed. The literal is found from its first
+  // key (serviceType: serviceTitle) to its closing `});`, so a key added ANYWHERE inside it counts, including inside the conditional spreads. Comments are removed first.
+  const mobileGenericBodySource = () => fs.readFileSync(path.join(__dirname, '../../apps/mobile/src/app/request/review.js'), 'utf8').replace(/\r\n/g, '\n');
+  const sentKeysOf = (source) => {
+    const start = source.indexOf('serviceType: serviceTitle,');
+    const end = source.indexOf('\n      });', start);
+    if (start < 0 || end < 0) return { start, end, keys: [] };
+    const literal = source.slice(start, end).replace(/\/\/[^\n]*/g, ''); // comments out
+    // a key is a name followed by a colon at the start of a line, or at the start of an inline object ("...(cond ? { key: value } : {})"), or a shorthand property alone on its line ("serviceKey,")
+    const withValue = [...literal.matchAll(/(?:^|\n)\s*(?:\.\.\.\([^\n]*?\{\s*)?([A-Za-z_]\w*)\s*:/g)].map((m) => m[1]);
+    const shorthand = [...literal.matchAll(/(?:^|\n)[ \t]*([A-Za-z_]\w*)[ \t]*,[ \t]*(?=\n|$)/g)].map((m) => m[1]);
+    const keys = new Set([...withValue, ...shorthand]);
+    return { start, end, keys: [...keys] };
+  };
+
+  test('the mobile source is found: the guard cannot pass because it read nothing', () => {
+    const { start, end, keys } = sentKeysOf(mobileGenericBodySource());
+    expect(start).toBeGreaterThan(-1); // if buildBody() is rewritten, this fails loudly instead of the check silently reading nothing
     expect(end).toBeGreaterThan(start);
-    const region = source.slice(start, end + 40);
-    const keys = new Set([...region.matchAll(/^\s+(?:\.\.\.\(.*?\{ )?(\w+):/gm)].map((m) => m[1]));
-    const sent = [...keys];
-    expect(sent.length).toBeGreaterThan(12);
-    for (const key of sent) expect({ key, kept: KEPT_FIELDS.includes(key) }).toEqual({ key, kept: true });
-    for (const key of ['patientName', 'patientAge', 'patientGender', 'patientLocation', 'patientContact', 'origin', 'destination', 'country', 'preferredDate', 'careLevel', 'description', 'urgency']) expect(region).toContain(`${key}:`);
+    for (const key of ['serviceType', 'serviceKey', 'patientName', 'patientAge', 'patientGender', 'patientLocation', 'patientContact', 'origin', 'destination', 'country', 'preferredDate', 'careLevel', 'description', 'mobility', 'equipOxygen', 'equipOxygenLpm', 'equipCardiacMonitor', 'equipVentilator', 'urgency']) {
+      expect(keys).toContain(key); // all nineteen, the conditional ones included
+    }
+    expect(keys.length).toBeGreaterThanOrEqual(19);
+  });
+
+  test('every key the mobile app\'s generic body builds is a kept key of the backend generic path (none would be silently dropped)', () => {
+    const { keys } = sentKeysOf(mobileGenericBodySource());
+    const dropped = keys.filter((key) => !KEPT_FIELDS.includes(key));
+    expect(dropped).toEqual([]);
+  });
+
+  test('and no key the app sends is on the refused or retired lists (those are refused or ignored)', () => {
+    const { keys } = sentKeysOf(mobileGenericBodySource());
+    for (const key of keys) {
+      expect({ key, refused: REFUSED_FIELDS.includes(key) }).toEqual({ key, refused: false });
+      expect({ key, retired: RETIRED_LEGACY_FIELDS.includes(key) }).toEqual({ key, retired: false });
+    }
+  });
+
+  test('the check itself works: a field added to the mobile body, anywhere in it, is reported as not kept', () => {
+    const source = mobileGenericBodySource();
+    const last = '        urgency: d.urgency || undefined,';
+    const added = (text) => source.replace(last, `${last}\n        ${text}`);
+    const notKept = (text) => sentKeysOf(text).keys.filter((key) => !KEPT_FIELDS.includes(key));
+    // 1. a plain key after the last one
+    expect(notKept(added('someNewField: d.something,'))).toEqual(['someNewField']);
+    // 2. a plain key at the top
+    expect(notKept(source.replace('serviceType: serviceTitle,', 'serviceType: serviceTitle,\n        topNewField: 1,'))).toEqual(['topNewField']);
+    // 3. a key inside a conditional spread (the shape the transport fields use)
+    const spread = "...(asksEquipment(d.service, 'equipVentilator') ? { equipVentilator: d.equipVentilator } : {}),";
+    expect(source).toContain(spread);
+    expect(notKept(source.replace(spread, `${spread}\n          ...(d.x ? { nestedNewField: d.x } : {}),`))).toEqual(['nestedNewField']);
+    // 3b. a shorthand property (a bare name on its own line, like serviceKey,)
+    expect(notKept(source.replace('        serviceKey,\n', '        serviceKey,\n        shorthandNewField,\n'))).toEqual(['shorthandNewField']);
+    // 4. a commented-out key is not a key
+    expect(sentKeysOf(added('// ghostField: 1,')).keys).not.toContain('ghostField');
+    // the real source has none of these
+    expect(notKept(source)).toEqual([]);
+  });
+
+  test('a key the validator keeps really is kept (the other half of the contract: the keys on the list reach createRequest)', () => {
+    const { keys } = sentKeysOf(mobileGenericBodySource());
+    const sample = { serviceType: 'Ground Ambulance', serviceKey: 'ground', patientName: 'John Doe', patientAge: '61', patientGender: 'Male', patientLocation: 'Pune', patientContact: '+91 98765 43210', origin: 'Pune', destination: 'Mumbai', country: 'India', preferredDate: '2099-01-01', careLevel: 'crit_icu', description: 'x', mobility: 'walking', equipOxygen: true, equipOxygenLpm: 3, equipCardiacMonitor: false, equipVentilator: false, urgency: 'urgent_24h' };
+    const { data, unknownFields, error } = validateGenericRequest(sample);
+    expect(error).toBeUndefined();
+    expect(unknownFields).toEqual([]);
+    for (const key of keys) expect({ key, kept: key in data }).toEqual({ key, kept: true });
   });
 
   test('values are stored exactly as sent: no trimming, no case change, no normalisation', () => {

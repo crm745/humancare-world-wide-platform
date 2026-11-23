@@ -1,6 +1,9 @@
 const jwt = require('jsonwebtoken');
 const { PASSWORD_CHANGE_REQUIRED } = require('../constants/auth.constants');
 const { prisma } = require('../../db/prisma');
+const sessions = require('../../modules/auth/session.service');
+
+const SESSION_ENDED = 'Your session has ended. Please log in again.';
 
 // No cookie-parser dependency for the sake of one cookie — this reads it straight
 // off the raw Cookie header. Only the admin portal sets this cookie (see
@@ -60,7 +63,19 @@ function requireAuth(allowedRoles, options = {}) {
         if (account && account.deletedAt) return res.status(401).json({ error: 'Your session has ended. Please log in again.' });
       }
 
-      req.user = { id: payload.sub, role: payload.role, corporateId: payload.corporateId ?? null, adminRole: payload.adminRole ?? null };
+      // Patient and corporate sessions are per device (session.service.js): the token's session must be live (not signed out, not idle for 30 minutes, not past 7 days). A token from before sessions
+      // existed has no `sid`: accepted outside production and for at most its own 15 minutes; refused in production unless AUTH_ALLOW_LEGACY_TOKENS=true.
+      if (payload.role === 'patient' || payload.role === 'corporate') {
+        if (payload.sid !== undefined) {
+          if (!sessions.sessionsAvailable()) return res.status(401).json({ error: SESSION_ENDED });
+          const verdict = await sessions.checkAccessSession(payload);
+          if (!verdict.ok) return res.status(401).json({ error: SESSION_ENDED, code: verdict.reason });
+        } else if (!sessions.legacyAccessTokensAllowed()) {
+          return res.status(401).json({ error: SESSION_ENDED, code: 'session_upgrade_required' });
+        }
+      }
+
+      req.user = { id: payload.sub, role: payload.role, corporateId: payload.corporateId ?? null, adminRole: payload.adminRole ?? null, sessionId: payload.sid ?? null };
       next();
     } catch (err) {
       next(err);

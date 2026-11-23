@@ -43,29 +43,25 @@ async function post(body) {
   return out;
 }
 const stored = () => mockStore.rows[mockStore.rows.length - 1];
+// Ground Ambulance and Commercial Air need a valid contact number and a date that is not in the past (transport-request.validation.js).
+const CONTACT = '+91 98765 43210';
+const FUTURE_DAY = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 const logged = () => infoSpy.mock.calls.map((call) => String(call[0])).filter((line) => line.startsWith('[generic-request]'));
 
+// Teleconsultation, Medical Value Travel, Marine and Corporate Medical Solutions are NOT here any more: their generic body is refused (tests/legacy-body-guard.test.js).
 describe('valid generic bodies are saved exactly as before', () => {
   // [name, body, the columns the row must hold]
   const GOLDEN = [
-    ['Ground Ambulance (the whole mobile body)', { serviceType: 'Ground Ambulance', serviceKey: 'ground', patientName: 'John Doe', patientAge: '61', patientGender: 'Male', patientLocation: 'Pune', patientContact: '+91 98765 43210', origin: 'Pune', destination: 'Mumbai', country: 'India', preferredDate: '2026-12-01', careLevel: 'crit_icu,crit_ecmo', description: 'Needs transport.', equipOxygen: true, equipOxygenLpm: 3, urgency: 'urgent_24h' },
+    ['Ground Ambulance (the whole mobile body)', { serviceType: 'Ground Ambulance', serviceKey: 'ground', patientName: 'John Doe', patientAge: '61', patientGender: 'Male', patientLocation: 'Pune', patientContact: '+91 98765 43210', origin: 'Pune', destination: 'Mumbai', country: 'India', preferredDate: FUTURE_DAY, careLevel: 'crit_icu,crit_ecmo', description: 'Needs transport.', equipOxygen: true, equipOxygenLpm: 3, urgency: 'urgent_24h' },
       { serviceKey: 'ground', patientAge: 61, patientGender: 'Male', patientLocation: 'Pune', patientContact: '+91 98765 43210', country: 'India', careLevel: 'crit_icu,crit_ecmo', description: 'Needs transport.', equipOxygen: true, equipOxygenLpm: 3, urgency: 'urgent_24h', mobility: null, equipCardiacMonitor: null, equipVentilator: null }],
-    ['Commercial Air stretcher', { serviceType: 'Medical Escort (Commercial Airlines) — Stretcher (CAS)', serviceKey: 'commercialair_stretcher', patientName: 'John Doe', patientAge: '61', patientGender: 'Female', patientLocation: 'Mumbai', patientContact: '+971 50 111 2222', origin: 'Mumbai', destination: 'Dubai', country: 'United Arab Emirates', preferredDate: '2026-12-01', careLevel: 'crit_ventilated', equipOxygen: false, equipCardiacMonitor: true, urgency: 'planned' },
+    ['Commercial Air stretcher', { serviceType: 'Medical Escort (Commercial Airlines) — Stretcher (CAS)', serviceKey: 'commercialair_stretcher', patientName: 'John Doe', patientAge: '61', patientGender: 'Female', patientLocation: 'Mumbai', patientContact: '+971 50 111 2222', origin: 'Mumbai', destination: 'Dubai', country: 'United Arab Emirates', preferredDate: FUTURE_DAY, careLevel: 'crit_ventilated', equipOxygen: false, equipCardiacMonitor: true, urgency: 'planned' },
       { serviceKey: 'commercialair_stretcher', patientAge: 61, careLevel: 'crit_ventilated', equipOxygen: false, equipOxygenLpm: null, equipCardiacMonitor: true, equipVentilator: null, urgency: 'planned', country: 'United Arab Emirates' }],
     ['Hospitalization', { serviceType: 'Hospitalization Assistance', serviceKey: 'hospital', patientName: 'John Doe', patientAge: '40', patientGender: 'Male', origin: 'Pune', destination: 'Pune', description: 'Planned admission.', urgency: 'planned' },
       { serviceKey: 'hospital', patientAge: 40, description: 'Planned admission.', urgency: 'planned', careLevel: null, mobility: null, equipOxygen: null }],
-    ['Corporate Medical Solutions', { serviceType: 'Corporate Medical Solutions', serviceKey: 'corporate', patientName: 'John Doe', patientAge: '35', origin: 'Pune', destination: 'Pune', description: 'Annual checkups.' },
-      { serviceKey: 'corporate', patientAge: 35, description: 'Annual checkups.', urgency: null }],
-    ['older Marine', { serviceType: 'Marine Medical Safety', serviceKey: 'marine', patientName: 'John Doe', origin: 'Mumbai', destination: 'Dubai', description: 'Crew injury.', urgency: 'urgent_24h' },
-      { serviceKey: 'marine', description: 'Crew injury.', urgency: 'urgent_24h', patientAge: null }],
-    ['older Medical Value Travel', { serviceType: 'Medical Value Travel', serviceKey: 'medvalue', patientName: 'John Doe', origin: 'Delhi', destination: 'Singapore', description: 'Heart valve surgery.', urgency: 'planned' },
-      { serviceKey: 'medvalue', description: 'Heart valve surgery.', urgency: 'planned' }],
     ['the older "air" key', { serviceType: 'Air Ambulance', serviceKey: 'air', patientName: 'John Doe', patientAge: '70', origin: 'Pune', destination: 'Mumbai', careLevel: 'ICU / Critical, Ambulatory', mobility: 'bedridden', equipOxygen: true, equipCardiacMonitor: false, equipVentilator: false, urgency: 'critical_6h' },
       { serviceKey: 'air', patientAge: 70, careLevel: 'ICU / Critical, Ambulatory', mobility: 'bedridden', equipOxygen: true, equipCardiacMonitor: false, equipVentilator: false, urgency: 'critical_6h' }],
     ['no serviceKey (a very old build)', { serviceType: 'Ground Ambulance', patientName: 'John Doe', origin: 'Pune', destination: 'Mumbai', description: 'Needs transport.' },
       { serviceKey: null, patientAge: null }],
-    ['an older Teleconsultation body', { serviceType: 'Tele Consultation & House Call', serviceKey: 'tele', patientName: 'John Doe', patientAge: '29', origin: 'Pune', destination: 'Pune', description: 'Fever.' },
-      { serviceKey: 'tele', patientAge: 29, description: 'Fever.' }],
   ];
   test.each(GOLDEN)('%s', async (_name, input, columns) => {
     const r = await post(input);
@@ -89,7 +85,7 @@ describe('valid generic bodies are saved exactly as before', () => {
   });
 
   test('a reference and Case are made as before (REQ- reference, the Case copies the request)', async () => {
-    const r = await post({ serviceType: 'Ground Ambulance', serviceKey: 'ground', patientName: 'John Doe', origin: 'Pune', destination: 'Mumbai', description: 'Needs transport.' });
+    const r = await post({ serviceType: 'Ground Ambulance', serviceKey: 'ground', patientName: 'John Doe', patientContact: CONTACT, preferredDate: FUTURE_DAY, origin: 'Pune', destination: 'Mumbai', description: 'Needs transport.' });
     expect(r.body.request.referenceNumber).toBe('REQ-1100');
     expect(mockStore.cases[0]).toMatchObject({ referenceNumber: 'REQ-1100', patientName: 'John Doe', serviceType: 'Ground Ambulance', origin: 'Pune', destination: 'Mumbai' });
   });
@@ -157,14 +153,10 @@ describe('invalid input is a 400, never a database error', () => {
 
 describe('another service\'s own columns are refused for every generic service, and nothing is saved', () => {
   const SERVICES = [
-    ['Commercial Air', { serviceType: 'Medical Escort', serviceKey: 'commercialair_stretcher' }],
-    ['Ground Ambulance', { serviceType: 'Ground Ambulance', serviceKey: 'ground', description: 'Needs transport.' }],
+    ['Commercial Air', { serviceType: 'Medical Escort', serviceKey: 'commercialair_stretcher', patientContact: CONTACT, preferredDate: FUTURE_DAY }],
+    ['Ground Ambulance', { serviceType: 'Ground Ambulance', serviceKey: 'ground', description: 'Needs transport.', patientContact: CONTACT, preferredDate: FUTURE_DAY }],
     ['Hospitalization', { serviceType: 'Hospitalization Assistance', serviceKey: 'hospital' }],
-    ['Corporate Medical', { serviceType: 'Corporate Medical Solutions', serviceKey: 'corporate' }],
-    ['older Marine', { serviceType: 'Marine Medical Safety', serviceKey: 'marine' }],
-    ['older Medical Value Travel', { serviceType: 'Medical Value Travel', serviceKey: 'medvalue' }],
     ['the older "air" key', { serviceType: 'Air Ambulance', serviceKey: 'air' }],
-    ['an older Teleconsultation', { serviceType: 'Tele Consultation & House Call', serviceKey: 'tele' }],
     ['no serviceKey', { serviceType: 'Ground Ambulance', description: 'Needs transport.' }],
   ];
   const FIELDS = {

@@ -206,7 +206,7 @@ describe('refused and unavailable requests save nothing', () => {
 });
 
 describe('other services keep their behaviour', () => {
-  const ground = (extra = {}) => ({ serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground', patientName: 'J Smith', origin: 'Pune', destination: 'Mumbai', description: 'Needs transport.', ...extra });
+  const ground = (extra = {}) => ({ serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground', patientName: 'J Smith', patientContact: '+91 98765 43210', preferredDate: inDays(4), origin: 'Pune', destination: 'Mumbai', description: 'Needs transport.', ...extra });
 
   it('still takes plain-text cities and stores no city metadata', async () => {
     const res = await post(ground({ preferredDate: inDays(4) }));

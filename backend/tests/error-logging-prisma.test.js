@@ -54,6 +54,7 @@ describe('a real PrismaClientValidationError', () => {
     destination: 'Dubai',
     patientName: SECRET_NAME,
     patientContact: SECRET_PHONE,
+    preferredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), // Ground needs a day that is not past (transport-request.validation.js)
     description: SECRET_NOTE,
   };
 

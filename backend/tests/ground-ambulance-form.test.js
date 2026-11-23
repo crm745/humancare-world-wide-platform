@@ -31,6 +31,8 @@ const body = (extra = {}) => ({
   patientGender: 'Female',
   origin: 'Pune, India',
   destination: 'Mumbai, India',
+  patientContact: '+91 98765 43210',
+  preferredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10), // Ground / Commercial Air need a contact number and a day that is not past (transport-request.validation.js)
   description: 'Post-surgical patient, needs ICU transfer.',
   urgency: 'urgent_24h',
   ...extra,

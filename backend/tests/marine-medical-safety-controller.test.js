@@ -240,30 +240,20 @@ describe('fields the structured format does not carry are refused (and nothing i
   });
 });
 
-describe('older generic Marine requests stay on the existing path', () => {
-  test('the generic body is accepted exactly as before: its own origin, destination, description and urgency, no scope, no structured description', async () => {
+describe('older generic Marine requests are refused (tests/legacy-body-guard.test.js has the full set)', () => {
+  test('the generic body is refused with app_update_required and nothing is saved or looked up', async () => {
     const r = await post(legacy({ description: 'Crew member injured on deck.', urgency: 'planned', country: 'India', patientContact: '+971 50 111 2222', preferredDate: '2030-01-01' }));
-    expect(r.status).toBe(201);
-    expect(stored().transferScope ?? null).toBeNull();
-    expect(stored()).toMatchObject({ serviceKey: 'marine', origin: 'Mumbai, India', destination: 'Dubai, UAE', description: 'Crew member injured on deck.', urgency: 'planned', careLevel: null, equipOxygen: null });
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe('app_update_required');
+    expect(mockStore.rows).toHaveLength(0);
     expect(mockLookups).toEqual([]);
   });
-  test('its write is unchanged: no flow rate key is written for it (the Marine-only write applies to a structured request only)', async () => {
-    await post(legacy());
-    expect('equipOxygenLpm' in stored()).toBe(false);
-    expect('transferScope' in stored()).toBe(false);
-  });
-  test('the generic rules still refuse what they always refused for Marine: mobility, equipment, a flow rate', async () => {
+  test('a generic body is refused whatever else it carries: mobility, equipment, a flow rate', async () => {
     for (const extra of [{ mobility: 'walking' }, { equipOxygen: false }, { equipCardiacMonitor: true }, { equipOxygenLpm: 4 }]) {
       const r = await post(legacy(extra));
       expect({ extra, status: r.status }).toEqual({ extra, status: 400 });
     }
     expect(mockStore.rows).toHaveLength(0);
-  });
-  test('a generic body with no origin is still refused by the generic rule', async () => {
-    const r = await post({ serviceType: 'Marine Medical Safety', serviceKey: 'marine', patientName: 'John Doe', destination: 'Dubai' });
-    expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/Missing required field\(s\): origin/);
   });
   test('the structured fields on another service key are not taken for Marine\'s: a hospital body stays generic', async () => {
     const r = await post({ serviceType: 'Hospitalization Assistance', serviceKey: 'hospital', patientName: 'John Doe', origin: 'Pune', destination: 'Mumbai', serviceScope: 'domestic' });
@@ -276,14 +266,14 @@ describe('older generic Marine requests stay on the existing path', () => {
 
 describe('other services\' flow-rate writes are unchanged', () => {
   test('Ground Ambulance still stores its flow rate (and none for Oxygen off)', async () => {
-    const base = { serviceType: 'Ground Ambulance', serviceKey: 'ground', patientName: 'John Doe', origin: 'Pune', destination: 'Mumbai', description: 'Needs transport.', urgency: 'urgent_24h' };
+    const base = { serviceType: 'Ground Ambulance', serviceKey: 'ground', patientName: 'John Doe', patientContact: '+91 98765 43210', preferredDate: inDays(30), origin: 'Pune', destination: 'Mumbai', description: 'Needs transport.', urgency: 'urgent_24h' };
     expect((await post({ ...base, equipOxygen: true, equipOxygenLpm: 3 })).status).toBe(201);
     expect(stored()).toMatchObject({ equipOxygen: true, equipOxygenLpm: 3 });
     expect((await post({ ...base, equipOxygen: false })).status).toBe(201);
     expect(stored()).toMatchObject({ equipOxygen: false, equipOxygenLpm: null });
   });
   test('Commercial Air still stores its flow rate', async () => {
-    const r = await post({ serviceType: 'Medical Escort (Commercial Airlines)', serviceKey: 'commercialair_stretcher', patientName: 'John Doe', origin: 'Pune', destination: 'Mumbai', urgency: 'urgent_24h', equipOxygen: true, equipOxygenLpm: 2.5 });
+    const r = await post({ serviceType: 'Medical Escort (Commercial Airlines)', serviceKey: 'commercialair_stretcher', patientName: 'John Doe', patientContact: '+91 98765 43210', preferredDate: inDays(30), origin: 'Pune', destination: 'Mumbai', urgency: 'urgent_24h', equipOxygen: true, equipOxygenLpm: 2.5 });
     expect(r.status).toBe(201);
     expect(stored()).toMatchObject({ equipOxygen: true, equipOxygenLpm: 2.5 });
   });
@@ -322,7 +312,7 @@ describe('the PDF', () => {
     expect(valueAfter(lines, 'Critical level:')).toBe('ICU, ECMO');
     expect(valueAfter(lines, 'Oxygen:')).toBe('Yes (4 LPM)');
     expect(valueAfter(lines, 'Medical History:')).toBe('Chest pain since 04:00.');
-    expect(valueAfter(lines, 'Status:')).toBe('submitted');
+    expect(valueAfter(lines, 'Status:')).toBe('Submitted'); // the status is written as a word, not as its stored key
   });
   test('rows that were not answered are left out: no date, no Critical Level, no Oxygen answer, no history', async () => {
     const lines = await renderPdfLines(newMarine({ preferredDate: null, careLevel: null, equipOxygen: null, equipOxygenLpm: null, description: composeMarineDescription({}) }));

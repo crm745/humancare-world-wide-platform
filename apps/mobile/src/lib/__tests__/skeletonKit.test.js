@@ -313,7 +313,8 @@ describe('Profile and the forms', () => {
     expect(read('../../state/AppContext.js')).toContain("apiGet('/auth/me')");
   });
   test('forms have no pull-to-refresh', () => {
-    ['personal-details', 'edit-profile', 'login', 'register', 'login-otp', 'register-otp', 'complete-profile', 'change-contact', 'corporate-new-case', 'forgot-password', 'reset-password', 'set-password'].forEach((name) => {
+    // (personal-details is not here any more: it re-reads the profile on a pull, and while editing only re-checks the connection; tests/networkRefresh.test.js)
+    ['edit-profile', 'login', 'register', 'login-otp', 'register-otp', 'complete-profile', 'change-contact', 'corporate-new-case', 'forgot-password', 'reset-password', 'set-password'].forEach((name) => {
       expect(app(name)).not.toContain('RefreshControl');
     });
     ['step1', 'step2', 'step3'].forEach((n) => {

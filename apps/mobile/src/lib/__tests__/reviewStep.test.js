@@ -331,7 +331,8 @@ describe('Edit and Change go to the right step; Submit is unchanged', () => {
     // Re-recorded for the Phase 4 final safety fix: a refusal of a LATER attempt (session expired or unverified, a 4xx) while an earlier attempt is unconfirmed no longer ends the
     // pending state: Review tells the person about the refusal and keeps the unconfirmed card (requestUnknownState.test.js).
     // Re-recorded for the localization pass: the one toast of this block ("Upload at least one document ...") now reads t('req_err_need_doc') and the error toast reads errorText(err, t) (lib/errorText.js: the app's own errors in the person's language); nothing else in the block changed.
-    expect(crypto.createHash('sha256').update(review.slice(a, b)).digest('hex')).toBe('fdef15532305a357509e29b0c36452f133c851e60872cdf1d9ff967b2ff9a8eb');
+    // Re-recorded for the server-error localization (M1): the field errors of a refusal are read with fieldErrorsFromError(err, t), so a refused field is shown in the person's language when the server sent its stable code (lib/serverErrors.js); the English text stays the fallback. Nothing else in the block changed.
+    expect(crypto.createHash('sha256').update(review.slice(a, b)).digest('hex')).toBe('be0880e81903d542899cbce190c1cfccef80dbcbf225402ae63d499b2cfefba0');
   });
   test('the payload bodies are still there', () => {
     expect(review).toContain('buildPrivateCharterPayload(charterDraft)');

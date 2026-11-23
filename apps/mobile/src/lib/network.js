@@ -17,7 +17,7 @@
 //
 // Probing is deliberately rare. /health is asked only: (1) when the link comes up or its kind changes, (2) when a real call failed without an
 // answer, timed out or got a 5xx, (3) when the app returns to the foreground after a while or while degraded, (4) on a slow back-off timer, ONLY
-// while the state is not online (15 s, 30 s, then every 60 s, and not while the app is in the background). While online and healthy there is no
+// while the state is not online (1.5 s, 3 s, 5 s, 10 s ... then every 60 s, and not while the app is in the background). While online and healthy there is no
 // timer and no polling. Two probes are never closer than MIN_PROBE_GAP_MS, and only one is ever in flight, so a burst of failing calls is one probe.
 //
 // TWO KINDS OF FACT, kept apart:
@@ -26,14 +26,22 @@
 // A /health failure never says "no internet" on a phone whose link is up: it says the server could not be reached. An answer is also only ever applied to the link state it was ASKED under: a
 // probe that was in flight when the link changed (dropped, or came back) belongs to the past and is thrown away, so a late answer can never overwrite a newer state.
 // Right after a link comes up the first questions are quick (LINK_UP_RECHECK_MS), because a radio that has just reconnected often refuses the first request; the slow back-off only starts after those.
+// Two things keep recovery quick without more probing:
+//   - a change of ONLY NetInfo's isInternetReachable hint (same network, same kind) is not a new link state: it neither throws away a /health answer that is on its way nor restarts the quick questions
+//     (NetInfo tests its own address a few seconds after a Wi-Fi joins, and on a LAN-only Wi-Fi that test says "not reachable" while our backend is perfectly reachable);
+//   - while the phone is known to be OFFLINE it re-reads the phone's connection every OFFLINE_LINK_RECHECK_MS (a local read, no request to anything) so a late or missed NetInfo event cannot keep
+//     "offline" on screen;
+//   - in the same watch the backend's /health is ALSO asked (single-flight): an answer from it proves the phone is connected, whatever NetInfo has or has not said yet (offlineProbe).
 // Nothing here touches authentication, tokens or any request: it only reports. A network failure never signs anyone out and nothing is resent.
 export const NET = Object.freeze({ UNKNOWN: 'unknown', ONLINE: 'online', OFFLINE: 'offline', SLOW: 'slow', SERVER_DOWN: 'serverDown' });
 
 export const SLOW_PROBE_MS = 3500; // a /health answer slower than this is "slow"
-export const MIN_PROBE_GAP_MS = 5000; // no two probes closer than this (unless a link change forces one)
+export const MIN_PROBE_GAP_MS = 1500; // no two probes closer than this (unless a link change forces one)
 export const FOREGROUND_STALE_MS = 30000; // returning to the app re-checks only if the last probe is older than this
-export const DEGRADED_RECHECK_MS = Object.freeze([15000, 30000, 60000]); // back-off while not online; the last value repeats
+export const DEGRADED_RECHECK_MS = Object.freeze([1500, 3000, 5000, 10000, 20000, 40000, 60000]); // back-off while not online (never closer than MIN_PROBE_GAP_MS); the last value repeats, so never faster than once a minute at the end
 export const LINK_UP_RECHECK_MS = Object.freeze([500, 1000, 1500, 2500, 4000, 6000]); // the first questions after a link comes up: the radio may not be ready yet
+export const OFFLINE_LINK_RECHECK_MS = 500; // while the phone is KNOWN to have no link, ask the phone (not the backend) this often whether it has one: NetInfo's event can be late or missed
+export const OFFLINE_PROBE_EVERY = 3; // while OFFLINE, every this many link re-reads (500 ms each) the backend's /health is ALSO asked once: reaching it proves the phone is connected whatever NetInfo says
 export const RECOVERY_PROBE_TIMEOUT_MS = 2000; // a probe asked while recovering gives up after this (a just-reconnected radio often swallows packets); normal probes keep the probe's own limit
 
 const DEGRADED = new Set([NET.OFFLINE, NET.SERVER_DOWN, NET.SLOW]);
@@ -49,6 +57,8 @@ export const normalizeLink = (state) => ({
 });
 
 const linkKey = (link) => `${link.isConnected}|${link.isInternetReachable}|${link.type}`;
+// Which network the phone is on: connected or not, and of which kind. The reachability hint is not part of it.
+const networkKey = (link) => `${link.isConnected}|${link.type}`;
 // Hard offline: the phone has no link. NetInfo's isInternetReachable === false alone does NOT count: it says nothing about our backend, which /health is asked about.
 const linkIsDown = (link) => link.isConnected === false;
 
@@ -77,6 +87,9 @@ export function createNetworkStore({ probe, subscribeLink, subscribeAppActive = 
   let failStreak = 0;
   let recheckTimer = null;
   let recheckIndex = 0;
+  let offlineTimer = null;
+  let offlineTick = 0;
+  let offlineProbing = false; // single-flight for the probe asked while OFFLINE
   let generation = 0; // moved by stop(), so an answer that arrives after it is dropped
   let linkEpoch = 0; // moved by every change of the link: a /health answer is applied only to the epoch it was asked in
   let probeEpoch = -1; // the epoch of the probe in flight
@@ -103,6 +116,43 @@ export function createNetworkStore({ probe, subscribeLink, subscribeAppActive = 
   }
 
   const clearRecheck = () => { if (recheckTimer) { clearTimeout(recheckTimer); recheckTimer = null; } };
+  const clearOfflineWatch = () => { if (offlineTimer) { clearTimeout(offlineTimer); offlineTimer = null; } };
+  // While the link is known to be down (and the app is in front, and the phone can be asked), re-read the phone's connection every OFFLINE_LINK_RECHECK_MS. No backend traffic.
+  function scheduleOfflineWatch() {
+    clearOfflineWatch();
+    if (!started || !appActive || !refreshLink || !linkIsDown(state.link) || state.status !== NET.OFFLINE) return;
+    offlineTimer = setTimeout(() => {
+      offlineTimer = null;
+      refresh();
+      offlineTick += 1;
+      if (offlineTick % OFFLINE_PROBE_EVERY === 0) offlineProbe();
+      scheduleOfflineWatch();
+    }, OFFLINE_LINK_RECHECK_MS);
+  }
+
+  // The phone says it has no link, but a late or missed NetInfo event (Android can take seconds to report a Wi-Fi that is already usable) must not keep "offline" on screen: the backend is ALSO asked, single-flight,
+  // with the short recovery limit. While there is really no link the request fails at once and nothing changes. If the backend ANSWERS (any HTTP answer), the phone is plainly connected: the outage is
+  // over for the phone (buttons work), the answer is applied as that of a link that has just come up, and the restoration is announced like any other. An answer for a link state that has since changed is thrown away.
+  function offlineProbe() {
+    if (offlineProbing || !started || !appActive || state.status !== NET.OFFLINE || !linkIsDown(state.link)) return;
+    offlineProbing = true;
+    const mine = generation;
+    const epoch = linkEpoch;
+    (async () => {
+      let result;
+      try { result = await probe({ timeoutMs: RECOVERY_PROBE_TIMEOUT_MS }); } catch { result = { ok: false, ms: 0 }; }
+      if (mine !== generation || !started || epoch !== linkEpoch || state.status !== NET.OFFLINE) return;
+      if (!result.ok && !result.status) return; // no answer: still no link (or the backend is unreachable too: the phone's own word stands)
+      linkEpoch += 1;
+      clearOfflineWatch();
+      const type = state.link.type && state.link.type !== 'none' ? state.link.type : 'unknown';
+      recovering = true;
+      state = { ...state, link: { isConnected: true, isInternetReachable: true, type }, status: NET.UNKNOWN };
+      emit();
+      recheckIndex = 0;
+      applyProbe(result, true);
+    })().finally(() => { offlineProbing = false; });
+  }
 
   // The slow back-off, only while degraded, only while the app is in front, and never while the link is known to be down (NetInfo then wakes us).
   function scheduleRecheck() {
@@ -169,6 +219,14 @@ export function createNetworkStore({ probe, subscribeLink, subscribeAppActive = 
     const link = normalizeLink(netInfoState);
     if (linkKey(link) === linkKey(state.link) && state.status !== NET.UNKNOWN) return; // the same thing said again: nothing to do
     const previous = state.link;
+    // Only the reachability HINT changed (same network: same connected flag and kind): that says nothing about OUR backend, so it is not a new link state. A probe in flight stays valid, the quick
+    // questions are not restarted, and when the internet has just been confirmed while the backend is still unconfirmed, one question is asked (single-flight, so never a second).
+    // (A link that was not known before - connected null - is never a hint change: the first real reading always starts the questions.)
+    if (previous.isConnected !== null && networkKey(link) === networkKey(previous)) {
+      set({ link });
+      if (link.isInternetReachable === true && (DEGRADED.has(state.status) || recovering || state.status === NET.UNKNOWN)) runProbe({ force: true, recovery: recovering });
+      return;
+    }
     linkEpoch += 1; // every real change of the link starts a new epoch: probes asked before it are dropped
     if (linkIsDown(link)) {
       recovering = false;
@@ -176,9 +234,12 @@ export function createNetworkStore({ probe, subscribeLink, subscribeAppActive = 
       clearRecheck();
       failStreak = 0;
       recheckIndex = 0;
+      offlineTick = 0;
       set({ link, status: NET.OFFLINE, lastCheckedAt: now() });
+      scheduleOfflineWatch();
       return;
     }
+    clearOfflineWatch();
     set({ link });
     // The link is up again after being down: the phone is no longer offline (a Verify or Submit button is enabled at once), while the backend is asked. It is "not known yet" until that answers, and the
     // outage is only over (the restoration is announced) when it does.
@@ -195,10 +256,12 @@ export function createNetworkStore({ probe, subscribeLink, subscribeAppActive = 
 
   function onAppActive(active) {
     appActive = active === true;
-    if (!appActive) { clearRecheck(); return; }
+    if (!appActive) { clearRecheck(); clearOfflineWatch(); return; }
     refresh();
+    scheduleOfflineWatch();
     const stale = !lastProbeAt || now() - lastProbeAt > FOREGROUND_STALE_MS;
-    if (DEGRADED.has(state.status) || state.status === NET.UNKNOWN || stale) runProbe();
+    // Coming back to the app (e.g. from the Wi-Fi settings) while the backend is not confirmed: ask NOW, not after the gap.
+    if (DEGRADED.has(state.status) || state.status === NET.UNKNOWN || stale) runProbe({ force: DEGRADED.has(state.status) || state.status === NET.UNKNOWN });
     scheduleRecheck();
   }
 
@@ -236,6 +299,7 @@ export function createNetworkStore({ probe, subscribeLink, subscribeAppActive = 
       started = false;
       generation += 1;
       clearRecheck();
+      clearOfflineWatch();
       if (unsubLink) { unsubLink(); unsubLink = null; }
       if (unsubApp) { unsubApp(); unsubApp = null; }
       probePromise = null;

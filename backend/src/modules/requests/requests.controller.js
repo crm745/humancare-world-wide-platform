@@ -32,7 +32,9 @@ const { isMvtStructuredRequest, cityRefOf, validateMvtRequest } = require('./med
 const { isMarineStructuredRequest, cityRefOf: marineCityRefOf, validateMarineRequest } = require('./marine-medical-safety.validation');
 const { isCorporateStructuredRequest, validateCorporateRequest, isNewCorporateFormat } = require('./corporate-medical.validation');
 const { validateGenericRequest, unknownFieldsLogLine } = require('./generic-request.validation');
-const { SIGNATURE_BYTES, contentMatchesDeclared } = require('../../common/utils/file-signature');
+const { legacyBypassProblem } = require('./legacy-body-guard');
+const { validateTransportRequest } = require('./transport-request.validation');
+const { closedRequestProblem, fileCountProblem, fileContentProblem, safeDocumentName } = require('./upload-policy');
 
 const REQUIRED_FIELDS = ['serviceType', 'patientName', 'origin', 'destination'];
 const { REQUIRED_SERVICE_BY_KEY } = require('../bitrix/bitrix-lead');
@@ -42,8 +44,6 @@ const { REQUIRED_SERVICE_BY_KEY } = require('../bitrix/bitrix-lead');
 const SERVICE_KEYS = new Set([...Object.keys(REQUIRED_SERVICE_BY_KEY), 'hospital', 'marine', 'medvalue', 'air']);
 // Mortal Remains: the app sends the single key "mortal"; the two older keys (mortal_domestic / mortal_international) are no longer accepted for new
 // requests. Its rules live in mortal-remains.validation.js. Rows already stored with an older key are untouched and still recognised (isMortalRequestKey).
-// Uploads for a Mortal Remains request: at most this many files per request.
-const MORTAL_MAX_FILES = 10;
 
 const FIELD_ERRORS_MESSAGE = 'Please correct the highlighted fields.';
 
@@ -231,6 +231,10 @@ async function submitRequest(req, res, next) {
       const request = await createRequest(req.user.id, data, { clientRequestId });
       return res.status(201).json({ request: toPatientRequest(request) });
     }
+    // Every structured branch above has declined this body. For Teleconsultation, Medical Value Travel, Marine and Corporate Medical Solutions that means the old generic format (or a body that
+    // only names the service in serviceType): refused, never saved as an incomplete request (legacy-body-guard.js).
+    const bypass = legacyBypassProblem(req.body);
+    if (bypass) return res.status(bypass.status).json(bypass.body);
     const missing = REQUIRED_FIELDS.filter((field) => !req.body[field]);
     if (missing.length) {
       return res.status(400).json({ error: `Missing required field(s): ${missing.join(', ')}` });
@@ -244,6 +248,9 @@ async function submitRequest(req, res, next) {
     }
     const medicalError = medicalFieldsError(req.body);
     if (medicalError) return res.status(400).json({ error: medicalError });
+    // Ground Ambulance and Commercial Air have no validator of their own: their contact number, date, origin, destination and name are checked here (transport-request.validation.js).
+    const transportProblem = validateTransportRequest(req.body);
+    if (transportProblem) return res.status(400).json(transportProblem);
     // The generic path's own check (generic-request.validation.js): the type and size of every key it keeps, another service's own columns refused, and ONLY the kept keys passed on
     // to createRequest (never the raw body). A problem is a 400 here, not a database error. Stage 1 of unknown keys: they are ignored as before and their NAMES (never values) are
     // logged once, so a later stage can refuse them with the facts in hand.
@@ -304,37 +311,31 @@ async function listMyDocuments(req, res, next) {
 // The type every Mortal Remains upload is stored as.
 const MORTAL_DOCUMENT_TYPE = 'Supporting Document';
 
-// Why a Mortal Remains upload must be refused, or null. (Two uploads arriving at the same instant could pass the count together and exceed the
-// cap by one: the app uploads one file at a time.)
-async function mortalUploadProblem(request, file) {
-  const stored = await prisma.document.count({ where: { caseId: request.case.id } });
-  if (stored >= MORTAL_MAX_FILES) return `A Mortal Remains request can have at most ${MORTAL_MAX_FILES} documents.`;
-  let head = Buffer.alloc(0);
-  try {
-    const handle = await fs.promises.open(file.path, 'r');
-    try {
-      const buffer = Buffer.alloc(SIGNATURE_BYTES);
-      const { bytesRead } = await handle.read(buffer, 0, SIGNATURE_BYTES, 0);
-      head = buffer.subarray(0, bytesRead);
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    return 'The uploaded file could not be read.';
-  }
-  if (!contentMatchesDeclared(head, file.mimetype, file.originalname)) {
-    return 'The file content does not match its type. Allowed: PDF, JPG, PNG, WEBP, DOC, DOCX.';
-  }
-  return null;
+// Why an upload to a request on the original (Case) path must be refused, or null: the request already holds the most documents it may (30; Mortal Remains 10), or the file is empty, too big,
+// unreadable or not what its type and name claim (upload-policy.js: one policy for every service). Two uploads arriving at the same instant could pass the count together; the count is
+// taken again, under a per-Case lock, right before the row is written (see accept below).
+async function legacyUploadProblem(request, file) {
+  return fileCountProblem(await prisma.document.count({ where: { caseId: request.case.id } }), request.serviceKey) || fileContentProblem(file);
 }
 
 //
 async function uploadRequestDocument(req, res, next) {
+  // The file is already on disk (multer). Until a database row refers to it, it belongs to nobody: on every way out that is not "stored" (a refusal, a database failure, any unexpected error)
+  // it is deleted. `fileOwned` flips when a row exists; `rowAttempted` marks that a row was being written, so a failure there is first checked against the database (a write that
+  // actually succeeded must never lose its file).
+  let fileOwned = false;
+  let rowAttempted = false;
+  const discardFile = () => (req.file ? fs.promises.rm(req.file.path, { force: true }).catch(() => {}) : Promise.resolve());
+  const releaseUnlessStored = async () => {
+    if (fileOwned || !req.file) return;
+    if (rowAttempted) {
+      const row = await prisma.document.findFirst({ where: { fileUrl: `/uploads/${req.file.filename}` }, select: { id: true } }).catch(() => null);
+      if (row) return;
+    }
+    await discardFile();
+  };
   try {
     if (!req.file) return res.status(400).json({ error: 'file is required' });
-    // The file is already on disk (multer). If the request is not found or is not the patient's, or
-    // has nothing to attach it to, it must not be left behind unreferenced.
-    const discardFile = () => fs.promises.rm(req.file.path, { force: true }).catch(() => {});
     // Phase 5: the app's id for this logical upload (optional; an older app sends none). A malformed one is refused, never guessed at.
     const uploadId = parseClientUploadId(req.body && req.body.clientUploadId);
     if (uploadId.present && !uploadId.valid) {
@@ -363,9 +364,20 @@ async function uploadRequestDocument(req, res, next) {
     // by ClamAV, and reviewed by an Admin. The same URL and form field as before; an optional
     // "replacesDocumentId" field marks an earlier document as replaced.
     if (request.reviewStatus != null) {
+      // A repeat of an upload the server already holds is answered with the original whatever the request's state is (upload recovery); anything new must be allowed: the request is
+      // still open and the file is what it claims to be. (The review workflow's own cap of 30 and its checks run inside addPatientDocument.)
+      const replay = clientUploadId ? (request.requestDocuments || []).find((d) => d.clientUploadId === clientUploadId) : null; // from the request already loaded above (it carries each document's clientUploadId)
+      if (!replay) {
+        const problem = closedRequestProblem(request) || (await fileContentProblem(req.file));
+        if (problem) {
+          await discardFile();
+          return res.status(problem.status).json(problem.body);
+        }
+      }
       const stored = await addPatientDocument({
         userId: req.user.id, requestId: request.id, file: req.file, replacesDocumentId: req.body && req.body.replacesDocumentId, clientUploadId,
       });
+      fileOwned = !stored.replayed; // a replay deleted its own copy; a new document owns the file
       // A repeat of an upload the server already has: the original is the answer. No second scan, replacement or count (and its new file was deleted).
       if (stored.replayed) return res.status(200).json({ document: toUploadResponse(stored) });
       // Fail closed: if the scanner is down the document is saved but stays "error" (unusable)
@@ -403,26 +415,39 @@ async function uploadRequestDocument(req, res, next) {
         const prior = await findCaseDocumentByClientUploadId(request.case.id, clientUploadId);
         if (prior) return replayLegacy(prior);
       }
-      if (mortal) {
-        const problem = await mortalUploadProblem(request, req.file);
-        if (problem) {
-          await discardFile();
-          return res.status(400).json({ error: problem });
-        }
+      // The same rules for every service: not on a cancelled or completed request, at most 30 documents (Mortal Remains 10), and the file's content must be what its type and name claim.
+      const problem = closedRequestProblem(request) || (await legacyUploadProblem(request, req.file));
+      if (problem) {
+        await discardFile();
+        return res.status(problem.status).json(problem.body);
       }
       // SCAN BEFORE STORE (documents/legacy-scan.js): the row below is created only after a confirmed clean verdict, so nothing (the patient's download, the corporate portal, the Bitrix24
       // message and its retry sweep) can ever see a document that was not scanned. Infected: 422 and quarantined. Scanner down, timeout or any other non-verdict: 503, deleted, FAIL CLOSED.
       const scan = await scanBeforeStore(req.file, { expectedSha256: sha256 }); // { sha256, engine, scannedAt }: stored with the row as its clean scan record
       let document;
       try {
-        document = await addDocumentToCase(request.case.id, {
-          type: mortal ? MORTAL_DOCUMENT_TYPE : 'Medical Report',
-          name: req.file.originalname,
-          fileUrl: `/uploads/${req.file.filename}`,
-          fileSizeBytes: req.file.size,
-          clientUploadId,
-          scan,
+        // The count is taken again here, one upload at a time per Case (per process), so parallel uploads cannot both pass the check above and exceed the cap.
+        const written = await withUploadLock(`cap:${request.case.id}`, async () => {
+          const full = fileCountProblem(await prisma.document.count({ where: { caseId: request.case.id } }), request.serviceKey);
+          if (full) return { full };
+          rowAttempted = true;
+          return {
+            document: await addDocumentToCase(request.case.id, {
+              type: mortal ? MORTAL_DOCUMENT_TYPE : 'Medical Report',
+              name: safeDocumentName(req.file.originalname), // never the raw client text: no control or path characters, at most 191 characters (upload-policy.js)
+              fileUrl: `/uploads/${req.file.filename}`,
+              fileSizeBytes: req.file.size,
+              clientUploadId,
+              scan,
+            }),
+          };
         });
+        if (written.full) {
+          await discardFile();
+          return res.status(written.full.status).json(written.full.body);
+        }
+        document = written.document;
+        fileOwned = true; // a row now refers to the file: from here on it is kept whatever happens next (CRM message, response)
       } catch (err) {
         // The same upload arrived at the same instant in another process and won: the unique index is the final protection. Return the original; nothing else happens for this copy.
         if (clientUploadId && isUniqueViolation(err)) {
@@ -448,6 +473,7 @@ async function uploadRequestDocument(req, res, next) {
     // One copy of the same upload at a time (per process): a second copy waits, then finds the document and is answered from it: no second scan and no second Bitrix message.
     return clientUploadId ? await withUploadLock(`${request.case.id}:${clientUploadId}`, accept) : await accept();
   } catch (err) {
+    await releaseUnlessStored().catch(() => {}); // a failed upload never leaves its file behind
     next(err);
   }
 }
@@ -455,7 +481,7 @@ async function uploadRequestDocument(req, res, next) {
 async function downloadRequestSummary(req, res, next) {
   try {
     const request = await getRequestForUser(req.user.id, req.params.id);
-    streamRequestSummaryPdf(res, request);
+    await streamRequestSummaryPdf(res, request);
   } catch (err) {
     next(err);
   }

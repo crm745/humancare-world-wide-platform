@@ -9,7 +9,7 @@ import { LANGUAGES } from '../data/mock';
 import I18N from '../data/i18n.json';
 import { translate } from '../lib/translate';
 import { navReplace } from '../lib/nav';
-import { clearTokens } from '../lib/session';
+import { signOutSession } from '../lib/signOut';
 import { BottomNav, Screen, TopBar, useScrollToTopOnTabTap } from '../components/layout';
 import { useFabScrollPad } from '../components/sos/hooks';
 import { SectionLabel, Text } from '../components/ui';
@@ -94,7 +94,8 @@ export default function Profile() {
   // The destination is shown first, then the tokens are cleared: clearing them while this screen is still open
   // would let the auth gate send the person to Login before Getting Started opens.
   // Logging out on purpose also deletes the saved request draft and its key (an expired session does not: the same account finds its draft when it signs in again).
-  const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/login'); await clearDraftEverywhere(); await clearTokens(); };
+  // Log out: the saved draft goes first (the account is read from the tokens), the server is told in the background (a patient's refresh token stops working), then the tokens are cleared.
+  const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/login'); await signOutSession({ isCorporate, beforeClear: clearDraftEverywhere }); };
   const soon = () => toast(t('prof_soon'));
 
   // Pull-to-refresh: the account details come from the server (GET /auth/me). The profile stays on screen while it loads (no skeleton: it

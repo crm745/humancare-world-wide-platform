@@ -8,6 +8,9 @@ import { WRITE_TIMEOUT_MS, failureOf, startDeadline } from './apiErrors';
 import { reportApiOutcome } from './networkReporter';
 import { UPLOAD_STALL_MS, createStallWatch, uploadAnswered, uploadCancelled, uploadNoAnswer } from './uploadErrors';
 
+import { holdIdle } from './idleSession';
+import { oversizedUploadError } from './fileSize';
+
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 // The network service (lib/network.js) asks the same server's /health with this.
 export const API_BASE_URL = API_URL;
@@ -213,6 +216,8 @@ async function apiFetch(path, options = {}, isRetry = false) {
     err.status = res.status;
     err.code = data.code;
     err.secondsLeft = data.secondsLeft;
+    err.field = data.field; // which form field a refusal is about, and the numbers its sentence needs: lib/serverErrors.js turns code + field + params into the person's language
+    err.params = data.params;
     err.data = data;
     if (res.status >= 500) err.failure = 'server';
     throw err;
@@ -283,7 +288,15 @@ function formFields(fields) {
 //   stallTimeoutMs an upload that makes NO progress for this long ends as a timeout (default 60 s; 0 = never). No total duration is assumed. Once every byte has been sent the server
 //                  may still scan the file, so the wait for its answer is longer (UPLOAD_RESPONSE_WAIT_MS). A timeout is an UNKNOWN outcome, like a lost connection.
 // Nothing here retries or resends: a failure of any kind is thrown once, classified, and the caller decides (lib/uploadRecovery.js).
+// An upload holds the idle session timeout while it runs (lib/idleSession.js): a long upload is not cut off by 30 minutes without a touch.
 export async function apiUpload(path, file, isRetry = false, onProgress, fields, options = {}) {
+  // A file whose size is known to be over the limit is never sent (lib/fileSize.js): the same refusal the server would give, without the wait. A file of unknown size goes on and meets the server's limit.
+  const oversized = oversizedUploadError(file);
+  if (oversized) throw oversized;
+  const release = holdIdle();
+  try { return await uploadOnce(path, file, isRetry, onProgress, fields, options); } finally { release(); }
+}
+async function uploadOnce(path, file, isRetry, onProgress, fields, options) {
   const { signal, stallTimeoutMs = UPLOAD_STALL_MS } = options || {};
   // Uploads always belong to a signed-in person: held until the session is known, and sent only if it is valid.
   if (!isRetry) await ensureAuthenticated();
@@ -475,7 +488,11 @@ async function readWebBody(res, onProgress) {
   return new Blob(chunks, { type });
 }
 
-export async function apiDownload(path, { destination, onProgress, isRetry = false } = {}) {
+export async function apiDownload(path, options = {}) {
+  const release = holdIdle();
+  try { return await downloadOnce(path, options); } finally { release(); }
+}
+async function downloadOnce(path, { destination, onProgress, isRetry = false } = {}) {
   if (!isRetry) await ensureAuthenticated();
   const token = await getAccessToken();
   if (!token) {

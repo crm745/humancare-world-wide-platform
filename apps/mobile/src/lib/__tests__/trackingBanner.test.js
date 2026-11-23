@@ -50,6 +50,18 @@ describe('the title and the subtitle', () => {
   test('a service the config does not know: its full name is the title', () => {
     expect(B.bannerTexts({ hasRoute: false, from: '', to: '', shortName: '', serviceName: 'Some Service', area: '' })).toEqual({ title: 'Some Service', subtitle: '' });
   });
+  test('a subtitle that only repeats the chip is left out (Ground Ambulance under a Ground Ambulance chip), with a route or without', () => {
+    const d = buildTrackingDetails(ground(), t);
+    expect(d.chipLabel).toBe('Ground Ambulance');
+    expect(d.serviceName).toBe('Ground Ambulance');
+    expect(B.bannerTexts(d)).toEqual({ title: 'Pune → Mumbai', subtitle: '' });
+    expect(B.bannerTexts({ ...d, chipLabel: 'GROUND AMBULANCE ' }).subtitle).toBe('');
+    // no route: the title is already the service, so the same name is not repeated below it either
+    expect(B.bannerTexts({ hasRoute: false, from: '', to: '', shortName: 'Ground Ambulance', serviceName: 'Ground Ambulance', area: '', chipLabel: 'Ground Ambulance' }).subtitle).toBe('');
+    // a different subtitle is kept: Private Charter's full name under its "Air Ambulance" chip, an area under a service title
+    expect(B.bannerTexts(buildTrackingDetails(request(), t)).subtitle).toBe('Private Charter Air Ambulance Service');
+    expect(B.bannerTexts(buildTrackingDetails(home(), t)).subtitle).toBe('Andheri West, Mumbai');
+  });
   test('very long city names are passed whole (the screen cuts them with an ellipsis after two lines)', () => {
     const long = 'Llanfairpwllgwyngyllgogerychwyrndrobwllllantysiliogogogoch';
     const d = buildTrackingDetails(request({ originCityName: long, destinationCityName: long }), t);

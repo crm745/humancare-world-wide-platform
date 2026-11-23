@@ -235,13 +235,14 @@ describe('NetInfo "internet unreachable" is a hint, not proof: the backend\'s /h
     expect(t.status()).toBe(NET.ONLINE);
     expect(t.restored()).toBe(1);
   });
-  test('NetInfo flips between unreachable and reachable: only the newest answer counts', async () => {
+  test('NetInfo flips between unreachable and reachable: the question already on its way stays valid (the hint is not a new link state), and its answer is the one that counts', async () => {
     const t = rig();
     t.link(WIFI_UNREACHABLE); await flush();
     t.link(WIFI); await flush();
-    expect(t.asked).toHaveLength(2);
-    t.asked[1](OK); await flush();
-    t.asked[0](REFUSED); await flush(); // the first answer is about an older link state
+    // Changed with the recovery-speed pass (lib/network.js): a change of only the reachability HINT neither drops the answer on its way nor asks again (the old rule threw the answer away and
+    // restarted the wait every time NetInfo's own test finished). A different NETWORK still does: see networkRecoverySpeed.test.js.
+    expect(t.asked).toHaveLength(1);
+    t.asked[0](OK); await flush();
     expect(t.status()).toBe(NET.ONLINE);
   });
   test('a real call that succeeds while NetInfo says unreachable -> ONLINE', async () => {

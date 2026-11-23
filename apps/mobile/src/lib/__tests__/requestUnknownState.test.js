@@ -620,6 +620,6 @@ describe('the screens and the API client (source checks)', () => {
     const catchBlock = review.slice(review.indexOf('} catch (err) {\n      setUploading(null);'));
     const at = (text) => catchBlock.indexOf(text);
     expect(at("if (outcome === 'unconfirmed' || submissionTracker.isUnconfirmed()) { setRetryable(true); setNotice('lost'); return; }")).toBeGreaterThan(-1);
-    expect(at('submissionTracker.isUnconfirmed()')).toBeLessThan(at('fieldErrorsFromError(err)'));
+    expect(at('submissionTracker.isUnconfirmed()')).toBeLessThan(at('fieldErrorsFromError(err, t)'));
   });
 });

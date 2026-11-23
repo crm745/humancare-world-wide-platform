@@ -11,6 +11,8 @@ import { Screen, TopBar } from '../layout';
 import { Button, Text } from '../ui';
 import { ServiceIconTile } from '../home/ServiceIcon';
 import { KeyboardBar, KeyboardScroll } from '../keyboard';
+import { AppRefreshControl } from '../AppRefreshControl';
+import { useNetworkRefresh } from '../../lib/useNetworkRefresh';
 import { ConnectionBanner } from '../network/ConnectionBanner';
 import { ProgressButton } from '../network/ProgressButton';
 import { Collapse } from '../network/Collapse';
@@ -98,6 +100,9 @@ export function RequestFrame({ step, children, firstError, onInvalid, onNext, pr
   const { t, toast, updateDraft, setFormStep } = useApp();
   const { isOffline } = useNetwork();
   const OfflineIcon = NETWORK_ICONS.wifiOff;
+  // Pull-to-refresh on the form: ONLY a re-check of the connection (so Submit and the other network buttons wake up at once when the backend answers). It reads nothing and changes nothing: the fields,
+  // the documents and the saved draft are untouched, and nothing is sent (lib/networkRefresh.js).
+  const { refreshing, onRefresh } = useNetworkRefresh();
   const insets = useSafeAreaInsets();
   useEffect(() => { setFormStep(step); }, [step, setFormStep]); // the draft (lib/draftStore.js) remembers which step the person was on
   // The Continue bar rides on top of the keyboard; the scroll area keeps a focused field above it.
@@ -149,6 +154,7 @@ export function RequestFrame({ step, children, firstError, onInvalid, onNext, pr
         <ConnectionBanner />
         <KeyboardScroll
           ref={scrollRef} className="flex-1" footerHeight={barHeight} showsVerticalScrollIndicator={false}
+          refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 24 }}
         >
           {showService && <View className="mb-5"><ServiceCard /></View>}

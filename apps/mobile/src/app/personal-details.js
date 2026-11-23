@@ -16,6 +16,8 @@ import { CountryPicker } from '../components/NationalityPhone';
 import { useSkeletonGate } from '../components/skeleton/hooks';
 import { LoadFailure } from '../components/LoadFailure';
 import { useRetryOnRestore } from '../lib/useRetryOnRestore';
+import { useNetworkRefresh } from '../lib/useNetworkRefresh';
+import { AppRefreshControl } from '../components/AppRefreshControl';
 import { FormSkeleton } from '../components/skeleton/screens';
 import { COLORS } from '../theme/colors';
 
@@ -65,7 +67,8 @@ export default function PersonalDetails() {
   const { t, toast, isCorporate, setProfile } = useApp();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  // The form is not pulled to refresh (an edit in progress must never be lost); it loads with a skeleton and offers Try again.
+  // It loads with a skeleton and offers Try again. A pull to refresh (below) reads the profile again while it is only being VIEWED; while it is being edited a pull only re-checks the connection:
+  // the typed form, the errors and the open picker are never touched either way.
   const gate = useSkeletonGate(loading);
   const [failed, setFailed] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -93,6 +96,16 @@ export default function PersonalDetails() {
   };
   // The connection came back after the first load failed: it is read again once (a read: nothing is saved by this).
   useRetryOnRestore({ failed, retry, enabled: !isCorporate });
+
+  // A quiet re-read of the account (the same GET /auth/me): the screen keeps what it shows until the answer replaces it; a failure keeps it and is reported by the pull itself.
+  const reloadProfile = useCallback(async () => {
+    const { user: me } = await apiGet('/auth/me');
+    if (!me) throw new Error(t('err_no_personal'));
+    setUser(me);
+    setProfile(profileFromUser(me));
+    setFailed(false);
+  }, [t, setProfile]);
+  const { refreshing, onRefresh } = useNetworkRefresh({ reload: editing || isCorporate ? undefined : reloadProfile });
 
   const view = user ? viewOf(user) : null;
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
@@ -155,7 +168,7 @@ export default function PersonalDetails() {
   return (
     <Screen>
       <TopBar title={t('prof_personal')} />
-      <Body contentClassName="px-[18px] py-4">
+      <Body contentClassName="px-[18px] py-4" refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {loading && gate.visible ? <FormSkeleton label={t('sk_loading_profile')} fields={6} /> : null}
 
         {!loading && failed ? <LoadFailure titleKey="lf_title_profile" message={t('pd_load_failed')} onRetry={retry} /> : null}

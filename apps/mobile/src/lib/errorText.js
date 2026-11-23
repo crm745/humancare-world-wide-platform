@@ -1,9 +1,10 @@
 // The words of an error, in the person's language. The app's own error messages (lib/api.js, lib/apiErrors.js) are written in English as a fallback and carry a `code`; this turns the
-// ones the app wrote into the dictionary text, and leaves anything else alone: a message the SERVER sent (a refused field, "account locked") is shown as it arrived, because the app has
-// no key for text it has not seen (translating server messages is a backend change).
+// ones the app wrote into the dictionary text, and leaves anything else alone: a message the SERVER sent is shown as it arrived UNLESS it carries a stable code the app knows
+// (the request and document-upload refusals: lib/serverErrors.js), in which case it is shown in the person's language; the English message stays the fallback for any other text.
 //
 //   errorText(err, t)             the translated text for an app-written error, else err.message
 //   errorText(err, t, fallbackKey) ... and, when the error has no message at all, t(fallbackKey)
+import { localizedServerError } from './serverErrors';
 import { NETWORK_READ_MESSAGE, NETWORK_WRITE_MESSAGE, TIMEOUT_READ_MESSAGE, TIMEOUT_WRITE_MESSAGE } from './apiErrors';
 
 // The messages the app itself writes (exact text), and the dictionary key of each.
@@ -35,6 +36,10 @@ export function errorKey(err) {
 export function errorText(err, t, fallbackKey) {
   const key = errorKey(err);
   if (key) return t(key);
+  // A refusal the server sent with a stable code (a refused field, a refused document): the dictionary text of the current language. An unknown code, or a missing translation, falls
+  // through to the server's own English message below.
+  const fromCode = localizedServerError(err, t);
+  if (fromCode) return fromCode;
   const message = err && typeof err.message === 'string' ? err.message : '';
   if (message) return message;
   return fallbackKey ? t(fallbackKey) : '';

@@ -16,7 +16,9 @@
     "migrate:all": "npm run migrate:dev && npm run migrate:test",
     "test:safe": "cross-env NODE_ENV=test jest --config jest.safe.config.js --runInBand",
     "integration:db": "cross-env HUMANCARE_INTEGRATION_RUN=true node scripts/integration-db.js",
-    "test:integration": "cross-env NODE_ENV=test HUMANCARE_INTEGRATION_RUN=true jest --config jest.integration.config.js --runInBand"
+    "test:integration": "cross-env NODE_ENV=test HUMANCARE_INTEGRATION_RUN=true jest --config jest.integration.config.js --runInBand",
+    "devdb:generate": "prisma generate --schema .devdb/schema.prisma",
+    "test:devdb": "cross-env NODE_ENV=development HUMANCARE_DEVDB_RUN=true jest --config jest.devdb.config.js --runInBand"
   },
   "keywords": [],
   "author": "",
@@ -37,7 +39,7 @@
     "jsonwebtoken": "^9.0.3",
     "libphonenumber-js": "^1.12.10",
     "multer": "^2.4.0",
-    "nodemailer": "10.1.0",
+    "nodemailer": "10.6.1",
     "pdfkit": "^0.20.2",
     "prisma": "^6.19.3"
   },

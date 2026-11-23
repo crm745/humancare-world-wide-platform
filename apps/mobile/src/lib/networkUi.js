@@ -1,6 +1,7 @@
 // What the shared offline experience shows, decided apart from React so every case can be unit-tested (Phase 2 of the network work).
 // It only READS the network state (lib/network.js, through useNetwork()); it never touches authentication and never sends or resends anything.
 import { classifyApiError, isOutcomeUnknown } from './apiErrors';
+import I18N from '../data/i18n.json';
 
 // ---- the global banner ---------------------------------------------------------------------------------------------------------------------
 //   offline     no internet connection
@@ -82,7 +83,17 @@ export function loadFailureView({ error, net, screenTitleKey } = {}) {
 // A toast that only repeats what the network banner already says ("No internet connection…", "Could not reach the server…"): while that message is on screen the toast is not drawn, so
 // the person never sees two messages about the same thing at the bottom (components/widgets.js Toast).
 const NETWORK_TOAST = /internet connection|reach the server|reach humancare|check your connection|connection was lost|took too long to answer|slow internet/i;
-export const isNetworkToast = (message) => typeof message === 'string' && NETWORK_TOAST.test(message);
+// The same rule in EVERY language: the English wording is matched by the pattern above, and the translations of exactly those dictionary texts (EN, HI, MR, GU, TE, AR) are matched as they are, so a toast
+// that repeats the banner is left out for a person reading Hindi or Arabic just as it is for one reading English (it used to be English only).
+const NETWORK_TOAST_TEXTS = (() => {
+  const texts = new Set();
+  for (const key of Object.keys(I18N.EN || {})) {
+    if (typeof I18N.EN[key] !== 'string' || !NETWORK_TOAST.test(I18N.EN[key])) continue;
+    for (const lang of Object.keys(I18N)) { const text = I18N[lang] && I18N[lang][key]; if (typeof text === 'string' && text !== '') texts.add(text); }
+  }
+  return texts;
+})();
+export const isNetworkToast = (message) => typeof message === 'string' && (NETWORK_TOAST.test(message) || NETWORK_TOAST_TEXTS.has(message));
 // ONLY while a problem banner is really on the screen the person is looking at (`bannerVisible`: lib/bannerPresenter.js isVisible). A screen with no header (login, register, the code screens, ...)
 // has no banner, so an error there is never left out: the toast is the only thing that tells the person what happened.
 export const hideToastForBanner = ({ message, bannerVisible = false } = {}) => bannerVisible === true && isNetworkToast(message);

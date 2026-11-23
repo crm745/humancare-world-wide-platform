@@ -23,7 +23,13 @@ export function Collapse({ show, children, style }) {
   if (show !== v.seen) setV({ seen: show, mounted: true, id: v.id + 1, mode: show ? 'enter' : 'exit' });
 
   const unmount = (id) => setV((s) => (s.id === id ? { ...s, mounted: false, mode: 'settled' } : s));
+  // A safety net: the animation callbacks are not called when an animation is interrupted (the connection flapping), which can leave the line clipped to a sliver (an icon, no words). Whatever
+  // happens, the line is released to its natural size / removed shortly after its animation should have ended.
+  const guard = useRef(null);
+  const settleLater = (fn) => { if (guard.current) clearTimeout(guard.current); guard.current = setTimeout(() => { guard.current = null; fn(); }, Math.max(heightMs, fadeMs) + 120); };
+  useEffect(() => () => { if (guard.current) clearTimeout(guard.current); }, []);
   const open = (h) => {
+    settleLater(() => { animating.value = 0; opacity.value = 1; });
     animating.value = heightMs ? 1 : 0;
     if (heightMs) height.value = withTiming(h, { duration: heightMs, easing: bezier(EASE_OUT) }, (finished) => { if (finished) animating.value = 0; });
     opacity.value = withTiming(1, { duration: fadeMs, easing: bezier(EASE_OUT) });
@@ -35,6 +41,7 @@ export function Collapse({ show, children, style }) {
     if (v.mode === 'exit') {
       started.current = v.id;
       const id = v.id;
+      settleLater(() => unmount(id));
       if (heightMs) { animating.value = 1; height.value = withTiming(0, { duration: heightMs, easing: bezier(EASE_IN) }); }
       opacity.value = withTiming(0, { duration: fadeMs, easing: bezier(EASE_IN) }, (finished) => { if (finished) { animating.value = 0; runOnJS(unmount)(id); } });
     }
@@ -45,7 +52,7 @@ export function Collapse({ show, children, style }) {
     const h = Math.round(e.nativeEvent.layout.height);
     natural.current = h;
     // eslint-disable-next-line react-hooks/immutability -- shared values are written from animation callbacks, as reanimated intends
-    if (v.mode === 'enter' && started.current !== v.id) { started.current = v.id; if (heightMs) height.value = 0; open(h); }
+    if (v.mode === 'enter' && started.current !== v.id) { started.current = v.id; if (heightMs) height.value = 0; open(h); } else if (v.mode === 'enter' && started.current === v.id && h > 0) open(h); // the size changed while opening (the words were laid out after the icon)
   };
 
   const animatedStyle = useAnimatedStyle(() => (animating.value ? { opacity: opacity.value, height: height.value, overflow: 'hidden' } : { opacity: opacity.value }));

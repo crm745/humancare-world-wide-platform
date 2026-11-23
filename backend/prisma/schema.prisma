@@ -51,6 +51,8 @@ model User {
   // still point at it (those foreign keys are Restrict on purpose). Everything that identifies or lets anyone sign in to the account is
   // cleared at the same moment, and requireAuth refuses a token for a retired account at once. NULL for every live account.
   deletedAt    DateTime? @map("deleted_at")
+  // The devices this patient is signed in on (see AuthSession). No column: the rows point here.
+  authSessions AuthSession[]
   createdAt    DateTime @default(now()) @map("created_at")
   requests     ServiceRequest[]
   consents     UserConsent[]
@@ -223,6 +225,37 @@ model AdminInvitation {
 // active per Admin (enforced in code under a row lock on admin_users). It locks after 30
 // minutes idle and ends at the absolute limit; both times are fixed when it is created or
 // last used. History is kept 365 days after expiry/revocation.
+// One signed-in DEVICE of a patient or a corporate user (admins have their own AdminSession). Every access and refresh token carries this row's id (`sid`); a token whose session is revoked,
+// idle or past its lifetime is refused, so signing out one device ends only that device and a password reset or an account retirement ends them all.
+//   refreshHash / previousHash   SHA-256 of the current / the previous refresh token's random id (jti), never the token. Each refresh rotates it; a token that is neither is a REUSE and revokes the
+//                                session (a short grace window for the previous one covers a lost answer on a bad connection).
+//   lastActivityAt               the last authenticated request (written at most once a minute): the server's idle timeout is 30 minutes after it.
+//   absoluteExpiresAt            createdAt + 7 days: the refresh policy, whatever the activity.
+// Exactly one of userId / corporateUserId is set: createSession (src/modules/auth/session.service.js) is the only writer and refuses anything else. (MySQL does not allow a CHECK on columns that have a
+// cascading foreign key, so the database cannot enforce it.)
+model AuthSession {
+  id                String         @id @db.Char(36)
+  userId            Int?           @map("user_id")
+  user              User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  corporateUserId   Int?           @map("corporate_user_id")
+  corporateUser     CorporateUser? @relation(fields: [corporateUserId], references: [id], onDelete: Cascade)
+  refreshHash       String         @db.Char(64) @map("refresh_hash")
+  previousHash      String?        @db.Char(64) @map("previous_hash")
+  rotatedAt         DateTime?      @map("rotated_at")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  lastActivityAt    DateTime       @default(now()) @map("last_activity_at")
+  absoluteExpiresAt DateTime       @map("absolute_expires_at")
+  revokedAt         DateTime?      @map("revoked_at")
+  revokedReason     String?        @db.VarChar(64) @map("revoked_reason")
+  // The device as the client reported itself (its User-Agent), shortened: shown in the list of signed-in devices. Not an identifier.
+  userAgent         String?        @db.VarChar(255) @map("user_agent")
+
+  @@index([userId, revokedAt, absoluteExpiresAt])
+  @@index([corporateUserId, revokedAt, absoluteExpiresAt])
+  @@index([absoluteExpiresAt])
+  @@map("auth_sessions")
+}
+
 model AdminSession {
   id                Int       @id @default(autoincrement())
   adminId           Int       @map("admin_id")
@@ -506,6 +539,8 @@ model CorporateUser {
   mustChangePassword Boolean   @default(false) @map("must_change_password")
   passwordChangedAt  DateTime? @map("password_changed_at")
   createdAt    DateTime  @default(now()) @map("created_at")
+  // The devices this corporate user is signed in on (see AuthSession). No column: the rows point here.
+  authSessions AuthSession[]
 
   @@map("corporate_users")
 }

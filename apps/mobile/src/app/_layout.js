@@ -21,13 +21,15 @@ import { SosFab } from '../components/sos/SosFab';
 import { RecaptchaBadgeGate } from '../components/RecaptchaBadgeGate';
 import { KeyboardRoot } from '../components/keyboard';
 import { SystemBack } from '../components/SystemBack';
+import { useIdleSession } from '../components/IdleSessionGuard';
 import { GoogleCallbackScreen } from '../components/GoogleCallbackScreen';
 
 function Shell() {
   const { isRTL } = useApp();
+  const idle = useIdleSession(); // the 30-minute idle session timeout (components/IdleSessionGuard.js)
   // Arabic flips the layout in place, like the prototype's .phone.rtl, without an app reload.
   return (
-    <View className="flex-1 bg-canvas" style={{ direction: isRTL ? 'rtl' : 'ltr' }}>
+    <View className="flex-1 bg-canvas" style={{ direction: isRTL ? 'rtl' : 'ltr' }} {...idle.viewProps}>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#F2F6FC' } }} />
       <SosFab />

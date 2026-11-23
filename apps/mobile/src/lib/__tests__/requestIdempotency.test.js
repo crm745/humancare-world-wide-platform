@@ -612,7 +612,7 @@ describe('the screens (source checks)', () => {
     expect(at('const outcome = await afterFailure(submissionTracker, err);')).toBeGreaterThan(-1);
     expect(at("outcome === 'edited'")).toBeGreaterThan(-1);
     expect(at("outcome === 'unconfirmed'")).toBeGreaterThan(-1);
-    for (const handling of ['fieldErrorsFromError(err)', 'toast(errorText(err, t))']) {
+    for (const handling of ['fieldErrorsFromError(err, t)', 'toast(errorText(err, t))']) {
       expect(at("outcome === 'edited'")).toBeLessThan(at(handling));
       expect(at("outcome === 'unconfirmed'")).toBeLessThan(at(handling));
     }

@@ -176,7 +176,7 @@ export default function RequestReview() {
       if (outcome === 'unconfirmed' || submissionTracker.isUnconfirmed()) { setRetryable(true); setNotice('lost'); return; }
       // The server refused a field: the form is left exactly as it was, each message goes under its
       // field, and the person is taken to the first step that has one.
-      const fields = fieldErrorsFromError(err);
+      const fields = fieldErrorsFromError(err, t);
       if (fields) {
         setServerErrors(fields);
         const { step } = firstErrorLocation(fields);

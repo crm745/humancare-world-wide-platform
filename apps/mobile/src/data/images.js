@@ -9,6 +9,7 @@ export const IMAGES = {
   IMG_CORPORATE: require('../../assets/images/corporate.jpg'),
   IMG_MORTAL: require('../../assets/images/mortal.jpg'),
   IMG_COMMERCIALAIR: require('../../assets/images/commercialair.webp'),
+  IMG_PRIVATECHARTER: require('../../assets/images/privatecharter.jpg'),
 };
 
 export const LOGO = require('../../assets/images/logo-full.png');

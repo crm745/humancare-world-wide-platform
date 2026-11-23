@@ -200,7 +200,8 @@ describe('where the app listens (static guards)', () => {
   test('AppState listeners for the network are only added by the adapter', () => {
     const files = ['app', 'components', 'lib', 'state'].flatMap(sourceFiles).filter((f) => /AppState\.addEventListener/.test(read(f)));
     // Phase 6 adds one unrelated listener (writes a waiting draft when the app goes to the background); it is not a network listener and lives in its own adapter.
-    expect(files).toEqual(['lib/draftStoreDevice.js', 'lib/networkDevice.js']);
+    // The idle session timeout adds one more, also unrelated to the network and in its own device adapter (it ends a session that has been idle for 30 minutes, background time included).
+    expect(files).toEqual(['lib/draftStoreDevice.js', 'lib/idleSessionDevice.js', 'lib/networkDevice.js']);
   });
   test('the /health probe is only built in the adapter (one place asks the backend)', () => {
     const files = ['app', 'components', 'lib', 'state'].flatMap(sourceFiles).filter((f) => f !== 'lib/healthProbe.js' && /createHealthProbe\(/.test(read(f)));
@@ -220,8 +221,9 @@ describe('where the app listens (static guards)', () => {
   });
   test('only the shared offline pieces read the network state (Phase 2): the provider, the banner, the shared failure view, Button, the OTP screen, the social buttons on Login and the Can\'t Connect screen (Phase 3)', () => {
     const users = ['app', 'components'].flatMap(sourceFiles).filter((f) => /useNetwork|NetworkContext/.test(read(f)));
+    // The pull-to-refresh pass adds the two screens that use the shared useNetworkRefresh hook (it reads the network service only to re-check the connection): personal-details and service/[key].
     // Phase 5 adds the three screens that start a document preview or download: offline they stop at the shared offline message instead of starting a fetch that cannot finish.
-    expect(users.sort()).toEqual(['app/_layout.js', 'app/cant-connect.js', 'app/document-preview.js', 'app/my-documents.js', 'app/request-details.js', 'app/request/step1.js', 'app/tracking.js', 'components/AuthGate.js', 'components/LoadFailure.js', 'components/OtpScreen.js', 'components/network/BannerDriver.js', 'components/network/CachedNote.js', 'components/network/NeedsInternet.js', 'components/request/RequestFrame.js', 'components/ui.js']);
+    expect(users.sort()).toEqual(['app/_layout.js', 'app/cant-connect.js', 'app/document-preview.js', 'app/my-documents.js', 'app/personal-details.js', 'app/request-details.js', 'app/request/step1.js', 'app/service/[key].js', 'app/tracking.js', 'components/AuthGate.js', 'components/LoadFailure.js', 'components/OtpScreen.js', 'components/network/BannerDriver.js', 'components/network/CachedNote.js', 'components/network/NeedsInternet.js', 'components/request/RequestFrame.js', 'components/ui.js']);
   });
   test('the API client does not import the network service (no import cycle: it only reports through networkReporter)', () => {
     const api = read('lib/api.js');

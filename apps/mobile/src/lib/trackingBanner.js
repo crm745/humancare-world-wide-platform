@@ -8,9 +8,14 @@ import { formatDate, formatDayMonth } from './dateFormat';
 // Without one (Home Healthcare, Teleconsultation ...): the short service name, and below it the patient's area / city when there is one, else the full service name.
 //   hasRoute   both cities are known
 //   shortName  the short service name ('' when the service has none: then the full name is the title)
-export function bannerTexts({ hasRoute, from, to, shortName, serviceName, area }, rtl = false) {
-  if (hasRoute && from && to) return { title: `${from} ${rtl ? '←' : '→'} ${to}`, subtitle: serviceName || '' };
-  return { title: shortName || serviceName || '', subtitle: area || (shortName ? serviceName : '') || '' };
+// A subtitle that only repeats the chip next to the request number ("Ground Ambulance" under a "Ground Ambulance" chip) is left out: the line would say the same thing twice.
+const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+export function bannerTexts({ hasRoute, from, to, shortName, serviceName, area, chipLabel }, rtl = false) {
+  let title;
+  let subtitle;
+  if (hasRoute && from && to) { title = `${from} ${rtl ? '←' : '→'} ${to}`; subtitle = serviceName || ''; } else { title = shortName || serviceName || ''; subtitle = area || (shortName ? serviceName : '') || ''; }
+  if (subtitle && (same(subtitle, chipLabel) || same(subtitle, title))) subtitle = '';
+  return { title, subtitle };
 }
 
 // ---- the blue part ---------------------------------------------------------------------------------------------------------------

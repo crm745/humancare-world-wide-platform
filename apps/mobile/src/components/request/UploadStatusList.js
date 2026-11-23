@@ -2,6 +2,7 @@ import { View } from 'react-native';
 import { CircleAlert, CircleCheck, FileText, Image as ImageIcon } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
 import { uploadSummary } from '../../lib/uploadRecovery';
+import { localizedUploadMessage } from '../../lib/serverErrors';
 import { Text } from '../ui';
 import { COLORS } from '../../theme/colors';
 
@@ -17,11 +18,14 @@ const IMAGE = /\.(jpe?g|png|gif|webp|heic|heif)$/i;
 const isImageFile = (file) => IMAGE.test(String(file.name || file.uri || ''));
 const trimStop = (text) => String(text || '').replace(/\.\s*$/, '');
 
+// What a refused file says: the dictionary text of the person's language when the server's refusal is one the app knows (lib/serverErrors.js), else the stored text.
+const refusedText = (stored, t) => trimStop(localizedUploadMessage(stored, t) || stored);
+
 // The words of a file's status (what the row says, and what a screen reader reads after the name).
 function statusText({ file, state: s }, state, progress, t) {
   if (s === 'accepted') return t('up_state_accepted');
   if (s === 'sending') return t('up_state_sending').replace('{p}', String(Math.round(Math.max(0, Math.min(1, progress || 0)) * 100)));
-  if (s === 'refused') return trimStop(state.errors[file.uri]);
+  if (s === 'refused') return refusedText(state.errors[file.uri], t);
   return t('up_state_pending');
 }
 
@@ -50,7 +54,7 @@ function Status({ row, state, progress, t }) {
     return (
       <View style={{ marginTop: 2, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         <CircleAlert size={16} color="#B42828" strokeWidth={2.2} />
-        <Text style={{ flex: 1, fontFamily: FONT[700], fontSize: 13, lineHeight: 18, color: '#B42828' }}>{trimStop(state.errors[file.uri])}</Text>
+        <Text style={{ flex: 1, fontFamily: FONT[700], fontSize: 13, lineHeight: 18, color: '#B42828' }}>{refusedText(state.errors[file.uri], t)}</Text>
       </View>
     );
   }

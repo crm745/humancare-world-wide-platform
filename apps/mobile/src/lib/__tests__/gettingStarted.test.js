@@ -27,7 +27,7 @@ describe('Getting Started: one page', () => {
 describe('sign out', () => {
   test('a patient goes straight to Login (a corporate account to the corporate login), not to Getting Started', () => {
     const profile = read('app/profile.js');
-    expect(profile).toContain("navReplace(isCorporate ? '/corporate-login' : '/login'); await clearDraftEverywhere(); await clearTokens();");
+    expect(profile).toContain("navReplace(isCorporate ? '/corporate-login' : '/login'); await signOutSession({ isCorporate, beforeClear: clearDraftEverywhere });");
     expect(profile).not.toMatch(/signOut = async \(\) => \{ navReplace\([^)]*welcome/);
   });
 });

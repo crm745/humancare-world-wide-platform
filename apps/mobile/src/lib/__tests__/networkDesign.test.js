@@ -260,7 +260,8 @@ describe('uploads', () => {
     expect(list).toContain('#A3AEC2'); // Not sent yet: a grey dot
     expect(list).toContain('#B42828'); // refused
     expect(list).toMatch(/height: 4, borderRadius: 2, backgroundColor: '#E4E9F2'/);
-    expect(list).toContain("trimStop(state.errors[file.uri])"); // "Unsupported file type" (the server's reason, without its full stop)
+    expect(list).toContain("refusedText(state.errors[file.uri], t)"); // "Unsupported file type" (the server's reason, without its full stop; in the person's language when the app knows the refusal: lib/serverErrors.js)
+    expect(list).toContain('trimStop(localizedUploadMessage(stored, t) || stored)');
   });
   test('the submitted screen with a missing file: success circle, warning with the plural text, the list, Try again and Return home in the bar', () => {
     const screen = read('app/request/submitted.js');

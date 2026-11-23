@@ -24,8 +24,19 @@ const SERVICES = [
 const PDF = Buffer.from('%PDF-1.4 download check');
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('png body')]);
 
-const create = (token, serviceType, serviceKey) => request(app).post('/requests').set('Authorization', `Bearer ${token}`)
-  .send({ serviceType, serviceKey, patientName: 'John Doe', origin: 'Mumbai', destination: 'Dubai', ...(serviceKey === 'ground' ? { description: 'Needs transport.' } : {}) });
+const FUTURE_DAY = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+// Each service's current valid body: Marine and Medical Value Travel are sent in their structured formats (the generic body is refused: legacy-body-guard.js), and Ground and Commercial Air need a
+// contact number and a day that is not past (transport-request.validation.js).
+const bodyFor = (serviceType, serviceKey) => {
+  const person = { patientName: 'John Doe', patientAge: 40, patientGender: 'Male', country: 'IN', patientContact: '+91 98765 43210' };
+  if (serviceKey === 'marine') return { serviceType, serviceKey, serviceScope: 'international', ...person, originCity: { text: 'Port of Mumbai' }, destinationCity: { text: 'Port of Dubai' }, utcOffsetMinutes: 0 };
+  if (serviceKey === 'medvalue') return { serviceType, serviceKey, treatmentScope: 'international', ...person, currentCity: { text: 'Mumbai' }, destinationCity: { text: 'Dubai' }, specialty: 'Oncology', utcOffsetMinutes: 0 };
+  const generic = { serviceType, serviceKey, patientName: 'John Doe', origin: 'Mumbai', destination: 'Dubai' };
+  if (serviceKey === 'ground') return { ...generic, patientContact: '+91 98765 43210', preferredDate: FUTURE_DAY, description: 'Needs transport.' };
+  if (serviceKey.startsWith('commercialair')) return { ...generic, patientContact: '+91 98765 43210', preferredDate: FUTURE_DAY };
+  return generic;
+};
+const create = (token, serviceType, serviceKey) => request(app).post('/requests').set('Authorization', `Bearer ${token}`).send(bodyFor(serviceType, serviceKey));
 const upload = (token, id, buffer, filename, contentType) => request(app).post(`/requests/me/${id}/documents`).set('Authorization', `Bearer ${token}`)
   .attach('file', buffer, { filename, contentType });
 const download = (token, id) => request(app).get(`/documents/${id}/file`).set('Authorization', `Bearer ${token}`).buffer(true).parse((res, cb) => {

@@ -144,12 +144,11 @@ describe('submitting a Corporate Medical Solutions request', () => {
     for (const key of ['companyName', 'employeeCount', 'selectedProgrammes']) expect(key in stored()).toBe(false);
   });
 
-  it('an older generic Corporate Medical body still goes through the generic path (REQ- reference, free-text description)', async () => {
+  it('an older generic Corporate Medical body is REFUSED (it would skip the phone, date and required-field rules) and nothing is saved (tests/legacy-body-guard.test.js has the full set)', async () => {
     const r = await post({ serviceType: 'Corporate Medical Solutions', serviceKey: 'corporate', patientName: 'John Doe', patientAge: '35', origin: 'Pune', destination: 'Pune', description: 'Annual checkups.' });
-    expect(r.status).toBe(201);
-    expect(stored()).toMatchObject({ serviceKey: 'corporate', description: 'Annual checkups.', referenceNumber: 'REQ-1100' });
-    for (const key of ['companyName', 'employeeCount', 'selectedProgrammes']) expect(key in stored()).toBe(false);
-    expect(isNew(r.body.request)).toBe(false);
+    expect(r.status).toBe(400);
+    expect(r.body.code).toBe('app_update_required');
+    expect(mockStore.rows).toHaveLength(0);
   });
 });
 

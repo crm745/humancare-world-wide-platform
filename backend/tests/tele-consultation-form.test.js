@@ -15,6 +15,7 @@ const { prisma } = require('../src/db/prisma');
 const { createPatient } = require('./helpers');
 const { renderPdfLines, valueAfter } = require('./helpers/pdf-text');
 const { createLead } = require('../src/modules/bitrix/bitrix.service');
+const { createRequest } = require('../src/modules/requests/requests.service');
 const { buildLeadFields, REQUIRED_SERVICE_BY_KEY } = require('../src/modules/bitrix/bitrix-lead');
 
 afterAll(async () => {
@@ -47,6 +48,9 @@ const legacyBody = (extra = {}) => ({
   serviceType: 'Tele Consultation & House Call', serviceKey: 'tele', patientName: 'Old Patient', patientAge: 70, patientGender: 'Male', patientLocation: 'Pune', patientContact: '+91 98765 43210',
   origin: 'Pune', destination: 'Mumbai', country: 'India', preferredDate: inDays(5), description: 'Cough and fever.', urgency: 'planned', ...extra,
 });
+
+// An older-format request. The API refuses the generic Teleconsultation body now (legacy-body-guard.js), so one is made the way historical rows were: straight through createRequest.
+const postLegacy = async (user, payload) => ({ status: 201, body: { request: await createRequest(user.id, payload) } });
 
 describe('POST /requests: a structured Teleconsultation request', () => {
   it.each(COMBINATIONS)('%s + %s is saved, with the derived fields and an empty destination', async (scope, type) => {
@@ -329,8 +333,8 @@ describe('document uploads', () => {
   });
 
   it('an older Teleconsultation request keeps its documents readable and still takes uploads (older app builds)', async () => {
-    const { token } = await createPatient();
-    const old = await post(token, legacyBody());
+    const { token, user } = await createPatient();
+    const old = await postLegacy(user, legacyBody());
     expect(old.status).toBe(201);
     const first = await upload(token, old.body.request.id);
     expect(first.status).toBe(201);
@@ -345,34 +349,26 @@ describe('document uploads', () => {
 });
 
 describe('older Teleconsultation requests and the older payload', () => {
-  it('the older payload is still accepted and stored as it always was (destination, urgency, description, date of service)', async () => {
-    const { token } = await createPatient();
-    const res = await post(token, legacyBody());
-    expect(res.status).toBe(201);
-    expect(res.body.request).toMatchObject({ serviceKey: 'tele', origin: 'Pune', destination: 'Mumbai', urgency: 'planned', description: 'Cough and fever.', patientLocation: 'Pune' });
-    const kase = await prisma.case.findUnique({ where: { serviceRequestId: res.body.request.id } });
-    expect(kase).toMatchObject({ origin: 'Pune', destination: 'Mumbai', urgency: 'routine' });
-  });
-
-  it('the older rules still apply to it: destination is required', async () => {
+  it('the older payload is refused, not saved as an incomplete request (legacy-body-guard.js): whatever it carries, and nothing is saved', async () => {
     const { token } = await createPatient();
     const { destination, ...without } = legacyBody();
     expect(destination).toBe('Mumbai');
-    const res = await post(token, without);
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Missing required field(s): destination');
-    const emptied = await post(token, legacyBody({ destination: '' }));
-    expect(emptied.status).toBe(400);
+    for (const payload of [legacyBody(), without, legacyBody({ destination: '' }), legacyBody({ patientContact: 'not a phone', preferredDate: '2001-01-01' })]) {
+      const res = await post(token, payload);
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe('app_update_required');
+    }
+    expect(await mine(token)).toHaveLength(0);
   });
 
-  it('the older rules for other fields still apply: mobility and equipment are refused for Teleconsultation', async () => {
+  it('mobility and equipment are still refused for Teleconsultation', async () => {
     const { token } = await createPatient();
     expect((await post(token, legacyBody({ mobility: 'walking' }))).status).toBe(400);
   });
 
   it('an older request with a destination reads exactly as it was; a new one is told apart by its empty destination', async () => {
-    const { token } = await createPatient();
-    const old = await post(token, legacyBody());
+    const { token, user } = await createPatient();
+    const old = await postLegacy(user, legacyBody());
     const fresh = await post(token, body());
     expect(old.body.request.destination).toBe('Mumbai');
     expect(fresh.body.request.destination).toBe('');
@@ -434,9 +430,9 @@ describe('Bitrix24 receives the stored request through its existing code, which 
   });
 
   it('an older Teleconsultation request makes the same lead as before (title, drop city, destination, urgency, date)', async () => {
-    const { token } = await createPatient();
+    const { user } = await createPatient();
     const date = inDays(8);
-    await post(token, legacyBody({ preferredDate: date }));
+    await postLegacy(user, legacyBody({ preferredDate: date }));
     const fields = buildLeadFields(createLead.mock.calls[0][0]);
     expect(fields.TITLE).toBe('Pune to Mumbai');
     expect(fields[FIELD.PICKUP_CITY]).toBe('Pune');

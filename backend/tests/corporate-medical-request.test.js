@@ -187,11 +187,10 @@ describe('historical requests', () => {
     expect(isNewCorporateFormat(one)).toBe(false);
   });
 
-  it('the older generic body is still accepted and keeps its REQ- reference', async () => {
+  it('the older generic body is refused, not saved as an incomplete request (legacy-body-guard.js)', async () => {
     const { token } = await createPatient();
     const res = await post(token, { serviceType: 'Corporate Medical Solutions', serviceKey: 'corporate', patientName: 'John Doe', patientAge: '35', origin: 'Pune', destination: 'Pune', description: 'Annual checkups.' });
-    expect(res.status).toBe(201);
-    expect(res.body.request.referenceNumber).toMatch(/^REQ-\d+$/);
-    expect(res.body.request.companyName).toBeNull();
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('app_update_required');
   });
 });

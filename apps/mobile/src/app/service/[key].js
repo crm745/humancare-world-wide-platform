@@ -13,6 +13,8 @@ import { Body, Screen, TopBar } from '../../components/layout';
 import { DraftSheet } from '../../components/home/DraftSheet';
 import { Button, Card, Heading, SectionLabel, Text } from '../../components/ui';
 import { useRetryOnRestore } from '../../lib/useRetryOnRestore';
+import { useNetworkRefresh } from '../../lib/useNetworkRefresh';
+import { AppRefreshControl } from '../../components/AppRefreshControl';
 
 export default function ServiceDetail() {
   const { t, lang, toast, resetDraft, isCorporate, draft, savedDraft, resumeDraft, discardDraft } = useApp();
@@ -24,16 +26,16 @@ export default function ServiceDetail() {
   const [asking, setAsking] = useState(false); // the "Saved draft found" sheet is open
 
   const [liveFailed, setLiveFailed] = useState(false);
-  const loadLive = useCallback(() => {
-    apiGet(`/services/${liveSlugFor(key)}`)
+  const loadLive = useCallback(() => apiGet(`/services/${liveSlugFor(key)}`)
       .then(({ service }) => { setLive(service); setLiveFailed(false); })
       // A 404 only means "no editable text for this service" (see lib/serviceLookup.js): the bundled
       // content is used silently. Any other failure is still shown.
-      .catch((err) => { if (!isMissingLiveService(err)) { setLiveFailed(true); toast(errorText(err, t)); } });
-  }, [key, toast, t]);
+      .catch((err) => { if (!isMissingLiveService(err)) { setLiveFailed(true); toast(errorText(err, t)); } }), [key, toast, t]);
   useEffect(() => { loadLive(); }, [loadLive]);
   // The bundled text is shown meanwhile; when the connection comes back after a failed read, the live text is read once more.
   useRetryOnRestore({ failed: liveFailed, retry: loadLive });
+  // Pull-to-refresh: the live text is read again (its own failure already says why; the bundled text stays on screen). Nothing here touches the draft or the sheet below.
+  const { refreshing, onRefresh } = useNetworkRefresh({ reload: loadLive });
 
   // English: the bundled text with the editable (live) text over it, as before. Any other language: the translated bundled text (the live text is English only).
   const content = localizedServiceContent(local, SERVICES[key] ? key : 'air', t);
@@ -63,7 +65,7 @@ export default function ServiceDetail() {
   return (
     <Screen>
       <TopBar title={t('service_detail_title')} />
-      <Body contentClassName="p-[22px]">
+      <Body contentClassName="p-[22px]" refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         <View className="mb-5 min-h-[180px] flex-1 overflow-hidden rounded-2xl bg-primary">
           <Image source={IMAGES[local.img]} style={{ position: 'absolute', width: '100%', height: '100%' }} resizeMode="cover" />
         </View>

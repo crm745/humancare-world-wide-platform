@@ -648,7 +648,7 @@ describe('wiring (source checks)', () => {
   const ctx = read('state/AppContext.js');
   test('explicit logout and account deletion delete the draft and key BEFORE the tokens are cleared; an expired session does not', () => {
     const profile = read('app/profile.js');
-    expect(profile).toContain("await clearDraftEverywhere(); await clearTokens();");
+    expect(profile).toContain('await signOutSession({ isCorporate, beforeClear: clearDraftEverywhere });'); // sessionEnd.js runs beforeClear (the draft) BEFORE clear (the tokens): sessionEnd.test.js
     const del = read('app/delete-account-otp.js');
     expect(del.indexOf('await clearDraftEverywhere()')).toBeGreaterThan(del.indexOf('submissionTracker.clearAll()'));
     expect(del.indexOf('await clearDraftEverywhere()')).toBeLessThan(del.indexOf('await clearTokens()'));

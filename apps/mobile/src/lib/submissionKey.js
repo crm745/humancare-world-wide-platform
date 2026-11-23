@@ -148,6 +148,8 @@ export function createSubmissionTracker({ storage, getUserId, generate = generat
     // (the server says it saved the request), the person discards the submission, or the account changes. Nothing a later refusal says can clear them.
     markUnconfirmed() { active = null; unconfirmed = true; },
     isUnconfirmed: () => unconfirmed,
+    // A send is waiting for its answer right now (read-only: the idle session timeout does not end a session in the middle of one).
+    isAwaitingAnswer: () => active !== null,
 
     // A new submission is starting (a fresh start of a service, another service chosen): the next begin() makes a NEW key. Unconfirmed submissions already stored stay (so
     // "Check status" can still find them); only the person's explicit discard, a confirmed outcome, an account switch or the account's deletion forgets them.

@@ -454,7 +454,7 @@ describe('no polling while healthy; a slow back-off only while degraded', () => 
     expect(t.probe).toHaveBeenCalledTimes(1);
     expect(jest.getTimerCount()).toBe(0);
   });
-  test('serverDown after a link came up re-checks quickly (500 ms ... 6 s), then at 15 s, 30 s, then every 60 s, and stops once online', async () => {
+  test('serverDown after a link came up re-checks quickly (500 ms ... 6 s), then at 5 s, 10 s, 20 s, 40 s, then every 60 s, and stops once online', async () => {
     const t = build([REFUSED]);
     t.store.start();
     t.link(WIFI);
@@ -468,22 +468,25 @@ describe('no polling while healthy; a slow back-off only while degraded', () => 
       expected += 1;
       expect(t.probe).toHaveBeenCalledTimes(expected);
     }
+    // the slow back-off, driven by the constants (5 s, 10 s, 20 s, 40 s, then every 60 s)
     await advance(DEGRADED_RECHECK_MS[0] - 1);
     expect(t.probe).toHaveBeenCalledTimes(expected);
     await advance(1);
     expected += 1;
     expect(t.probe).toHaveBeenCalledTimes(expected);
-    await advance(DEGRADED_RECHECK_MS[1]);
+    for (const delay of DEGRADED_RECHECK_MS.slice(1)) {
+      await advance(delay);
+      expected += 1;
+      expect(t.probe).toHaveBeenCalledTimes(expected);
+    }
+    const last = DEGRADED_RECHECK_MS[DEGRADED_RECHECK_MS.length - 1];
+    await advance(last); // the last interval repeats: never faster than once a minute at the end
     expected += 1;
     expect(t.probe).toHaveBeenCalledTimes(expected);
-    await advance(DEGRADED_RECHECK_MS[2]);
-    expected += 1;
-    expect(t.probe).toHaveBeenCalledTimes(expected);
-    await advance(DEGRADED_RECHECK_MS[2]); // the last interval repeats: never faster than once a minute
-    expected += 1;
-    expect(t.probe).toHaveBeenCalledTimes(expected);
+    await advance(last - 1);
+    expect(t.probe).toHaveBeenCalledTimes(expected); // not a probe sooner than the last interval
     t.setResults([OK]);
-    await advance(DEGRADED_RECHECK_MS[2]);
+    await advance(1);
     expect(status(t)).toBe(NET.ONLINE);
     const calls = t.probe.mock.calls.length;
     await advance(10 * 60 * 1000);

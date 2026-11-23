@@ -19,7 +19,8 @@ const KEYS = ['pd_account_label', 'pd_section_personal', 'pd_section_contact', '
 describe('the screen uses what already exists', () => {
   test('the existing API client and the two existing endpoints, nothing else', () => {
     expect(screen).toContain("import { apiGet, apiPatch } from '../lib/api'");
-    expect(screen.match(new RegExp('apiGet[(]', 'g'))).toHaveLength(1);
+    expect(screen.match(new RegExp('apiGet[(]', 'g'))).toHaveLength(2); // the first load, and the quiet re-read of a pull to refresh: the same endpoint
+    expect(screen.match(new RegExp("apiGet[(]'/auth/me'[)]", 'g'))).toHaveLength(2);
     expect(screen.match(new RegExp('apiPatch[(]', 'g'))).toHaveLength(1);
     expect(screen).toContain("apiGet('/auth/me')");
     expect(screen).toContain("apiPatch('/auth/me', patch)");
@@ -166,7 +167,9 @@ describe('screen states', () => {
   test('loading, failure with a retry, and an empty state', () => {
     expect(screen).toContain("{loading && gate.visible ? <FormSkeleton label={t('sk_loading_profile')} fields={6} /> : null}");
     expect(screen).not.toContain('LoadingState');
-    expect(screen).not.toContain('RefreshControl'); // a form is never pulled to refresh
+    // Pull-to-refresh is allowed because it can never lose an edit: while the details are being edited a pull only re-checks the connection (no reload at all), and the typed form is never touched.
+    expect(screen).toContain('<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />');
+    expect(screen).toContain('useNetworkRefresh({ reload: editing || isCorporate ? undefined : reloadProfile })');
     expect(screen).toContain('<LoadFailure titleKey="lf_title_profile"');
     expect(screen).toContain("t('pd_nothing_yet')");
   });

@@ -391,7 +391,7 @@ describe('what is sent', () => {
   });
   test('errors and success are handled by the existing submit code: a server refusal keeps the form and shows the message, success opens the confirmation with the reference', () => {
     const review = read('app/request/review.js');
-    expect(review).toContain('const fields = fieldErrorsFromError(err);');
+    expect(review).toContain('const fields = fieldErrorsFromError(err, t);');
     expect(review).toContain('toast(errorText(err, t));');
     expect(review).toContain("navReplace({ pathname: '/request/submitted', params: { id: request.referenceNumber, requestId: request.id, service: serviceTitle } });");
     expect(review).toContain('} finally {');

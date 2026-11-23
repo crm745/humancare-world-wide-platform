@@ -113,7 +113,7 @@ describe('Bitrix24 on/off switch', () => {
     process.env.BITRIX_SYNC_ENABLED = 'true';
     const { token } = await createPatient();
     const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`)
-      .send({ ...baseRequestBody, serviceType: 'Commercial Airlines — Wheelchair (CAW)', serviceKey: 'commercialair_wheelchair' });
+      .send({ ...baseRequestBody, serviceType: 'Commercial Airlines — Wheelchair (CAW)', serviceKey: 'commercialair_wheelchair', patientContact: '+91 98765 43210', preferredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) });
     expect(res.status).toBe(201);
     expect(res.body.request.serviceKey).toBe('commercialair_wheelchair');
     expect(createLead.mock.calls[0][0]).toMatchObject({ serviceKey: 'commercialair_wheelchair', industry: 712, origin: 'Mumbai, India' });

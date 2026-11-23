@@ -44,7 +44,7 @@ describe('Profile: About HumanCare, Delete account, Log out', () => {
     expect(profile).toMatch(/<UserX[^>]*color="#C53030"/);
   });
   test('Log out is unchanged', () => {
-    expect(profile).toContain("const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/login'); await clearDraftEverywhere(); await clearTokens(); };");
+    expect(profile).toContain("const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/login'); await signOutSession({ isCorporate, beforeClear: clearDraftEverywhere }); };");
     expect(profile).toContain('onPress={signOut}');
   });
 });

@@ -1,6 +1,8 @@
 const express = require('express');
 const { logRequestError, isBodyParserError, publicBodyErrorMessage } = require('./common/logging/safe-error-log');
 const cors = require('cors');
+const { createCorsOptions } = require('./common/security/cors-origins');
+const { resolveTrustProxy } = require('./common/security/trust-proxy');
 const { authRouter } = require('./modules/auth/auth.routes');
 const { requestsRouter } = require('./modules/requests/requests.routes');
 const { casesRouter } = require('./modules/cases/cases.routes');
@@ -16,6 +18,10 @@ const { corporateRegistrationRouter } = require('./modules/corporate-registratio
 const app = express();
 // Two response-header basics for every route: do not announce the framework, and never let a browser guess a content type.
 app.disable('x-powered-by');
+// Behind a reverse proxy, TRUST_PROXY says how many hops to trust so req.ip (the rate limiters) is the real client; unset = trust none (src/common/security/trust-proxy.js). A bad value stops the server at start.
+const trustProxy = resolveTrustProxy(process.env);
+if (trustProxy !== false) app.set('trust proxy', trustProxy);
+else if (String(process.env.NODE_ENV).toLowerCase() === 'production') console.warn('TRUST_PROXY is not set: client IPs are taken from the socket. Behind a reverse proxy set TRUST_PROXY (for example 1) or every user shares one rate-limit budget.');
 app.use((_req, res, next) => { res.set('X-Content-Type-Options', 'nosniff'); next(); });
 
 // What a failed request is allowed to leave in the log: the error's name and code, the status and
@@ -37,11 +43,9 @@ function logAdminRequestError(err, req, status) {
   };
   console.error(`Request failed: ${JSON.stringify(meta)}`);
 }
-// `origin: true` reflects the caller's own Origin back (same effective permissiveness
-// as the old wildcard) — required because `credentials: true` is incompatible with a
-// literal '*' origin, and the admin portal's cookie-based session needs credentials
-// allowed cross-origin (it's served from a different port than this API).
-app.use(cors({ origin: true, credentials: true }));
+// Browsers may call this API (with credentials) only from an allow-listed origin: CORS_ALLOWED_ORIGINS and the configured portal addresses; local development origins only outside production.
+// Requests without an Origin header (the native mobile app, server calls) are unaffected. See src/common/security/cors-origins.js.
+app.use(cors(createCorsOptions(process.env)));
 // The global 100 KB limit (the parser's default) is unchanged. `verify` runs on the raw bytes
 // before they are parsed; it records only their COUNT, so routes with a tighter limit (see
 // maxBodyBytes in admin-auth.validation.js) can enforce it on the bytes actually received - also

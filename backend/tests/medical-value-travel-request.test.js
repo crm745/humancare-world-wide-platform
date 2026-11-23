@@ -140,12 +140,11 @@ describe('POST /requests: a structured Medical Value Travel request', () => {
 describe('Medical Value Travel: older app builds and historical requests', () => {
   const generic = (extra = {}) => ({ serviceType: 'Medical Value Travel', serviceKey: 'medvalue', patientName: 'John Doe', origin: 'Mumbai, India', destination: 'Dubai, UAE', ...extra });
 
-  it('the generic body an older build sends is still accepted, exactly as before (no scope, its own urgency and description)', async () => {
+  it('the generic body an older build sends is refused, not saved as an incomplete request (legacy-body-guard.js)', async () => {
     const { token } = await createPatient();
     const res = await post(token, generic({ description: 'Needs a knee replacement.', urgency: 'planned', country: 'India', patientContact: '+971 50 111 2222' }));
-    expect(res.status).toBe(201);
-    expect(res.body.request).toMatchObject({ serviceKey: 'medvalue', transferScope: null, urgency: 'planned', description: 'Needs a knee replacement.', origin: 'Mumbai, India' });
-    expect((await rowOf(res.body.request.id)).case).toBeTruthy();
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('app_update_required');
   });
 
   it('the generic rules still refuse mobility and equipment for medvalue', async () => {

@@ -175,12 +175,12 @@ describe('PDF and Bitrix read the same stored value the same way', () => {
     const body = {
       serviceKey: 'privatecharter', serviceType: 'Private Charter Air Ambulance Service', patientName: 'Maria Fernandez', patientAge: 61,
       patientGender: 'female', country: 'AE', origin: { geonameId: IDS.MUMBAI }, destination: { geonameId: IDS.DUBAI },
-      patientContact: '+971501234567', preferredDate: '2099-01-01', careLevel: ['care_icu', 'care_stable'], description: 'x', mobility: 'bedridden', urgency: 'planned',
+      patientContact: '+971501234567', preferredDate: '2099-01-01', careLevel: ['care_icu'], description: 'x', mobility: 'bedridden', urgency: 'planned', // Private Charter takes exactly ONE care level (the validator, the app's form and private-charter-validation.test.js agree); stored multi-value rows are covered by the tables above
     };
     const { data, fields } = validatePrivateCharterRequest(body, { cities: { origin: city(IDS.MUMBAI), destination: city(IDS.DUBAI) } });
     expect(fields).toEqual({});
-    expect(data.careLevel).toBe('care_icu,care_stable');
-    expect(await careInPdf(data.careLevel)).toBe('ICU / Critical, Stable / Monitored');
-    expect(bitrixLine(data.careLevel)).toBe('ICU / Critical, Stable / Monitored');
+    expect(data.careLevel).toBe('care_icu');
+    expect(await careInPdf(data.careLevel)).toBe('ICU / Critical');
+    expect(bitrixLine(data.careLevel)).toBe('ICU / Critical');
   });
 });
