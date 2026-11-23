@@ -9,6 +9,7 @@ import { downloadDocument, downloadErrorInfo } from '../lib/download';
 import { useNetwork } from '../state/NetworkContext';
 import { useRetryOnRestore } from '../lib/useRetryOnRestore';
 import { formatDisplayDate } from '../lib/requestShape';
+import { baseServiceName } from '../lib/requestDetailsView';
 import { isRequestFor, trackingItemFromCase, trackingItemFromRequest } from '../lib/trackingItem';
 import { corporateText, programmeNames } from '../lib/corporateMedical';
 import { Body, Screen, TopBar } from '../components/layout';
@@ -175,7 +176,7 @@ export default function Tracking() {
     <Screen>
       <TopBar title={t('tracking_details_title')} />
       <View className="flex-row items-center justify-between bg-white px-[18px] py-3.5">
-        <Text className="font-inter-black text-[14.5px] text-navy">{item.referenceNumber} · {item.serviceType}</Text>
+        <Text className="font-inter-black text-[14.5px] text-navy">{item.referenceNumber} · {baseServiceName(item, t)}</Text>
         {privateCharter ? <PrivateCharterStatusChip model={privateCharter} compact /> : <RequestStatusPill pill={item.reviewPill} status={item.status} />}
       </View>
       <View className="flex-row border-b border-line bg-white">
@@ -190,7 +191,7 @@ export default function Tracking() {
         <Body contentClassName="p-[18px]" refreshControl={refreshControl}>
           <Card className="p-[18px]">
             <InfoRow className="py-[13px]" label={t('lbl_status')} valueNode={privateCharter ? <PrivateCharterStatusChip model={privateCharter} compact /> : <RequestStatusPill pill={item.reviewPill} status={item.status} />} />
-            <InfoRow className="py-[13px]" label={t('lbl_service')} value={item.serviceType} />
+            <InfoRow className="py-[13px]" label={t('lbl_service')} value={baseServiceName(item, t)} />
             {item.corporate ? (
               <>
                 <InfoRow className="py-[13px]" label={corporateText(t, 'corp_company')} value={item.corporate.company} />

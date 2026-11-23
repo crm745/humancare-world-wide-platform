@@ -10,12 +10,15 @@ import { formatDate, formatDayMonth } from './dateFormat';
 //   shortName  the short service name ('' when the service has none: then the full name is the title)
 // A subtitle that only repeats the chip next to the request number ("Ground Ambulance" under a "Ground Ambulance" chip) is left out: the line would say the same thing twice.
 const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+// THE SERVICE IS NAMED ONCE. The chip carries its name when the title is the route; when there is no route the title IS the service's name and the chip shows only the service's icon (showChipLabel false).
+// The second line is never another name of the service ("Medical Escort" over "Commercial Airlines"): it is the patient's area, or nothing.
 export function bannerTexts({ hasRoute, from, to, shortName, serviceName, area, chipLabel }, rtl = false) {
   let title;
   let subtitle;
-  if (hasRoute && from && to) { title = `${from} ${rtl ? '←' : '→'} ${to}`; subtitle = serviceName || ''; } else { title = shortName || serviceName || ''; subtitle = area || (shortName ? serviceName : '') || ''; }
+  let showChipLabel = true;
+  if (hasRoute && from && to) { title = `${from} ${rtl ? '←' : '→'} ${to}`; subtitle = ''; } else { title = shortName || serviceName || ''; subtitle = area || ''; showChipLabel = !title; }
   if (subtitle && (same(subtitle, chipLabel) || same(subtitle, title))) subtitle = '';
-  return { title, subtitle };
+  return { title, subtitle, showChipLabel };
 }
 
 // ---- the blue part ---------------------------------------------------------------------------------------------------------------
@@ -100,11 +103,11 @@ export const statusColorOf = (status) => STATUS_COLOR[status] || STATUS_COLOR.ca
 
 // One label for the whole card: "Request REQ-1067, Mumbai to Delhi, Private Charter Air Ambulance Service, status In progress, updated 2 minutes ago".
 export function bannerAccessibilityLabel({ reference, hasRoute, from, to, shortName, serviceName, status, whenSpoken }, t) {
-  const place = hasRoute && from && to ? t('mr_a11y_route', { from, to }) : shortName && shortName !== serviceName ? shortName : '';
+  const place = hasRoute && from && to ? t('mr_a11y_route', { from, to }) : '';
   return [
     reference ? t('tb_a11y_request', { ref: reference }) : '',
     place,
-    serviceName,
+    shortName || serviceName, // the service, named once
     status ? t('tb_a11y_status', { status }) : '',
     whenSpoken ? t('tb_a11y_updated', { when: whenSpoken }) : '',
   ].filter(Boolean).join(', ');

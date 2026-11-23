@@ -15,6 +15,13 @@ export function toUiStatus(backendStatus) {
   return STATUS_TO_UI[backendStatus] || backendStatus;
 }
 
+// A stored service name ("Medical Escort (Commercial Airlines) — Stretcher (CAS)") as the one name people see ("Commercial Airlines"): no " — variant" and no "Medical Escort (...)" wrapper.
+export function storedServiceName(type) {
+  const base = String(type || '').split(' — ')[0].trim();
+  const escort = /^Medical Escort \((.+)\)$/.exec(base);
+  return (escort ? escort[1] : base).trim();
+}
+
 export function serviceKeyFromTitle(title) {
   return TITLE_TO_KEY[title] || 'air';
 }

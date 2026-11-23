@@ -6,7 +6,7 @@
 // always agree. The list has no stage events, so a cancelled request has no step here.
 import SERVICES from '../data/services.json';
 import { SERVICE_TILES } from '../data/mock';
-import { isMortalRequest, serviceKeyFromTitle } from './requestShape';
+import { isMortalRequest, serviceKeyFromTitle, storedServiceName } from './requestShape';
 import { TRACKING_STEPS, cityName, trackingPosition } from './requestTracking';
 import { isNewTeleRequest } from './teleConsultation';
 import { corporateText } from './corporateMedical';
@@ -58,7 +58,7 @@ export function progressOf(rawStatus) {
 export function cardView(item, t) {
   const key = serviceKeyOf(item);
   const titleKey = serviceTitleKey(key);
-  const name = titleKey ? t(titleKey) : item.serviceType || '';
+  const name = titleKey ? t(titleKey) : storedServiceName(item.serviceType);
   const statusKey = `status_${item.status}`;
   const statusLabel = t(statusKey) === statusKey ? String(item.status || '') : t(statusKey);
   const [badgeBg, badgeFg] = BADGE[item.status] || BADGE_OTHER;

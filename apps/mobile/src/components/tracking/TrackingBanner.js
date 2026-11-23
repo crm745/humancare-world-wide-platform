@@ -97,7 +97,7 @@ export default function TrackingBanner({ d }) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <View style={{ flexShrink: 1, minWidth: 0, height: 28, borderRadius: 14, paddingHorizontal: 11, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <ServiceIcon serviceKey={d.chipIcon} size={15} color={BRAND} fill={BRAND} fillOpacity={0.15} />
-            <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONT[800], fontSize: 12.5, color: BRAND }}>{d.chipLabel}</Text>
+            {texts.showChipLabel ? <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: FONT[800], fontSize: 12.5, color: BRAND }}>{d.chipLabel}</Text> : null}
           </View>
           <View style={{ width: 1, height: 16, backgroundColor: 'rgba(255,255,255,0.35)' }} />
           <Text numberOfLines={1} style={{ flexShrink: 0, fontFamily: FONT[700], fontSize: 12.5, letterSpacing: 0.375, color: 'rgba(255,255,255,0.85)' }}>{d.reference}</Text>

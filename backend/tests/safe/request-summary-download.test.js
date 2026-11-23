@@ -23,7 +23,7 @@ const { app } = require('../../src/app');
 const S = require('../../src/modules/auth/session.service');
 const { startSession } = require('../../src/modules/auth/auth.service');
 const { pdfLines } = require('../helpers/pdf-text');
-const { services, SECRET_TEXTS } = require('./helpers/summary-fixtures');
+const { canonical, services, SECRET_TEXTS } = require('./helpers/summary-fixtures');
 
 const all = services();
 const auth = (token) => ({ Authorization: `Bearer ${token}` });
@@ -59,7 +59,9 @@ describe('the download endpoint', () => {
       expect(res.body.subarray(0, 5).toString('latin1')).toBe('%PDF-');
       const text = pdfLines(res.body);
       expect(text).toContain('Request Summary');
-      expect(text).toContain(all[keys[i]].serviceType);
+      expect(text).toContain(canonical(all[keys[i]].serviceType));
+      expect(text).not.toContain('Medical Escort');
+      expect(text).not.toContain('Stretcher (CAS)'); // the variant is a Travel type row, never part of the service name
     }
   });
   test('the PDF is English whatever language the app or the request asks for', async () => {

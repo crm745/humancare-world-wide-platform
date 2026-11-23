@@ -119,4 +119,6 @@ const EIGHT = Object.freeze({
   'Medical Value Travel': 'medvalue',
 });
 
-module.exports = { NOW, CREATED, SECRETS, SECRET_TEXTS, EIGHT, services, wrap, documents };
+// The service's own name, once (what every patient-facing screen shows): no " — variant", no "Medical Escort (...)" wrapper.
+const canonical = (type) => { const base = String(type).split(' — ')[0].trim(); const m = /^Medical Escort \((.+)\)$/.exec(base); return m ? m[1] : base; };
+module.exports = { canonical, NOW, CREATED, SECRETS, SECRET_TEXTS, EIGHT, services, wrap, documents };

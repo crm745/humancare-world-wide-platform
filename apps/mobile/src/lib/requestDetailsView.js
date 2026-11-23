@@ -11,7 +11,7 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import SERVICES from '../data/services.json';
 import { getDateLocale, formatDate, formatDayMonth, formatTime } from './dateFormat';
 import { displayNameOf } from './countryNames';
-import { careLevelText } from './requestShape';
+import { careLevelText, storedServiceName } from './requestShape';
 import { TRACKING_STEPS, trackingPosition } from './requestTracking';
 import { documentHistory, reviewBanner, reviewState } from './requestDocuments';
 import { formatSize } from './documentHistoryView';
@@ -62,7 +62,7 @@ export function baseServiceName(request, t) {
   const titleKey = key === 'privatecharter' ? 'air_opt_charter_title' : key === 'commercialair' ? 'air_opt_commercial_title' : serviceTitleKey(key);
   if (titleKey) return t(titleKey);
   if (SERVICES[key] && SERVICES[key].title) return SERVICES[key].title;
-  return textOf(String((request && request.serviceType) || '').split(' — ')[0]);
+  return textOf(storedServiceName(request && request.serviceType));
 }
 
 export const isMortalKey = (request) => /^mortal(_|$)/.test((request && request.serviceKey) || '');

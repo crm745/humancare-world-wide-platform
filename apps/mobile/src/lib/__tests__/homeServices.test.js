@@ -29,7 +29,7 @@ describe('the eight top-level services, in the approved order', () => {
     expect(HOME_SERVICES.map((s) => s.key)).toEqual(['air', 'tele', 'homecare', 'ground', 'mortal', 'corporate', 'marine', 'medvalue']);
   });
   test('Home draws this list, and a "More" tile as the ninth cell', () => {
-    expect(home).toContain("import { HOME_SERVICES, SERVICE_LABELS } from '../data/mock';");
+    expect(home).toContain("import { HOME_SERVICES } from '../data/mock';");
     expect(home).toContain('const HOME_TILES = HOME_SERVICES;');
     expect(home).toContain('services={HOME_TILES}');
     expect(grid).toContain("const items = [...services, { key: '__more', more: true }];");

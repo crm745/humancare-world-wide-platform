@@ -4,7 +4,7 @@
 // headers it is sent with. Synthetic requests only. No database, no network.
 const zlib = require('zlib');
 const { renderPdfLines, renderPdfBuffer, fontUsage, valueAfter } = require('../helpers/pdf-text');
-const { SECRET_TEXTS, EIGHT, services, wrap } = require('./helpers/summary-fixtures');
+const { canonical, SECRET_TEXTS, EIGHT, services, wrap } = require('./helpers/summary-fixtures');
 
 jest.setTimeout(60000);
 const all = services();
@@ -29,7 +29,7 @@ describe('a real PDF for each of the eight services', () => {
     expect(buffer.length).toBeLessThan(400000);
     expect(pagesOf(buffer)).toBeGreaterThanOrEqual(1);
     const text = await lines(all[key]);
-    for (const expected of ['HumanCare Worldwide', 'Global Medical Assistance Company', 'Request Summary', 'Request ID:', 'REQ-1042', 'Status:', 'In progress', 'Generated:', 'Submitted:', 'Patient Information', 'Service Information', 'Service:', all[key].serviceType]) {
+    for (const expected of ['HumanCare Worldwide', 'Global Medical Assistance Company', 'Request Summary', 'Request ID:', 'REQ-1042', 'Status:', 'In progress', 'Generated:', 'Submitted:', 'Patient Information', 'Service Information', 'Service:', canonical(all[key].serviceType)]) {
       expect({ key, expected, found: text.includes(expected) }).toEqual({ key, expected, found: true });
     }
     expect(text.some((l) => /^\d{2} [A-Z][a-z]{2} 20\d\d, \d\d:\d\d UTC$/.test(l))).toBe(true); // the generated date

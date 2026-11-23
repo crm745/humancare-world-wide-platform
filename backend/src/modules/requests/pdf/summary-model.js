@@ -64,6 +64,15 @@ function clean(value) {
   return chars.length > TEXT_LIMIT ? `${chars.slice(0, TEXT_LIMIT).join('')}… (text shortened)` : text;
 }
 
+// The service's own name, once: the variant the app appends to it ("Commercial Airlines — Stretcher (CAS)", "Mortal Remains Transportation — Within India") is not a second service name; it is shown in its own
+// row (Travel type, Transfer scope, Transport mode).
+function baseServiceName(request) {
+  const type = request && typeof request.serviceType === 'string' ? request.serviceType : '';
+  const base = type.split(' — ')[0].trim();
+  const escort = /^Medical Escort \((.+)\)$/.exec(base); // the stored name of Commercial Airlines: the app calls the service "Commercial Airlines"
+  return (escort ? escort[1].trim() : base) || null;
+}
+
 // A country stored as its two-letter code (Private Charter, Marine, Medical Value Travel and Corporate Medical Solutions) is written as its English name; any other text is left as typed.
 const countryNames = typeof Intl !== 'undefined' && typeof Intl.DisplayNames === 'function' ? new Intl.DisplayNames(['en'], { type: 'region' }) : null;
 function countryText(value) {
@@ -89,7 +98,7 @@ function homeLayout(request) {
   const caretakers = String(request.caretakerTypes || '').split(',').map((key) => CARETAKERS[key]).filter(Boolean).join(', ');
   return {
     patient: rows(['Patient Name:', request.patientName], ['Age / Gender:', ageGender(request)], ['Contact Number:', request.patientContact], ['Country:', countryText(request.country)]),
-    service: rows(['Service:', request.serviceType], ['Service Date:', day(request.preferredDate)]),
+    service: rows(['Service:', baseServiceName(request)], ['Service Date:', day(request.preferredDate)]),
     details: rows(['Home address:', parsed.address], ['Nurse / Caretaker:', caretakers], ['Care Requirement:', HOURS[request.careRequirement]], ['Care Level:', request.careLevel],
       ['Oxygen:', oxygenText(request)], ['Medical History:', parsed.history]),
   };
@@ -100,7 +109,7 @@ function mvtLayout(request) {
   const specialty = parsed.specialty === OTHER_SPECIALTY ? `Other (${parsed.other})` : parsed.specialty;
   return {
     patient: rows(['Patient Name:', request.patientName], ['Age / Gender:', ageGender(request)], ['Contact Number:', request.patientContact], ['Country:', countryText(request.country)]),
-    service: rows(['Service:', request.serviceType], ['Treatment scope:', MVT_SCOPES[request.transferScope]], ['Preferred treatment date:', day(request.preferredDate)]),
+    service: rows(['Service:', baseServiceName(request)], ['Treatment scope:', MVT_SCOPES[request.transferScope]], ['Preferred treatment date:', day(request.preferredDate)]),
     details: rows(['Specialty:', specialty], ['Current city:', request.origin], ['Destination city:', request.destination], ['Medical History:', parsed.history]),
   };
 }
@@ -109,7 +118,7 @@ function corporateLayout(request) {
   const parsed = corporateFieldsOf(request);
   return {
     patient: rows(['Name of Employee:', request.patientName], ['Gender:', request.patientGender], ['Patient Contact:', parsed.patientContact]),
-    service: rows(['Service:', request.serviceType], ['Company Name:', parsed.companyName], ['No. of Employees:', parsed.employeeCount], ['Preferred Date:', day(parsed.preferredDate)]),
+    service: rows(['Service:', baseServiceName(request)], ['Company Name:', parsed.companyName], ['No. of Employees:', parsed.employeeCount], ['Preferred Date:', day(parsed.preferredDate)]),
     details: rows(['Programmes:', parsed.programmes.map((key) => CORPORATE_PROGRAMMES[key]).join(', ')], ['Office Address:', parsed.officeAddress], ['Office Country:', countryText(parsed.officeCountry)],
       ['Any Requirement:', parsed.anyRequirement], ['Special Requirement:', parsed.specialRequirement]),
   };
@@ -118,7 +127,7 @@ function corporateLayout(request) {
 function teleLayout(request) {
   return {
     patient: rows(['Patient Name:', request.patientName], ['Age / Gender:', ageGender(request)], ['Contact Number:', request.patientContact], ['Country:', countryText(request.country)]),
-    service: rows(['Service:', request.serviceType], ['Consultation type:', TELE_TYPES[request.consultationType]], ['Scope:', TELE_SCOPES[request.transferScope]], ['Visit date:', day(request.preferredDate)]),
+    service: rows(['Service:', baseServiceName(request)], ['Consultation type:', TELE_TYPES[request.consultationType]], ['Scope:', TELE_SCOPES[request.transferScope]], ['Visit date:', day(request.preferredDate)]),
     details: rows(['Current address:', request.origin], ['Medical details:', request.description]),
   };
 }
@@ -127,7 +136,7 @@ function marineLayout(request) {
   const parsed = parseMarineDescription(request.description);
   return {
     patient: rows(['Patient Name:', request.patientName], ['Age / Gender:', ageGender(request)], ['Contact Number:', request.patientContact], ['Country:', countryText(request.country)]),
-    service: rows(['Service:', request.serviceType], ['Service scope:', MARINE_SCOPES[request.transferScope]], ['Date of service:', day(request.preferredDate)]),
+    service: rows(['Service:', baseServiceName(request)], ['Service scope:', MARINE_SCOPES[request.transferScope]], ['Date of service:', day(request.preferredDate)]),
     details: rows(['Origin:', request.origin], ['Destination:', request.destination], ['Critical level:', careLevelText(request.careLevel)], ['Oxygen:', oxygenText(request)], ['Medical History:', parsed.history]),
   };
 }
@@ -142,7 +151,7 @@ function transportLayout(request) {
   return {
     patient: rows([mortal ? "Deceased Person's Name:" : 'Patient Name:', request.patientName], ['Age / Gender:', ageGender(request)], ['Contact Number:', request.patientContact],
       ['Country:', countryText(request.country)], ['Relation to the deceased:', request.deceasedRelation], ['Place of death:', request.placeOfDeath], ['Date of death:', day(request.dateOfDeath)]),
-    service: rows(['Service:', request.serviceType], ['Transfer scope:', SCOPES[request.transferScope]], ['Transport mode:', MODES[request.transportMode]],
+    service: rows(['Service:', baseServiceName(request)], ['Transfer scope:', SCOPES[request.transferScope]], ['Transport mode:', MODES[request.transportMode]],
       ['Travel type:', travel ? travel[1].charAt(0).toUpperCase() + travel[1].slice(1) : null], [mortal ? 'Preferred transfer date:' : 'Date Of Service:', day(request.preferredDate)],
       ['Urgency:', URGENCY_LABEL[request.urgency]]),
     details: rows(['From:', request.origin], ['To:', request.destination], [mortal ? 'Details:' : 'Condition & diagnosis:', details],
@@ -203,7 +212,7 @@ function buildSummaryModel(request, { now = new Date() } = {}) {
   ].filter((section) => section.rows.length > 0);
   return {
     reference: clean(request.referenceNumber) || 'Request',
-    serviceName: clean(request.serviceType) || 'HumanCare service request',
+    serviceName: clean(baseServiceName(request)) || 'HumanCare service request',
     statusKey: request.status || 'submitted',
     statusLabel: statusLabelOf(request.status),
     generatedAt: formatMoment(now),

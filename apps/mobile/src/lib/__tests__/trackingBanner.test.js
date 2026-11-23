@@ -24,22 +24,23 @@ const ground = (extra) => request({ serviceType: 'Ground Ambulance', serviceKey:
 const home = (extra) => request({ serviceType: 'Home Healthcare Services', serviceKey: 'homecare', origin: 'Andheri West, Mumbai', destination: '', originCityName: null, destinationCityName: null, case: null, ...extra });
 
 describe('the title and the subtitle', () => {
-  test('with a route: "Mumbai → Delhi", the full service name below', () => {
+  test('with a route: "Mumbai → Delhi", and no second line: the service is named once, in the chip', () => {
     const d = buildTrackingDetails(request(), t);
-    expect(B.bannerTexts(d)).toEqual({ title: 'Mumbai → Delhi', subtitle: 'Private Charter Air Ambulance Service' });
+    expect(B.bannerTexts(d)).toEqual({ title: 'Mumbai → Delhi', subtitle: '', showChipLabel: true });
+    expect(d.chipLabel).toBe('Private Charter');
   });
   test('right to left: the arrow points the other way', () => {
     const d = buildTrackingDetails(request(), t);
     expect(B.bannerTexts(d, true).title).toBe('Mumbai ← Delhi');
   });
-  test('without a route: the short service name, and the patient\'s area below it', () => {
+  test('without a route: the service name is the title (once; the chip keeps only its icon), and the area is below it', () => {
     const d = buildTrackingDetails(home(), t);
     expect(d.hasRoute).toBe(false);
-    expect(B.bannerTexts(d)).toEqual({ title: 'Home Healthcare', subtitle: 'Andheri West, Mumbai' });
+    expect(B.bannerTexts(d)).toEqual({ title: 'Home Healthcare', subtitle: 'Andheri West, Mumbai', showChipLabel: false });
   });
-  test('without a route and without an area: the full service name below the short one', () => {
+  test('without a route and without an area: the service name alone, never a second name for it below', () => {
     const d = buildTrackingDetails(home({ origin: '' }), t);
-    expect(B.bannerTexts(d)).toEqual({ title: 'Home Healthcare', subtitle: 'Home Healthcare Services' });
+    expect(B.bannerTexts(d)).toEqual({ title: 'Home Healthcare', subtitle: '', showChipLabel: false });
   });
   test('one city only is not a route: the service titles the banner and the city is the area', () => {
     const d = buildTrackingDetails(ground({ destination: '' }), t);
@@ -48,18 +49,18 @@ describe('the title and the subtitle', () => {
     expect(B.bannerTexts(d).subtitle).toBe('Pune, Maharashtra, India');
   });
   test('a service the config does not know: its full name is the title', () => {
-    expect(B.bannerTexts({ hasRoute: false, from: '', to: '', shortName: '', serviceName: 'Some Service', area: '' })).toEqual({ title: 'Some Service', subtitle: '' });
+    expect(B.bannerTexts({ hasRoute: false, from: '', to: '', shortName: '', serviceName: 'Some Service', area: '' })).toEqual({ title: 'Some Service', subtitle: '', showChipLabel: false });
   });
   test('a subtitle that only repeats the chip is left out (Ground Ambulance under a Ground Ambulance chip), with a route or without', () => {
     const d = buildTrackingDetails(ground(), t);
     expect(d.chipLabel).toBe('Ground Ambulance');
     expect(d.serviceName).toBe('Ground Ambulance');
-    expect(B.bannerTexts(d)).toEqual({ title: 'Pune → Mumbai', subtitle: '' });
+    expect(B.bannerTexts(d)).toEqual({ title: 'Pune → Mumbai', subtitle: '', showChipLabel: true });
     expect(B.bannerTexts({ ...d, chipLabel: 'GROUND AMBULANCE ' }).subtitle).toBe('');
     // no route: the title is already the service, so the same name is not repeated below it either
     expect(B.bannerTexts({ hasRoute: false, from: '', to: '', shortName: 'Ground Ambulance', serviceName: 'Ground Ambulance', area: '', chipLabel: 'Ground Ambulance' }).subtitle).toBe('');
-    // a different subtitle is kept: Private Charter's full name under its "Air Ambulance" chip, an area under a service title
-    expect(B.bannerTexts(buildTrackingDetails(request(), t)).subtitle).toBe('Private Charter Air Ambulance Service');
+    // Private Charter's second line used to be its full name under an "Air Ambulance" chip: now there is none. An area under a service title is kept.
+    expect(B.bannerTexts(buildTrackingDetails(request(), t)).subtitle).toBe('');
     expect(B.bannerTexts(buildTrackingDetails(home(), t)).subtitle).toBe('Andheri West, Mumbai');
   });
   test('very long city names are passed whole (the screen cuts them with an ellipsis after two lines)', () => {
@@ -95,7 +96,7 @@ describe('the per-service config: chip label, chip icon', () => {
   });
   test('the view carries the config for the request\'s own service', () => {
     const d = buildTrackingDetails(request(), t);
-    expect(d).toMatchObject({ chipLabel: 'Air Ambulance', chipIcon: 'privatecharter', bannerImage: IM.BANNER_IMAGES.privatecharter, shortName: 'Private Charter' });
+    expect(d).toMatchObject({ chipLabel: 'Private Charter', chipIcon: 'privatecharter', bannerImage: IM.BANNER_IMAGES.privatecharter, shortName: 'Private Charter' });
     const g = buildTrackingDetails(ground(), t);
     expect(g).toMatchObject({ chipLabel: 'Ground Ambulance', chipIcon: 'ground', bannerImage: IM.BANNER_IMAGES.ground, shortName: 'Ground Ambulance' });
     // an older record with only a title still finds its service (the app's own resolver), and so its chip
@@ -329,15 +330,15 @@ describe('the status colours', () => {
 });
 
 describe('the spoken label of the card', () => {
-  test('"Request REQ-1067, Mumbai to Delhi, Private Charter Air Ambulance Service, status In Progress, updated 2 minutes ago"', () => {
+  test('"Request REQ-1067, Mumbai to Delhi, Private Charter, status In Progress, updated 2 minutes ago"', () => {
     const d = buildTrackingDetails(request(), t);
     const label = B.bannerAccessibilityLabel({ ...d, status: d.badge.label, whenSpoken: '2 minutes ago' }, t);
-    expect(label).toBe('Request REQ-1067, Mumbai to Delhi, Private Charter Air Ambulance Service, status In Progress, updated 2 minutes ago');
+    expect(label).toBe('Request REQ-1067, Mumbai to Delhi, Private Charter, status In Progress, updated 2 minutes ago');
   });
-  test('without a route: the short name, the full name, then the status and the time', () => {
+  test('without a route: the service name once, then the status and the time', () => {
     const d = buildTrackingDetails(home({ status: 'completed' }), t);
     expect(B.bannerAccessibilityLabel({ ...d, status: d.badge.label, whenSpoken: 'yesterday' }, t))
-      .toBe('Request REQ-1067, Home Healthcare, Home Healthcare Services, status Completed, updated yesterday');
+      .toBe('Request REQ-1067, Home Healthcare, status Completed, updated yesterday');
   });
   test('a missing time or status is left out, not read as "undefined"', () => {
     const label = B.bannerAccessibilityLabel({ reference: 'REQ-1', hasRoute: false, shortName: '', serviceName: 'Some Service' }, t);

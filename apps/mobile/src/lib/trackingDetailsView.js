@@ -109,7 +109,7 @@ export function buildTrackingDetails(request, t) {
     steps,
     cancelled,
     // The banner: the chip's label and icon, the service's drawn picture (null when it has none), the short service name and when the request last changed.
-    chipLabel: t(config.chipKey),
+    chipLabel: t(config.shortKey || config.chipKey), // the service's own name (the same words as the title), never a second, different name for it
     chipIcon: config.icon,
     bannerImage: bannerImageFor(serviceKey),
     shortName: config.shortKey ? t(config.shortKey) : '',

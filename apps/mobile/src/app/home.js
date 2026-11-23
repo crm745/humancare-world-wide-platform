@@ -5,10 +5,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state/AppContext';
-import { HOME_SERVICES, SERVICE_LABELS } from '../data/mock';
+import { HOME_SERVICES } from '../data/mock';
 import { apiGet } from '../lib/api';
 import { registerForPushNotifications } from '../lib/pushNotifications';
 import { serviceKeyFromTitle, toUiStatus } from '../lib/requestShape';
+import { baseServiceName } from '../lib/requestDetailsView';
 import { navReplace } from '../lib/nav';
 import { BottomNav, Screen, useScrollToTopOnTabTap } from '../components/layout';
 import { Text } from '../components/ui';
@@ -79,7 +80,7 @@ export default function Home() {
     const key = serviceKeyFromTitle(current.serviceType);
     activeRequest = {
       serviceKey: key,
-      serviceName: SERVICE_LABELS[key] ? t(SERVICE_LABELS[key]) : current.serviceType,
+      serviceName: baseServiceName(current, t),
       reference: current.referenceNumber,
       statusLabel: t(`status_${toUiStatus(current.status)}`),
       origin: current.origin,

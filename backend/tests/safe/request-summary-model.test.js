@@ -2,7 +2,7 @@
 // The content of the request summary PDF, service by service (pdf/summary-model.js): readable English labels, correctly formatted values, the right rows for each of the eight services, missing
 // fields handled, what the patient typed kept exactly, and nothing internal ever read. Pure: no PDF library, no database, no network. Requests are synthetic and shaped as the database stores them.
 const { buildSummaryModel, formatDateOnly, formatMoment, statusLabelOf, TEXT_LIMIT } = require('../../src/modules/requests/pdf/summary-model');
-const { NOW, SECRETS, SECRET_TEXTS, EIGHT, services, wrap } = require('./helpers/summary-fixtures');
+const { canonical, NOW, SECRETS, SECRET_TEXTS, EIGHT, services, wrap } = require('./helpers/summary-fixtures');
 
 const all = services();
 const build = (key, extra = {}) => buildSummaryModel({ ...all[key], ...extra }, { now: new Date('2026-11-23T14:05:00.000Z') });
@@ -13,7 +13,7 @@ describe('the header and the meta data (every service)', () => {
   test.each(Object.entries(EIGHT))('%s: Request ID, service, status, generated and submitted dates, in English and in UTC', (_name, key) => {
     const model = build(key);
     expect(model.reference).toBe('REQ-1042');
-    expect(model.serviceName).toBe(all[key].serviceType);
+    expect(model.serviceName).toBe(canonical(all[key].serviceType));
     expect(model.statusKey).toBe('in_progress');
     expect(model.statusLabel).toBe('In progress'); // a word, not the stored key
     expect(model.generatedAt).toBe('23 Nov 2026, 14:05 UTC');
@@ -238,5 +238,21 @@ describe('authorized data only: nothing internal is read, so nothing internal ca
     const before = JSON.stringify(request);
     buildSummaryModel(request);
     expect(JSON.stringify(request)).toBe(before);
+  });
+});
+
+describe('the service is named once (never "Medical Escort (Commercial Airlines) — Stretcher (CAS)")', () => {
+  test.each(Object.entries(EIGHT))('%s: one canonical Service value, no variant or wrapper in it', (_name, key) => {
+    const model = build(key);
+    const value = rowsOf(model)['Service:'];
+    expect(value).toBe(canonical(all[key].serviceType));
+    expect(value).not.toMatch(/ — /);
+    expect(value).not.toMatch(/^Medical Escort/);
+    expect(model.serviceName).toBe(value);
+  });
+  test('Commercial Airlines: the name is "Commercial Airlines" and the travel type has its own row', () => {
+    const model = build('commercialair');
+    expect(rowsOf(model)['Service:']).toBe('Commercial Airlines');
+    expect(rowsOf(model)['Travel type:']).toBe('Stretcher');
   });
 });
