@@ -1,5 +1,5 @@
 const PDFDocument = require('pdfkit');
-const { mobilityText, URGENCY_LABEL, EQUIPMENT } = require('../../common/constants/request.constants');
+const { mobilityText, URGENCY_LABEL, EQUIPMENT, TRAVEL_TYPE_LABEL, criticalLevelText, PRIVATE_CHARTER_KEY } = require('../../common/constants/request.constants');
 const { careLevelText } = require('../../common/utils/care-level');
 const { BRAND_PRIMARY } = require('../../common/constants/brand');
 
@@ -44,12 +44,17 @@ function streamRequestSummaryPdf(res, request) {
   row(doc, 'Place of death:', request.placeOfDeath);
   row(doc, 'Date of death:', day(request.dateOfDeath));
   row(doc, 'Service:', request.serviceType);
-  row(doc, 'From:', request.origin);
-  row(doc, 'To:', request.destination);
+  // Private Charter names its cities; the other services keep From / To.
+  const charter = request.serviceKey === PRIVATE_CHARTER_KEY;
+  row(doc, charter ? 'Origin City:' : 'From:', request.origin);
+  row(doc, charter ? 'Destination City:' : 'To:', request.destination);
   row(doc, mortal ? 'Preferred transfer date:' : 'Date Of Service:', day(request.preferredDate));
   row(doc, 'Status:', request.status);
   row(doc, 'Submitted:', new Date(request.createdAt).toLocaleString());
   row(doc, 'Urgency:', URGENCY_LABEL[request.urgency]);
+  row(doc, 'Travel type:', TRAVEL_TYPE_LABEL[request.travelType]);
+  row(doc, 'Critical level:', criticalLevelText(request.criticalLevel));
+  if (request.oxygenRequired != null) row(doc, 'Oxygen required:', request.oxygenRequired ? (request.oxygenFlowLpm ? `Yes, ${request.oxygenFlowLpm} LPM` : 'Yes') : 'No');
   if (request.description) row(doc, mortal ? 'Details:' : 'Condition & diagnosis:', request.description);
   // Keys read as English labels; so do the older translated labels, which the PDF's built-in font
   // cannot draw (Hindi, Marathi, Gujarati, Telugu and Arabic printed as garbage or not at all).

@@ -6,6 +6,8 @@ const {
 const { addDocumentToCase } = require('../documents/documents.service');
 const { toSafeDocument } = require('../documents/document-response');
 const { sendMedicalReportToBitrix } = require('../bitrix/bitrix.service');
+const { ingestUpload, discardStored, discardTemp } = require('../../storage/ingest');
+const { AREAS } = require('../../storage/keys');
 
 async function listMyCases(req, res, next) {
   try {
@@ -44,16 +46,23 @@ async function createCase(req, res, next) {
 async function uploadCaseDocument(req, res, next) {
   try {
     if (!req.file) return res.status(400).json({ error: 'file is required' });
-    const caseRecord = await getCaseById(req.params.id);
-    if (caseRecord.corporateId !== req.user.corporateId) {
-      return res.status(403).json({ error: 'This case was not submitted by your organization.' });
+    let stored = null;
+    let document;
+    let caseRecord;
+    try {
+      caseRecord = await getCaseById(req.params.id);
+      if (caseRecord.corporateId !== req.user.corporateId) {
+        await discardTemp(req.file);
+        return res.status(403).json({ error: 'This case was not submitted by your organization.' });
+      }
+      // Checked, virus-scanned (refused unless ClamAV says clean) and stored under a generated key before the row exists.
+      stored = await ingestUpload({ file: req.file, area: AREAS.CASE_DOCUMENTS, policy: 'organization' });
+      document = await addDocumentToCase(caseRecord.id, { type: req.body.type, name: req.file.originalname, fileUrl: stored.key, fileSizeBytes: stored.size });
+    } catch (err) {
+      await discardTemp(req.file);
+      if (stored) await discardStored(stored.key);
+      throw err;
     }
-    const document = await addDocumentToCase(caseRecord.id, {
-      type: req.body.type,
-      name: req.file.originalname,
-      fileUrl: `/uploads/${req.file.filename}`,
-      fileSizeBytes: req.file.size,
-    });
     // Other document types (passport, ID…) have their own Bitrix fields; only the report is mapped so far.
     if (document.type === 'Medical Report') await sendMedicalReportToBitrix(caseRecord.bitrixLeadId, document);
     // `document` was read in full (the Bitrix24 step above needs its fileUrl); the client gets the safe fields only.

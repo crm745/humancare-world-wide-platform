@@ -42,13 +42,14 @@ async function lockApprovedRequest(tx, requestId) {
   return { request, caseRecord, link: caseRecord.bitrixDealLink };
 }
 
-const requestEvent = (tx, { request, documentId = null, action, adminId, detail }) => tx.requestEvent.create({
-  data: { serviceRequestId: request.id, documentId, action, actorType: 'admin', actorId: adminId, detail },
+// `automation` (only the automatic sharing passes it): recorded as the SYSTEM, source "document_auto_share"; the designated Admin's id is still stored.
+const requestEvent = (tx, { request, documentId = null, action, adminId, detail, automation = false }) => tx.requestEvent.create({
+  data: { serviceRequestId: request.id, documentId, action, actorType: automation ? 'system' : 'admin', actorId: adminId, detail },
 });
 
-const audit = (tx, { caseRecord, share, action, adminId, code }) => appendAuditLog(tx, {
+const audit = (tx, { caseRecord, share, action, adminId, code, automation = false }) => appendAuditLog(tx, {
   caseId: caseRecord.id, entityType: 'bitrix_deal_document', entityId: String(share.id), action,
-  actorType: 'admin', actorId: adminId, source: 'admin_portal', reasonCode: code,
+  actorType: automation ? 'system' : 'admin', actorId: adminId, source: automation ? 'document_auto_share' : 'admin_portal', reasonCode: code,
   afterData: { caseId: caseRecord.id, caseReference: caseRecord.referenceNumber, shareId: share.id, requestDocumentId: share.requestDocumentId, status: share.status },
   correlationId: `share:${share.id}`, idempotencyKey: `${action}:share:${share.id}:${share.tryCount}`,
 });
@@ -66,8 +67,11 @@ const eventData = (kind, share, caseRecord, tryNumber) => ({
 
 // ---- authorize ----------------------------------------------------------------------------------------------------------------
 
-/** Admin explicitly authorizes ONE document to be attached to the Deal. Idempotent: an active share is returned as it is. */
-async function authorizeShare({ requestId, documentId, adminId, readFile = readVerifiedFile }) {
+/** Admin explicitly authorizes ONE document to be attached to the Deal. Idempotent: an active share is returned as it is.
+ *  `automation: true` is passed ONLY by the automatic sharing (deal-document-auto-share.js): a clean scan alone is enough (Admin review is not required, a
+ *  rejected document is still refused), the Case document need not exist yet, and a document whose earlier share was REVOKED is never shared again. */
+async function authorizeShare({ requestId, documentId, adminId, readFile = readVerifiedFile, automation = false }) {
+  const auto = automation === true;
   const rid = numericId(requestId, 'The request');
   const did = numericId(documentId, 'The document');
   return prisma.$transaction(async (tx) => {
@@ -75,12 +79,13 @@ async function authorizeShare({ requestId, documentId, adminId, readFile = readV
     const document = await tx.requestDocument.findFirst({ where: { id: did, serviceRequestId: request.id } });
     if (!document) throw httpError(404, 'Document not found');
     if (document.scanStatus !== 'clean') throw httpError(409, 'Only a document whose virus scan is clean can be shared.', 'document_not_clean');
-    if (document.reviewStatus !== 'approved') throw httpError(409, 'Only an approved document can be shared.', 'document_not_approved');
+    if (auto ? document.reviewStatus === 'rejected' : document.reviewStatus !== 'approved') throw httpError(409, auto ? 'A rejected document is never shared.' : 'Only an approved document can be shared.', auto ? 'document_rejected' : 'document_not_approved');
     if (document.supersededAt) throw httpError(409, 'This document was replaced by a newer one.', 'document_superseded');
-    if (document.caseDocumentId == null) throw httpError(409, 'The document is not part of the Case yet.', 'not_in_case');
+    if (!auto && document.caseDocumentId == null) throw httpError(409, 'The document is not part of the Case yet.', 'not_in_case');
 
     const last = await tx.bitrixDealDocument.findFirst({ where: { dealLinkId: link.id, requestDocumentId: document.id }, orderBy: { generation: 'desc' } });
     if (last && last.status !== 'revoked') return { share: last, alreadyAuthorized: true };
+    if (auto && last) return { share: last, alreadyAuthorized: true, revoked: true }; // an Admin revoked it: the automation never undoes that
 
     // The file must exist, match its checksum, and REALLY be a PDF or an image (its own bytes decide, not its name or declared type).
     const buffer = await readFile(document);
@@ -90,15 +95,15 @@ async function authorizeShare({ requestId, documentId, adminId, readFile = readV
     const generation = last ? last.generation + 1 : 1;
     const share = await tx.bitrixDealDocument.create({
       data: {
-        dealLinkId: link.id, requestDocumentId: document.id, caseDocumentId: document.caseDocumentId, generation,
+        dealLinkId: link.id, requestDocumentId: document.id, caseDocumentId: document.caseDocumentId ?? null, generation,
         sha256: document.sha256, sizeBytes: document.sizeBytes, detectedType,
         shareToken: `HC-D${document.id}G${generation}-${String(document.sha256).slice(0, 8)}`,
         status: 'authorized', tryCount: 1, authorizedByAdminId: adminId,
       },
     });
     await tx.integrationOutbox.create({ data: eventData('attach', share, caseRecord, 1) });
-    await requestEvent(tx, { request, documentId: document.id, action: ACTION.DOCUMENT_SHARE_AUTHORIZED, adminId, detail: { shareId: share.id, generation } });
-    await audit(tx, { caseRecord, share, action: 'bitrix.deal.document.authorized', adminId, code: 'share_authorized' });
+    await requestEvent(tx, { request, documentId: document.id, action: ACTION.DOCUMENT_SHARE_AUTHORIZED, adminId, detail: { shareId: share.id, generation }, automation: auto });
+    await audit(tx, { caseRecord, share, action: 'bitrix.deal.document.authorized', adminId, code: auto ? 'share_auto_authorized' : 'share_authorized', automation: auto });
     return { share, alreadyAuthorized: false };
   });
 }

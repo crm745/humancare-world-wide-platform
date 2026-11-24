@@ -8,7 +8,7 @@ jest.mock('../../src/db/prisma', () => ({
 }));
 jest.mock('../../src/middleware/upload.middleware', () => {
   const pass = () => (_req, _res, next) => next();
-  return { UPLOAD_DIR: require('os').tmpdir(), upload: { single: pass, array: pass, fields: pass, any: pass, none: pass } };
+  return { UPLOAD_DIR: require('os').tmpdir(), upload: { single: pass, array: pass, fields: pass, any: pass, none: pass }, uploadPatient: { single: pass, array: pass, fields: pass, any: pass, none: pass } };
 });
 jest.mock('../../src/integrations/clamav/clamav', () => ({}));
 

@@ -9,7 +9,7 @@ const realStore = require('../../src/modules/bitrix/deal-outbox.store');
 const { BitrixDealCallError } = require('../../src/modules/bitrix/bitrix-deal.api');
 
 const { runDealWorker, LEASE_SECONDS, RECONCILE_FIRST_DELAY_SECONDS, RECONCILE_INTERVAL_SECONDS, RECONCILIATION_WINDOW_SECONDS } = worker;
-const ENV_ON = { BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true' };
+const ENV_ON = { BITRIX_DEAL_PROFILE: 'test', BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true' };
 const REF = 'HC-PC-000123';
 
 // ---- in-memory world ----------------------------------------------------------------------------------------------

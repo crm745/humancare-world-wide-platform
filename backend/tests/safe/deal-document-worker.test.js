@@ -197,6 +197,13 @@ describe('attaching an authorized document', () => {
     expect(auditActions()).toEqual(['bitrix.deal.document.attached']);
   });
 
+  test('a clean scan alone is enough: a document whose Admin review is still PENDING is attached (a rejected one never is, see below)', async () => {
+    world.documents.set(31, newDocument({ reviewStatus: 'pending' }));
+    addEvent();
+    expect(await run()).toEqual({ active: true, claimed: 1 });
+    expect(api.dealFiles.get(DEAL_ID)).toEqual(['1001', '1002', '7000000001']); // Operations' files kept, ours added
+    expect(share()).toMatchObject({ status: 'attached', bitrixFileId: '7000000001', lastError: null });
+  });
   test('sends the verified bytes as base64 under the share token, with the extension of the real type', async () => {
     addEvent();
     await run();
@@ -278,7 +285,7 @@ describe('attaching an authorized document', () => {
 });
 
 // ---- eligibility at send time -------------------------------------------------------------------------------------------------------
-describe('only what was authorized, still clean, approved and unchanged, is sent', () => {
+describe('only what was authorized, still clean, not rejected and unchanged, is sent', () => {
   test.each([
     ['a document that is no longer clean', () => world.documents.set(31, newDocument({ scanStatus: 'infected' })), 'document_not_clean_and_approved'],
     ['a document that is no longer approved', () => world.documents.set(31, newDocument({ reviewStatus: 'rejected' })), 'document_not_clean_and_approved'],

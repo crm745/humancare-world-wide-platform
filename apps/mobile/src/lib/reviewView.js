@@ -9,7 +9,7 @@
 //   - every field the form collects for the service is here (see FORM_FIELDS below, which the tests check against the draft).
 import { hasValue } from './emptyValue';
 import {
-  baseServiceName, countryLabel, extOf, formatDateOnly, genderLabel, isMortalKey, isTransportRequest, mobilityLabel, phoneLabel, relationLabel,
+  baseServiceName, charterTravelLabel, countryLabel, criticalLevelLabel, oxygenLabel, extOf, formatDateOnly, genderLabel, isMortalKey, isTransportRequest, mobilityLabel, phoneLabel, relationLabel,
   textOf, transferTypeKey, travelTypeKey, urgencyView,
 } from './requestDetailsView';
 import { serviceKeyOf } from './myRequestsView';
@@ -29,6 +29,8 @@ export const FORM_FIELDS = {
     location: 'trip', dest: 'trip', date: 'trip', urgency: 'medical', desc: 'medical', files: 'documents',
   },
   transport: { care: 'medical', mobility: 'medical', equipOxygen: 'medical', equipCardiac: 'medical', equipVentilator: 'medical' },
+  // Private Charter (revised form) asks these in place of care level, mobility, equipment and urgency.
+  privatecharter: { travelType: 'trip', criticalLevel: 'medical', oxygenRequired: 'medical', oxygenFlowLpm: 'medical' },
   commercialair: { airlineMode: 'trip' },
   mortal: { mortalTransfer: 'trip', relation: 'patient', deathPlace: 'patient', deathDate: 'patient' },
 };
@@ -44,6 +46,7 @@ export function reviewView(draft, service, t) {
   // The same service object Request Details works from, so the same helpers apply.
   const asRequest = { serviceKey: service.key, serviceType: service.title };
   const mortal = isMortalKey(asRequest);
+  const charter = asRequest.serviceKey === 'privatecharter';
   const transport = isTransportRequest(asRequest);
   const travel = travelTypeKey(asRequest);
   const transfer = transferTypeKey(asRequest);
@@ -62,10 +65,12 @@ export function reviewView(draft, service, t) {
   ]);
 
   const trip = {
+    charter: !!charter,
     from: textOf(d.location),
     to: textOf(d.dest),
     rows: compact([
       field('date', t(mortal ? 'rd_date_transfer' : 'rd_date_service'), formatDateOnly(d.date)),
+      field('travelType', t('field_travel_type'), charter ? charterTravelLabel(d.travelType, t) : ''),
       field('travel', t('field_airline_mode'), travel ? t(travel) : ''),
       field('transfer', t('field_mortal_transfer'), transfer ? t(transfer) : ''),
     ]),
@@ -74,12 +79,14 @@ export function reviewView(draft, service, t) {
   const items = transport ? EQUIPMENT.filter(([flag]) => d[flag] === true).map(([, key]) => t(key)) : [];
   const medical = {
     urgency: urgencyView(d.urgency, t),
-    conditionLabel: t(mortal ? 'req_details' : 'req_condition'),
+    conditionLabel: t(mortal ? 'req_details' : charter ? 'req_medical_history' : 'req_condition'),
     condition: textOf(d.desc),
     care: transport ? (Array.isArray(d.care) ? d.care.filter(hasValue).map((key) => t(key)) : []) : [],
     mobility: transport ? mobilityLabel(d.mobility, t) : '',
     // Only the items that are on: none on means the whole row is left out.
     equipment: items.length ? { items, none: false } : null,
+    criticalLevel: charter ? criticalLevelLabel(d.criticalLevel, t) : '',
+    oxygen: charter ? oxygenLabel(d.oxygenRequired, d.oxygenFlowLpm, t) : '',
   };
 
   const docType = t(mortal ? 'lbl_death_certificate' : 'lbl_medical_report');
@@ -95,7 +102,7 @@ export function reviewView(draft, service, t) {
     };
   });
 
-  const medicalShown = !!(medical.urgency || medical.condition || medical.care.length || medical.mobility || medical.equipment);
+  const medicalShown = !!(medical.urgency || medical.condition || medical.care.length || medical.mobility || medical.equipment || medical.criticalLevel || medical.oxygen);
   return {
     service: { key: serviceKeyOf(asRequest), name: baseServiceName(asRequest, t) },
     patient: { titleKey: mortal ? 'rd_deceased' : 'rd_patient', fields: patientFields },
@@ -116,7 +123,8 @@ export function reviewView(draft, service, t) {
 export function fieldsFor(serviceKey) {
   const base = String(serviceKey || '').split('_')[0];
   const out = { ...FORM_FIELDS.always };
-  if (['air', 'privatecharter', 'commercialair', 'ground'].includes(base)) Object.assign(out, FORM_FIELDS.transport);
+  if (base === 'privatecharter') Object.assign(out, FORM_FIELDS.privatecharter);
+  else if (['air', 'commercialair', 'ground'].includes(base)) Object.assign(out, FORM_FIELDS.transport);
   if (base === 'commercialair') Object.assign(out, FORM_FIELDS.commercialair);
   if (base === 'mortal') Object.assign(out, FORM_FIELDS.mortal);
   return out;

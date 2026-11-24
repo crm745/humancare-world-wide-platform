@@ -22,7 +22,8 @@ describe('request-tracking.js (patient)', () => {
   test('keeps the generic tracking for every other service, and draws whatever steps the model returns', () => {
     expect(adapter).toMatch(/const view = trackingView\(request\);/);
     expect(adapter).toMatch(/view\.steps\.map\(/);
-    expect(adapter).toMatch(/model\.milestones\.filter\(/);
+    // the milestones, or the five stages of a request in the five-stage journey (model.actualStages), filtered the same way
+    expect(adapter).toMatch(/\(Array\.isArray\(model\.actualStages\) \? model\.actualStages : model\.milestones\)\.filter\(/);
     expect(read('../../components/tracking/TrackingDetails.js')).toMatch(/d\.steps\.map\(/);
   });
 

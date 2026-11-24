@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const { requireAuth } = require('../../common/middleware/auth.middleware');
-const { upload } = require('../../middleware/upload.middleware');
+const { uploadPatient } = require('../../middleware/upload.middleware');
 const {
   submitRequest,
   listMyRequests,
@@ -21,7 +21,7 @@ requestsRouter.get('/me/:id', requireAuth(['patient']), getMyRequestById);
 requestsRouter.get('/me/:id/summary', requireAuth(['patient']), downloadRequestSummary);
 // The ONE active published quotation of the patient's own request (null when there is none).
 requestsRouter.get('/me/:id/quotation', requireAuth(['patient']), getMyRequestQuotation);
-requestsRouter.post('/me/:id/documents', requireAuth(['patient']), upload.single('file'), uploadRequestDocument);
+requestsRouter.post('/me/:id/documents', requireAuth(['patient']), uploadPatient.single('file'), uploadRequestDocument);
 // No unauthenticated "guest" lookup by reference + mobile — every case view requires
 // a logged-in session now, removed per product decision (no access without login).
 

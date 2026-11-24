@@ -62,7 +62,8 @@ const DOT = {
 //   stepTitleKey  the milestone's own title key, always (a cancelled row is announced by the step it stopped at)
 //   subKey    the supporting text key; a cancelled stop row says it was closed
 export function timelineRows(model) {
-  const milestones = Array.isArray(model?.milestones) ? model.milestones : [];
+  // A request in the actual pipeline shows its five approved stages; every other request shows the milestones.
+  const milestones = Array.isArray(model?.actualStages) ? model.actualStages : Array.isArray(model?.milestones) ? model.milestones : [];
   const shown = milestones.filter((m) => m && m.state !== MILESTONE_STATE.NOT_APPLICABLE && DOT[m.state]);
   return shown.map((m, i) => {
     const cancelled = m.state === MILESTONE_STATE.CANCELLED;

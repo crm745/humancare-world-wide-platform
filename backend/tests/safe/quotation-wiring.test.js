@@ -116,9 +116,12 @@ describe('the inbound Deal processor (which the reconciliation job also feeds)',
   test('the hook sits after the Deal is verified and before the stage is looked up; reconciliation is unchanged and still feeds this processor', () => {
     const source = read('src/modules/bitrix/deal-inbox.service.js');
     const at = (text) => source.indexOf(text);
-    expect(at("deal[FIELD.REFERENCE] !== caseRecord.referenceNumber")).toBeGreaterThan(-1);
-    expect(at('detectAndEnqueueQuotationSync(ctx.prisma')).toBeGreaterThan(at("deal[FIELD.REFERENCE] !== caseRecord.referenceNumber"));
-    expect(at('detectAndEnqueueQuotationSync(ctx.prisma')).toBeLessThan(at('lookupStage(deal.STAGE_ID'));
+    // The Deal is verified against the ACTIVE PROFILE (category and the profile's reference field) before the hook, which gets that profile.
+    const verified = "dealProblem(active, deal, claim.dealId, caseRecord.referenceNumber)";
+    expect(at(verified)).toBeGreaterThan(-1);
+    expect(at('detectAndEnqueueQuotationSync(ctx.prisma')).toBeGreaterThan(at(verified));
+    expect(source).toContain('detectAndEnqueueQuotationSync(ctx.prisma, caseRecord, deal, active)');
+    expect(at('detectAndEnqueueQuotationSync(ctx.prisma')).toBeLessThan(at('lookupProfileStage(active, deal.STAGE_ID'));
     expect(source).toMatch(/if \(isQuotationSyncActive\(ctx\.env\)\)/);
     const reconcile = read('src/modules/bitrix/deal-reconcile.service.js');
     expect(reconcile).toContain("eventType: 'ONCRMDEALUPDATE'");
@@ -305,8 +308,9 @@ describe('what the quotation sync must never do', () => {
     expect(read('src/modules/bitrix/deal-outbox.store.js')).not.toMatch(/quotation/i);
     expect(read('src/modules/bitrix/deal-worker.service.js')).not.toMatch(/quotation/i);
   });
-  test('no AWS dependency was added', () => {
-    const pkg = JSON.parse(read('package.json'));
-    expect(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter((n) => /aws|s3/i.test(n))).toEqual([]);
+  test('the quotation modules do not use AWS directly (quotations still use their own local storage)', () => {
+    for (const file of ['quotation-sync.service.js', 'quotation-scan.service.js', 'quotation-storage.js']) {
+      expect(read('src/modules/bitrix/' + file)).not.toMatch(/aws-sdk|S3Client/);
+    }
   });
 });

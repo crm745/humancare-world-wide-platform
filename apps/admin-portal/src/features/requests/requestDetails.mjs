@@ -30,6 +30,41 @@ export function mobilityLabel(value) {
     .join(', ');
 }
 
+const TRAVEL_TYPE_LABEL = { patient_transfer: 'Patient Transfer', organ_transfer: 'Organ Transfer' };
+const CRITICAL_LEVEL_LABEL = { icu: 'ICU', ventilated: 'Ventilated', tracheostomy: 'Tracheostomy', ecmo: 'ECMO' };
+
+/** Private Charter: "patient_transfer" -> "Patient Transfer". Anything else is shown as stored. */
+export function travelTypeLabel(value) {
+  if (!has(value)) return null;
+  return Object.hasOwn(TRAVEL_TYPE_LABEL, value) ? TRAVEL_TYPE_LABEL[value] : String(value);
+}
+
+/**
+ * Private Charter Critical Level is a multi-select. The request row holds the chosen keys joined by commas ("icu,ecmo"); an array is
+ * accepted too, and a value stored before the multi-select (one key, "ecmo") reads as a list of one.
+ * "icu,ecmo" -> "ICU, ECMO". A key this page does not know is shown as stored. null when nothing is stored.
+ */
+export function criticalLevelLabel(value) {
+  if (!has(value)) return null;
+  const keys = (Array.isArray(value) ? value : String(value).split(',')).map((key) => String(key).trim()).filter(Boolean);
+  if (!keys.length) return null;
+  const known = Object.keys(CRITICAL_LEVEL_LABEL).filter((key) => keys.includes(key)).map((key) => CRITICAL_LEVEL_LABEL[key]);
+  const other = keys.filter((key) => !Object.hasOwn(CRITICAL_LEVEL_LABEL, key));
+  return [...known, ...other].join(', ');
+}
+
+/** Private Charter names its two cities "Origin City" and "Destination City"; every other service keeps "Origin" and "Destination". */
+export function cityLabels(serviceKey) {
+  return serviceKey === 'privatecharter' ? { origin: 'Origin City', destination: 'Destination City' } : { origin: 'Origin', destination: 'Destination' };
+}
+
+/** Private Charter oxygen: "No", "Yes, 4 LPM", or "Yes" when the rate is missing. null when the request has no answer (older requests). */
+export function oxygenLabel(request) {
+  if (request.oxygenRequired === true) return Number.isInteger(request.oxygenFlowLpm) ? `Yes, ${request.oxygenFlowLpm} LPM` : 'Yes';
+  if (request.oxygenRequired === false) return 'No';
+  return null;
+}
+
 export function capitalise(value) {
   return has(value) ? String(value).charAt(0).toUpperCase() + String(value).slice(1) : null;
 }

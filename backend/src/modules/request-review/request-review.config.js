@@ -67,6 +67,8 @@ const ACTION = {
   STATUS_CHANGED: 'status_changed',
   REQUEST_APPROVED: 'request_approved',
   CASE_CREATED: 'case_created',
+  // Written once by the automatic Private Charter approval (auto-approval.js) after the approval committed.
+  AUTO_APPROVED: 'auto_approved',
   // Bitrix Deal document sharing (Admin authorization is separate from document review) and post-Case document requests.
   DOCUMENT_SHARE_AUTHORIZED: 'document_share_authorized',
   DOCUMENT_SHARE_REVOKED: 'document_share_revoked',

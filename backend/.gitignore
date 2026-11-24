@@ -14,3 +14,8 @@ node_modules
 # Test-only folders (isolated uploads and captured mail; mail holds one-time tokens)
 .e2e-uploads/
 .e2e-mail/
+
+# Synthetic E2E orchestrator: per-run manifests/reports/screenshots and operator-local config (never commit)
+/.synthetic-e2e-runs/
+/scripts/synthetic-e2e-orchestrator/phone-pool.local.json
+/scripts/synthetic-e2e-orchestrator/network-risk-acknowledgment.local.json

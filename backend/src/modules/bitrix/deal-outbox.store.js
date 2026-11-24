@@ -15,6 +15,10 @@ const { DEAL_CREATE_EVENT, DEAL_ENTITY_TYPE, dealRecoveryIdempotencyKey } = requ
 // A manual-review marker, in last_error (the status vocabulary is fixed by M6, so "ambiguous" stays the status).
 const MANUAL_REVIEW_PREFIX = 'manual_review_required';
 const MAX_ERROR_LENGTH = 500;
+// The visible name prefix of the synthetic E2E orchestrator's identity. Its requests are approved and given a Case and an outbox event (so the whole
+// approval path is exercised), but that identity must NEVER be dispatched to a live Bitrix24 portal: the candidate queries below never offer such an
+// event, in any status, for any profile, whatever it is stamped with. It is a literal here on purpose: this module must not depend on the synthetic engine.
+const SYNTHETIC_IDENTITY_PREFIX = 'ZZ-SYNTHETIC';
 
 const toNumber = (value) => (value == null ? null : Number(value));
 
@@ -29,6 +33,7 @@ function cleanError(text) {
 // review are never offered again. A NEW (pending) event is offered only when its request is APPROVED: a draft or an
 // unapproved request never creates a Deal. An ambiguous event (a call may already have been made) is still offered
 // for reconciliation whatever the request's state.
+// An event whose request carries the synthetic E2E identity (patient name starting with SYNTHETIC_IDENTITY_PREFIX) is never offered, in either statement.
 // A SCOPE limits a pass to the events of the listed Cases only (used by the guarded test worker, scripts/e2e-worker.js):
 // 1 to MAX_SCOPE_CASES positive whole Case ids. An empty or malformed list is refused, never read as "everything".
 const MAX_SCOPE_CASES = 50;
@@ -40,6 +45,18 @@ function normalizeCaseIds(caseIds) {
   return [...new Set(caseIds)];
 }
 const marks = (list) => list.map(() => '?').join(', ');
+
+// An EVENT scope narrows a Case scope further, to exact outbox event ids (used by the single-event dispatch, single-event-dispatch.js). Same rules as
+// the Case ids: 1 to MAX_SCOPE_CASES positive whole numbers, an empty or malformed list is refused (never read as "everything"), and it only makes
+// sense TOGETHER with a Case scope, so an event scope alone is refused too.
+function normalizeEventIds(eventIds, caseIds) {
+  if (eventIds === undefined || eventIds === null) return null;
+  if (!Array.isArray(eventIds) || eventIds.length < 1 || eventIds.length > MAX_SCOPE_CASES || eventIds.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+    throw new Error(`An event scope needs 1 to ${MAX_SCOPE_CASES} positive whole event ids.`);
+  }
+  if (!caseIds) throw new Error('An event scope is only valid together with a Case scope.');
+  return [...new Set(eventIds)];
+}
 
 // The same statement as findCandidateIds below plus "AND o.case_id IN (...)". Kept as text next to it; a test compares
 // the two statements so they cannot drift apart.
@@ -58,16 +75,21 @@ const SCOPED_CANDIDATES_SQL = `
       AND (o.status <> 'pending' OR sr.review_status = 'approved')
       AND sr.bitrix_lead_id IS NULL
       AND (o.last_error IS NULL OR o.last_error NOT LIKE ?)
+      AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.payload, '$.profile')), 'test') = ?
+      AND sr.patient_name NOT LIKE ?
       AND o.case_id IN (%CASES%)
     ORDER BY o.id
     LIMIT ?`;
 
-async function findCandidateIds(db, status, limit, scope) {
+async function findCandidateIds(db, status, limit, scope, profile = null) {
   const caseIds = normalizeCaseIds(scope && scope.caseIds);
+  const eventIds = normalizeEventIds(scope && scope.eventIds, caseIds);
   if (caseIds) {
+    // With an event scope the statement gains one more condition, "AND o.id IN (...)", right before ORDER BY; without it the statement is unchanged.
+    const sql = SCOPED_CANDIDATES_SQL.replace('%CASES%', marks(caseIds)).replace('ORDER BY o.id', eventIds ? `AND o.id IN (${marks(eventIds)})\n    ORDER BY o.id` : 'ORDER BY o.id');
     const rows = await db.$queryRawUnsafe(
-      SCOPED_CANDIDATES_SQL.replace('%CASES%', marks(caseIds)),
-      DEAL_CREATE_EVENT, DEAL_ENTITY_TYPE, status, PRIVATE_CHARTER_KEY, `${MANUAL_REVIEW_PREFIX}%`, ...caseIds, limit,
+      sql,
+      DEAL_CREATE_EVENT, DEAL_ENTITY_TYPE, status, PRIVATE_CHARTER_KEY, `${MANUAL_REVIEW_PREFIX}%`, profile, `${SYNTHETIC_IDENTITY_PREFIX}%`, ...caseIds, ...(eventIds || []), limit,
     );
     return rows.map((row) => Number(row.id));
   }
@@ -86,6 +108,8 @@ async function findCandidateIds(db, status, limit, scope) {
       AND (o.status <> 'pending' OR sr.review_status = 'approved')
       AND sr.bitrix_lead_id IS NULL
       AND (o.last_error IS NULL OR o.last_error NOT LIKE ${`${MANUAL_REVIEW_PREFIX}%`})
+      AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.payload, '$.profile')), 'test') = ${profile}
+      AND sr.patient_name NOT LIKE ${`${SYNTHETIC_IDENTITY_PREFIX}%`}
     ORDER BY o.id
     LIMIT ${limit}`;
   return rows.map((row) => Number(row.id));
@@ -97,7 +121,7 @@ async function findCandidateIds(db, status, limit, scope) {
 async function claim(db, { id, fromStatus, workerId, leaseSeconds }) {
   return db.$transaction(async (tx) => {
     const rows = await tx.$queryRaw`
-      SELECT id, status, attempts, case_id, entity_type, entity_id, idempotency_key, external_call_started_at,
+      SELECT id, status, attempts, case_id, entity_type, entity_id, idempotency_key, external_call_started_at, payload,
              TIMESTAMPDIFF(SECOND, external_call_started_at, UTC_TIMESTAMP(3)) AS seconds_since_call
       FROM integration_outbox
       WHERE id = ${id}
@@ -140,6 +164,7 @@ async function claim(db, { id, fromStatus, workerId, leaseSeconds }) {
       caseId: toNumber(row.case_id),
       externalCallStartedAt: row.external_call_started_at ?? null,
       secondsSinceCall: toNumber(row.seconds_since_call),
+      payload: row.payload ?? null, // carries the Bitrix profile the event was queued for
     };
   });
 }
@@ -155,6 +180,21 @@ async function markExternalCallStarted(db, claimed, minRemainingSeconds) {
       AND locked_until > UTC_TIMESTAMP(3) + INTERVAL ${minRemainingSeconds} SECOND
       AND external_call_started_at IS NULL`;
   return Number(changed) === 1;
+}
+
+// Puts an event back to 'pending' for a LATER retry, clearing the external-call evidence. ONLY for the case where Bitrix24 refused to execute
+// the call at all (rate limit, rejected credential): then no Deal can exist, and leaving the evidence set would send the retry to reconciliation,
+// which never creates a Deal. Fenced exactly like writeResult (same lease, same attempts value), so a worker that lost its lease writes nothing.
+// Returns the number of rows written (1 or 0).
+async function writeRetry(db, claimed, { lastError = null, delaySeconds = 60 }) {
+  const changed = await db.$executeRaw`
+    UPDATE integration_outbox
+    SET status = 'pending', last_error = ${cleanError(lastError)}, external_call_started_at = NULL,
+        next_attempt_at = UTC_TIMESTAMP(3) + INTERVAL ${delaySeconds} SECOND,
+        locked_by = NULL, locked_until = NULL, updated_at = UTC_TIMESTAMP(3)
+    WHERE id = ${claimed.id} AND status = 'processing' AND attempts = ${claimed.attempts} AND locked_by = ${claimed.workerId}
+      AND locked_until > UTC_TIMESTAMP(3) AND external_call_started_at IS NOT NULL`;
+  return Number(changed);
 }
 
 // The single fenced result UPDATE for completed / failed / ambiguous (and a reschedule). The lease is released.
@@ -176,25 +216,26 @@ async function writeResult(db, claimed, { status, lastError = null, delaySeconds
 //   (b) an external call WAS started      -> 'ambiguous' (outcome unknown; reconciliation, never a re-send).
 // 'failed' events are never touched.
 // With `caseIds` (a scope) the same three statements touch only the events of those Cases.
-async function recoverExpiredLeasesScoped(db, maxClaims, caseIds) {
-  const where = `event_type = ? AND status = 'processing' AND locked_until <= UTC_TIMESTAMP(3) AND case_id IN (${marks(caseIds)})`;
+async function recoverExpiredLeasesScoped(db, maxClaims, caseIds, eventIds = null) {
+  const where = `event_type = ? AND status = 'processing' AND locked_until <= UTC_TIMESTAMP(3) AND case_id IN (${marks(caseIds)})${eventIds ? ` AND id IN (${marks(eventIds)})` : ''}`;
+  const scopeParams = [...caseIds, ...(eventIds || [])];
   const failed = await db.$executeRawUnsafe(
     `UPDATE integration_outbox SET status = 'failed', last_error = 'lease_expired_repeatedly_before_any_external_call',
         locked_by = NULL, locked_until = NULL, updated_at = UTC_TIMESTAMP(3)
-     WHERE ${where} AND external_call_started_at IS NULL AND attempts >= ?`, DEAL_CREATE_EVENT, ...caseIds, maxClaims);
+     WHERE ${where} AND external_call_started_at IS NULL AND attempts >= ?`, DEAL_CREATE_EVENT, ...scopeParams, maxClaims);
   const pending = await db.$executeRawUnsafe(
     `UPDATE integration_outbox SET status = 'pending', next_attempt_at = UTC_TIMESTAMP(3), locked_by = NULL, locked_until = NULL, updated_at = UTC_TIMESTAMP(3)
-     WHERE ${where} AND external_call_started_at IS NULL AND attempts < ?`, DEAL_CREATE_EVENT, ...caseIds, maxClaims);
+     WHERE ${where} AND external_call_started_at IS NULL AND attempts < ?`, DEAL_CREATE_EVENT, ...scopeParams, maxClaims);
   const ambiguous = await db.$executeRawUnsafe(
     `UPDATE integration_outbox SET status = 'ambiguous', last_error = 'lease_expired_during_external_call',
         next_attempt_at = UTC_TIMESTAMP(3), locked_by = NULL, locked_until = NULL, updated_at = UTC_TIMESTAMP(3)
-     WHERE ${where} AND external_call_started_at IS NOT NULL`, DEAL_CREATE_EVENT, ...caseIds);
+     WHERE ${where} AND external_call_started_at IS NOT NULL`, DEAL_CREATE_EVENT, ...scopeParams);
   return { failed: Number(failed), pending: Number(pending), ambiguous: Number(ambiguous) };
 }
 
-async function recoverExpiredLeases(db, { maxClaims, caseIds }) {
+async function recoverExpiredLeases(db, { maxClaims, caseIds, eventIds }) {
   const scoped = normalizeCaseIds(caseIds);
-  if (scoped) return recoverExpiredLeasesScoped(db, maxClaims, scoped);
+  if (scoped) return recoverExpiredLeasesScoped(db, maxClaims, scoped, normalizeEventIds(eventIds, scoped));
   const failed = await db.$executeRaw`
     UPDATE integration_outbox
     SET status = 'failed', last_error = 'lease_expired_repeatedly_before_any_external_call',
@@ -216,6 +257,6 @@ async function recoverExpiredLeases(db, { maxClaims, caseIds }) {
 }
 
 module.exports = {
-  normalizeCaseIds, MAX_SCOPE_CASES, SCOPED_CANDIDATES_SQL,
-  findCandidateIds, claim, markExternalCallStarted, writeResult, recoverExpiredLeases, cleanError, MANUAL_REVIEW_PREFIX,
+  normalizeCaseIds, normalizeEventIds, MAX_SCOPE_CASES, SCOPED_CANDIDATES_SQL, SYNTHETIC_IDENTITY_PREFIX,
+  findCandidateIds, claim, markExternalCallStarted, writeResult, writeRetry, recoverExpiredLeases, cleanError, MANUAL_REVIEW_PREFIX,
 };

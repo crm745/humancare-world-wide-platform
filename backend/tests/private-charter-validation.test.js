@@ -71,13 +71,11 @@ const valid = () => ({
   destination: { geonameId: IDS.MUMBAI },
   patientContact: '+971501234567',
   preferredDate: soon(),
-  careLevel: ['care_icu'],
+  travelType: 'patient_transfer',
   description: 'Post-op, BP <90/60, on O2 2 L/min',
-  mobility: 'bedridden',
-  equipOxygen: true,
-  equipCardiacMonitor: false,
-  equipVentilator: false,
-  urgency: 'critical_6h',
+  criticalLevel: ['icu'],
+  oxygenRequired: true,
+  oxygenFlowLpm: 2,
 });
 
 beforeEach(() => {
@@ -114,17 +112,19 @@ describe('Private Charter: accepted request', () => {
       patientGender: 'female',
       country: 'AE',
       patientContact: '+971501234567',
-      careLevel: 'care_icu',
-      mobility: 'bedridden',
-      equipOxygen: true,
-      urgency: 'critical_6h',
+      travelType: 'patient_transfer',
+      criticalLevel: ['icu'],
+      oxygenRequired: true,
+      oxygenFlowLpm: 2,
     });
+    // The removed fields are never passed on.
+    for (const gone of ['careLevel', 'mobility', 'urgency', 'equipOxygen', 'equipCardiacMonitor', 'equipVentilator']) expect(data).not.toHaveProperty(gone);
   });
 
   it('accepts a request without optional fields and without serviceType (derived by the backend)', async () => {
     const body = valid();
     delete body.serviceType; delete body.description;
-    delete body.equipOxygen; delete body.equipCardiacMonitor; delete body.equipVentilator;
+    body.oxygenRequired = false; delete body.oxygenFlowLpm;
     const res = await post(body);
     expect(res.status).toBe(201);
     expect(createRequest.mock.calls[0][1].serviceType).toBe('Private Charter Air Ambulance Service');
@@ -138,7 +138,7 @@ describe('Private Charter: accepted request', () => {
 
 describe('Private Charter: every required field missing', () => {
   const required = ['patientName', 'patientAge', 'patientGender', 'country', 'origin', 'destination',
-    'patientContact', 'preferredDate', 'careLevel', 'mobility', 'urgency'];
+    'patientContact', 'preferredDate', 'travelType', 'criticalLevel', 'oxygenRequired'];
 
   it.each(required)('refuses a request without %s', async (field) => {
     const body = valid();
@@ -256,7 +256,7 @@ describe('Private Charter: origin and destination cities', () => {
   it.each(['origin', 'destination'])('refuses a geonameId in %s that is not a positive whole number', async (field) => {
     for (const geonameId of ['1275339', '', 0, -5, 1.5, 2147483648, Number.MAX_SAFE_INTEGER, true, null, [1275339], { id: 1 }]) {
       const res = await refused({ ...valid(), [field]: { geonameId } }, field);
-      expect(res.body.fields[field]).toMatch(/geonameId|Send only|Select/);
+      expect(res.body.fields[field]).toMatch(/geonameId|only|Select/);
       createRequest.mockClear();
     }
   });
@@ -264,7 +264,7 @@ describe('Private Charter: origin and destination cities', () => {
   it.each(['origin', 'destination'])('refuses a city that does not exist or is historical, in %s', async (field) => {
     for (const geonameId of [IDS.NOT_IN_TABLE, IDS.HISTORICAL, 1]) {
       const res = await refused({ ...valid(), [field]: { geonameId } }, field);
-      expect(res.body.fields[field]).toBe('Select a valid city from the list.');
+      expect(res.body.fields[field]).toBe('Select a valid city from the list, or enter the city name.');
       createRequest.mockClear();
     }
   });
@@ -285,6 +285,23 @@ describe('Private Charter: origin and destination cities', () => {
       destinationCountryCode: 'AE',
     });
     expect(data).not.toHaveProperty('destinationTimezone');
+  });
+
+  it('accepts a city typed by hand (not in GeoNames) for either city, stored with no GeoNames id and no timezone', async () => {
+    const res = await post({ ...valid(), origin: { name: 'Smallville  North', countryCode: 'AE' }, destination: { name: 'Karachi' } });
+    expect(res.status).toBe(201);
+    const data = createRequest.mock.calls[0][1];
+    expect(data).toMatchObject({
+      origin: 'Smallville North, United Arab Emirates', originCityName: 'Smallville North', originCountryCode: 'AE',
+      destination: 'Karachi', destinationCityName: 'Karachi', destinationCountryCode: null,
+    });
+    for (const absent of ['originGeonameId', 'destinationGeonameId', 'originTimezone']) expect(data).not.toHaveProperty(absent);
+  });
+
+  it('a request with several critical levels passes them on as an ordered list', async () => {
+    const res = await post({ ...valid(), criticalLevel: ['ecmo', 'icu'] });
+    expect(res.status).toBe(201);
+    expect(createRequest.mock.calls[0][1].criticalLevel).toEqual(['icu', 'ecmo']);
   });
 
   it('tells two cities of the same name apart by id', () => {
@@ -311,7 +328,7 @@ describe('Private Charter: origin and destination cities', () => {
   it('refuses a looked-up city that is not the one the reference names', () => {
     const body = { ...valid(), origin: { geonameId: IDS.MUMBAI } };
     const { fields } = validatePrivateCharterRequest(body, { cities: { origin: verifiedCity(IDS.DUBAI), destination: verifiedCity(IDS.MUMBAI) } });
-    expect(fields.origin).toBe('Select a valid city from the list.');
+    expect(fields.origin).toBe('Select a valid city from the list, or enter the city name.');
   });
 
   it('refuses an origin whose record has no usable timezone', () => {
@@ -449,72 +466,54 @@ describe('Private Charter: preferred date', () => {
   });
 });
 
-describe('Private Charter: care level', () => {
+describe('Private Charter: travel type, critical level and oxygen (revised form)', () => {
   it.each([
-    ['unknown key', ['care_vip']], ['empty array', []], ['an empty string', ''], ['duplicate keys', ['care_icu', 'care_icu']],
-    ['care_na with another', ['care_na', 'care_icu']], ['another with care_na', ['care_stable', 'care_na']],
-    ['care_na among several', ['care_icu', 'care_na', 'care_stable']], ['a known and an unknown key', ['care_icu', 'care_vip']],
-    ['a number in the list', ['care_icu', 3]], ['an object', { care_icu: true }], ['a number', 1], ['a boolean', true],
-    ['a key among the legacy labels', 'care_icu'], ['an unknown label', 'Intensive'], ['a label and an unknown label', 'ICU / Critical, Intensive'],
-  ])('refuses %s', async (_label, value) => {
-    await expectRefused({ ...valid(), careLevel: value }, 'careLevel');
+    ['unknown', 'cargo'], ['a label', 'Patient Transfer'], ['upper case', 'ORGAN_TRANSFER'], ['a number', 1], ['a boolean', true], ['an empty array', []],
+    ['a list', ['patient_transfer']], ['an object', {}], ['empty', ''],
+  ])('refuses a travel type that is %s', async (_label, value) => {
+    await expectRefused({ ...valid(), travelType: value }, 'travelType');
+  });
+  it.each(['patient_transfer', 'organ_transfer'])('accepts travel type %s', (travelType) => {
+    expect(validate({ ...valid(), travelType }).data.travelType).toBe(travelType);
   });
 
   it.each([
-    [['care_icu', 'care_stable'], 'care_icu,care_stable'],
-    [['care_stable', 'care_icu'], 'care_icu,care_stable'], // stored in the fixed order, whatever order was sent
-    [['care_icu', 'care_stable', 'care_ambulatory'], 'care_icu,care_stable,care_ambulatory'],
-    [['care_ambulatory', 'care_icu'], 'care_icu,care_ambulatory'],
-  ])('accepts several care levels %j and stores them joined with commas: %s', (value, stored) => {
-    const { data, fields } = validate({ ...valid(), careLevel: value });
-    expect(fields.careLevel).toBeUndefined();
-    expect(data.careLevel).toBe(stored);
+    ['a bare string', 'icu'], ['a number', 1], ['an object', {}], ['empty', ''], ['an empty list', []], ['an unknown key', ['stable']], ['a label', ['ICU / Critical']],
+    ['an old care key', ['care_icu']], ['a duplicate', ['icu', 'icu']], ['a number in the list', [1]], ['a null in the list', [null]], ['too many', ['icu', 'ventilated', 'tracheostomy', 'ecmo', 'icu']],
+  ])('refuses a critical level that is %s (it is a list of one or more distinct choices)', async (_label, value) => {
+    await expectRefused({ ...valid(), criticalLevel: value }, 'criticalLevel');
+  });
+  it.each([['icu'], ['ecmo'], ['icu', 'ecmo'], ['ecmo', 'icu', 'ventilated', 'tracheostomy']])('accepts critical level %j and returns it in form order', (...levels) => {
+    const sent = validate({ ...valid(), criticalLevel: levels }).data.criticalLevel;
+    expect(sent).toEqual(['icu', 'ventilated', 'tracheostomy', 'ecmo'].filter((key) => levels.includes(key)));
   });
 
-  it('Not Applicable is exclusive, with a clear message, and nothing is kept', () => {
-    for (const value of [['care_na', 'care_icu'], ['care_icu', 'care_na'], ['care_icu', 'care_na', 'care_stable']]) {
-      const { data, fields } = validate({ ...valid(), careLevel: value });
-      expect(fields.careLevel).toBe('Not Applicable cannot be combined with another care level.');
-      expect(data.careLevel).toBeUndefined();
+  it.each([['a string', 'yes'], ['the text true', 'true'], ['a number', 1], ['empty', ''], ['a list', []]])('Oxygen Required must be a strict boolean: refuses %s', async (_label, value) => {
+    await expectRefused({ ...valid(), oxygenRequired: value }, 'oxygenRequired');
+  });
+  it('Oxygen Required Yes needs a whole flow rate of 1 to 60 LPM', async () => {
+    const withRate = (oxygenFlowLpm) => ({ ...valid(), oxygenRequired: true, oxygenFlowLpm });
+    for (const value of [undefined, null, '', 0, 61, 2.5, 'abc', '2.5', -3, true]) {
+      await expectRefused(withRate(value), 'oxygenFlowLpm');
+      createRequest.mockClear();
     }
+    for (const value of [1, 60, '12']) expect(validate(withRate(value)).data.oxygenFlowLpm).toBe(Number(value));
+  });
+  it('Oxygen Required No stores no flow rate, and a flow rate sent with No is refused', async () => {
+    const no = { ...valid(), oxygenRequired: false };
+    delete no.oxygenFlowLpm;
+    const { data, fields } = validate(no);
+    expect(fields).toEqual({});
+    expect(data.oxygenRequired).toBe(false);
+    expect(data).not.toHaveProperty('oxygenFlowLpm');
+    await expectRefused({ ...no, oxygenFlowLpm: 4 }, 'oxygenFlowLpm');
   });
 
-  it('a repeated care level is refused with its own message', () => {
-    expect(validate({ ...valid(), careLevel: ['care_icu', 'care_icu'] }).fields.careLevel).toBe('Each care level can be selected only once.');
-  });
-
-  it.each(['care_icu', 'care_stable', 'care_ambulatory', 'care_na'])('accepts the single key %s and stores it as it is', (key) => {
-    const { data, fields } = validate({ ...valid(), careLevel: [key] });
-    expect(fields.careLevel).toBeUndefined();
-    expect(data.careLevel).toBe(key);
-  });
-
-  it('accepts care_na on its own', () => {
-    expect(validate({ ...valid(), careLevel: ['care_na'] }).data.careLevel).toBe('care_na');
-  });
-
-  it('turns the legacy joined labels of every app language into keys and records it', () => {
-    for (const [key, labels] of Object.entries(CARE_LEVEL_LEGACY_LABELS)) {
-      for (const label of labels) {
-        const { data, fields, legacy } = validate({ ...valid(), careLevel: label });
-        expect(fields.careLevel).toBeUndefined();
-        expect(data.careLevel).toBe(key);
-        expect(legacy).toContain('careLevel');
-      }
-    }
-  });
-
-  it('accepts several legacy labels joined in one string (the multi-select), stored as keys in the fixed order', () => {
-    const { data, fields, legacy } = validate({ ...valid(), careLevel: 'ICU / गंभीर, स्थिर / निगरानी में' });
-    expect(fields.careLevel).toBeUndefined();
-    expect(data.careLevel).toBe('care_icu,care_stable');
-    expect(legacy).toContain('careLevel');
-    expect(validate({ ...valid(), careLevel: 'Stable / Monitored, ICU / Critical' }).data.careLevel).toBe('care_icu,care_stable');
-  });
-
-  it('still refuses legacy labels that repeat a level or combine Not Applicable with another', () => {
-    expect(validate({ ...valid(), careLevel: 'Not Applicable, ICU / Critical' }).fields.careLevel).toBe('Not Applicable cannot be combined with another care level.');
-    expect(validate({ ...valid(), careLevel: 'ICU / Critical, ICU / गंभीर' }).fields.careLevel).toBe('Each care level can be selected only once.');
+  it.each([
+    ['careLevel', ['care_icu']], ['careLevel', 'ICU / Critical'], ['mobility', 'walking'], ['mobility', ['walking']], ['urgency', 'planned'],
+    ['equipOxygen', true], ['equipCardiacMonitor', false], ['equipVentilator', true],
+  ])('the removed field %s is refused, not silently dropped', async (field, value) => {
+    await expectRefused({ ...valid(), [field]: value }, field);
   });
 
   it('covers every care_* label of every language in the mobile app', () => {
@@ -557,55 +556,6 @@ describe('Private Charter: medical description', () => {
   it.each([['a NUL character', 'pt stable\u0000'], ['a number', 90], ['an array', ['BP <90']], ['an object', { text: 'x' }], ['a boolean', false]])(
     'refuses %s', async (_label, value) => { await expectRefused({ ...valid(), description: value }, 'description'); },
   );
-});
-
-describe('Private Charter: mobility, urgency and equipment', () => {
-  it.each([['mobility', 'crawling'], ['mobility', 'Walking'], ['mobility', 1], ['mobility', true], ['mobility', {}], ['mobility', []], ['mobility', ''],
-    ['mobility', ['walking', 'crawling']], ['mobility', ['walking', 'walking']], ['mobility', ['walking', 1]], ['mobility', ['Walking']], ['mobility', ['walking,wheelchair']],
-    ['urgency', 'urgent'], ['urgency', 'critical'], ['urgency', 'routine'], ['urgency', 'URGENT_24H'], ['urgency', ['planned']]])(
-    'refuses %s = %j', async (field, value) => { await expectRefused({ ...valid(), [field]: value }, field); },
-  );
-
-  it.each(['bedridden', 'wheelchair', 'walking'])('accepts mobility %s (one string, as older app builds send it)', (mobility) => {
-    expect(validate({ ...valid(), mobility }).data.mobility).toBe(mobility);
-  });
-
-  it.each([
-    [['walking'], 'walking'],
-    [['bedridden', 'wheelchair'], 'bedridden,wheelchair'],
-    [['walking', 'bedridden'], 'bedridden,walking'], // fixed order, whatever order was sent
-    [['bedridden', 'wheelchair', 'walking'], 'bedridden,wheelchair,walking'],
-  ])('accepts several mobility options %j and stores them joined with commas: %s', (mobility, stored) => {
-    const { data, fields } = validate({ ...valid(), mobility });
-    expect(fields.mobility).toBeUndefined();
-    expect(data.mobility).toBe(stored);
-  });
-
-  it('at least one mobility option is required, a repeated one is refused with its own message, and an unknown one names the allowed values', () => {
-    expect(validate({ ...valid(), mobility: [] }).fields.mobility).toBe('Mobility is required.');
-    expect(validate({ ...valid(), mobility: undefined }).fields.mobility).toBe('Mobility is required.');
-    expect(validate({ ...valid(), mobility: ['walking', 'walking'] }).fields.mobility).toBe('Each mobility option can be selected only once.');
-    expect(validate({ ...valid(), mobility: ['walking', 'flying'] }).fields.mobility).toBe('Mobility must be one of: bedridden, wheelchair, walking.');
-  });
-
-  it('the longest stored mobility value fits the widened column (VARCHAR(191)) and not the old one (16)', () => {
-    const stored = validate({ ...valid(), mobility: ['bedridden', 'wheelchair', 'walking'] }).data.mobility;
-    expect(stored.length).toBeGreaterThan(16);
-    expect(stored.length).toBeLessThanOrEqual(191);
-  });
-
-  it.each(['critical_6h', 'urgent_24h', 'planned'])('keeps urgency %s as it is', (urgency) => {
-    expect(validate({ ...valid(), urgency }).data.urgency).toBe(urgency);
-  });
-
-  it.each(['equipOxygen', 'equipCardiacMonitor', 'equipVentilator'])('requires %s to be a strict boolean', async (field) => {
-    for (const value of ['true', 'false', 1, 0, 'yes', null, [], {}]) {
-      await expectRefused({ ...valid(), [field]: value }, field);
-      createRequest.mockClear();
-    }
-    expect(validate({ ...valid(), [field]: true }).data[field]).toBe(true);
-    expect(validate({ ...valid(), [field]: false }).data[field]).toBe(false);
-  });
 });
 
 describe('Private Charter: service key and type', () => {
@@ -719,6 +669,7 @@ describe('Private Charter: no write when validation fails', () => {
     const bad = [
       { ...valid(), patientAge: 0 }, { ...valid(), patientGender: 'x' }, { ...valid(), careLevel: ['care_na', 'care_icu'] },
       { ...valid(), preferredDate: '2020-01-01' }, { ...valid(), dateOfDeath: '2026-01-01' }, { ...valid(), urgency: 'urgent' },
+      { ...valid(), travelType: 'cargo' }, { ...valid(), criticalLevel: 'stable' }, { ...valid(), oxygenFlowLpm: 0 },
     ];
     for (const body of bad) expect((await post(body)).status).toBe(400);
     expect(createRequest).not.toHaveBeenCalled();

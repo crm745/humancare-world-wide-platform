@@ -6,16 +6,19 @@
 // database. Callers should wrap these in try/catch and log-and-continue.
 
 const { isBitrixSyncEnabled } = require('./bitrix-config');
-const fs = require('fs/promises');
-const path = require('path');
+const { sharedDispatcher } = require('./queue/dispatcher');
 const { buildLeadFields, medicalReportFields, MEDICAL_REPORT_FIELD } = require('./bitrix-lead');
-const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
+const { readBuffer } = require('../../storage');
+const { keyFromStoredReference } = require('../../storage/keys');
 
 const WEBHOOK_URL = process.env.BITRIX24_WEBHOOK_URL;
 const REQUEST_TIMEOUT_MS = 15000; // Bitrix webhooks normally respond in well under a second.
 
 // Last line of defence: even a caller that forgot to check the switch can't reach
 // the CRM while it's off (see bitrix-config.js).
+//
+// The portal's rate limit and circuit breaker are SHARED with the Deal, document and quotation workers (queue/dispatcher.js). A call the gateway
+// refuses was never sent: the error carries `deferred: true` so the retry job does not count it as a failed attempt.
 async function callBitrix(method, payload) {
   if (!isBitrixSyncEnabled()) {
     throw new Error('Bitrix24 sync is switched off (BITRIX_SYNC_ENABLED is not "true")');
@@ -23,6 +26,12 @@ async function callBitrix(method, payload) {
   if (!WEBHOOK_URL) {
     throw new Error('BITRIX24_WEBHOOK_URL is not set');
   }
+  return sharedDispatcher().run(() => exchange(method, payload), {
+    refuse: (reason) => Object.assign(new Error(`Bitrix24 ${method} deferred by the shared gateway (${reason}); nothing was sent`), { deferred: true, code: 'gate_closed' }),
+  });
+}
+
+async function exchange(method, payload) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let res;
@@ -44,7 +53,7 @@ async function callBitrix(method, payload) {
   // here and mask the real `!res.ok` failure below with a generic parse error instead.
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) {
-    throw new Error(`Bitrix24 ${method} failed (HTTP ${res.status}): ${data.error_description || data.error || 'no error details in response'}`);
+    throw Object.assign(new Error(`Bitrix24 ${method} failed (HTTP ${res.status}): ${data.error_description || data.error || 'no error details in response'}`), { httpStatus: res.status, ...(typeof data.error === 'string' && { bitrixCode: data.error.slice(0, 64) }) });
   }
   // A 2xx with no `result` is just as ambiguous as an error — treat it as a failure
   // instead of letting `undefined` flow back to the caller and get silently dropped
@@ -71,7 +80,7 @@ async function createLead(input) {
 // is a single-file field the new file replaces the old one, as before. `comments` (the lead
 // comment with every report's name in it) is written in the same call when given.
 async function attachMedicalReport(leadId, document, { comments } = {}) {
-  const content = await fs.readFile(path.join(UPLOAD_DIR, path.basename(document.fileUrl)));
+  const content = await readBuffer(keyFromStoredReference(document.fileUrl));
   const fields = medicalReportFields(document.name, content);
   const lead = await callBitrix('crm.lead.get', { id: leadId });
   const existing = lead && lead[MEDICAL_REPORT_FIELD];

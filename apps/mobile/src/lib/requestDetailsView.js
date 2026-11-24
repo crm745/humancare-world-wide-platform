@@ -140,6 +140,24 @@ export const mobilityLabel = (value, t) => {
   return keys.map((v) => (['bedridden', 'wheelchair', 'walking'].includes(v) ? t(`mobility_${v}`) : v)).join(', ');
 };
 
+// Private Charter (revised form): the answers read in the app's language. A value we do not know is shown as stored; nothing is invented.
+const TRAVEL_TYPE_KEYS = ['patient_transfer', 'organ_transfer'];
+const CRITICAL_LEVEL_KEYS = ['icu', 'ventilated', 'tracheostomy', 'ecmo'];
+export const charterTravelLabel = (value, t) => { const v = textOf(value); return TRAVEL_TYPE_KEYS.includes(v) ? t(`travel_${v}`) : v; };
+// Critical Level is a multi-select: a list of keys (the server sends a list; one stored before the multi-select is a list of one), or keys joined with commas.
+// Each known key is translated, in the order of the form; a value we do not know is shown as stored.
+export const criticalLevelLabel = (value, t) => {
+  const keys = (Array.isArray(value) ? value : [value]).flatMap((item) => textOf(item).split(',')).map((key) => key.trim()).filter(Boolean);
+  const known = CRITICAL_LEVEL_KEYS.filter((key) => keys.includes(key));
+  const other = keys.filter((key) => !CRITICAL_LEVEL_KEYS.includes(key));
+  return [...known.map((key) => t(`critical_${key}`)), ...other].join(', ');
+};
+// "No", "Yes, 4 LPM" ("Yes" without a rate); '' when the question was not asked (older requests).
+export function oxygenLabel(required, lpm, t) {
+  if (required === true) return Number.isInteger(Number(lpm)) && Number(lpm) > 0 ? `${t('req_yes')}, ${Number(lpm)} LPM` : t('req_yes');
+  return required === false ? t('req_no') : '';
+}
+
 // One chip per care level (careLevelText translates known keys and leaves older labels as stored).
 export function careChips(value, t) {
   const text = careLevelText(textOf(value), t);
@@ -276,21 +294,25 @@ export function detailsView(request, t) {
       ]),
     },
     trip: {
+      charter: textOf(request.serviceKey) === 'privatecharter', // Private Charter names them Origin City / Destination City
       from: textOf(request.origin),
       to: textOf(request.destination),
       rows: compact([
         field('date', t(mortal ? 'rd_date_transfer' : 'rd_date_service'), formatDateOnly(request.preferredDate)),
+        field('travelType', t('field_travel_type'), charterTravelLabel(request.travelType, t)),
         field('travel', t('field_airline_mode'), travel ? t(travel) : ''),
         field('transfer', t('field_mortal_transfer'), transfer ? t(transfer) : ''),
       ]),
     },
     medical: {
       urgency,
-      conditionLabel: t(mortal ? 'req_details' : 'req_condition'),
+      conditionLabel: t(mortal ? 'req_details' : request.serviceKey === 'privatecharter' ? 'req_medical_history' : 'req_condition'),
       condition: textOf(request.description),
       care,
       mobility,
       equipment,
+      criticalLevel: criticalLevelLabel(request.criticalLevel, t),
+      oxygen: oxygenLabel(request.oxygenRequired, request.oxygenFlowLpm, t),
     },
     documents: docs,
     // The bottom bar (and only it) opens live tracking.

@@ -2,7 +2,7 @@ const { prisma } = require('../../db/prisma');
 const { createLead } = require('../bitrix/bitrix.service');
 const { leadInputFromRequest } = require('../bitrix/bitrix-lead');
 const { isBitrixSyncEnabled, isPrivateCharterDealRequested } = require('../bitrix/bitrix-config');
-const { URGENCY_TO_CASE, PRIVATE_CHARTER_KEY } = require('../../common/constants/request.constants');
+const { URGENCY_TO_CASE, PRIVATE_CHARTER_KEY, criticalLevelColumn } = require('../../common/constants/request.constants');
 const { isRequestReviewEnabled, PATIENT_DOCUMENT_SELECT } = require('../request-review/request-review.config');
 const { createReviewRequest } = require('../request-review/request-review.service');
 const { SAFE_DOCUMENT_SELECT } = require('../documents/document-response');
@@ -45,6 +45,10 @@ async function createRequest(userId, data) {
     equipCardiacMonitor,
     equipVentilator,
     urgency,
+    travelType,
+    criticalLevel,
+    oxygenRequired,
+    oxygenFlowLpm,
   } = data;
 
   // Create first so we have an id, then stamp a human-friendly reference number onto it.
@@ -80,6 +84,10 @@ async function createRequest(userId, data) {
       equipCardiacMonitor: equipCardiacMonitor ?? null,
       equipVentilator: equipVentilator ?? null,
       urgency: urgency || null,
+      travelType: travelType || null,
+      criticalLevel: criticalLevelColumn(criticalLevel), // an array of keys is stored joined by commas
+      oxygenRequired: oxygenRequired ?? null,
+      oxygenFlowLpm: oxygenFlowLpm ?? null,
       referenceNumber: `TEMP-${Date.now()}`,
       status: 'submitted',
     },
@@ -149,7 +157,13 @@ async function listRequestsForUser(userId, { status } = {}) {
     }
     where.status = status;
   }
-  return prisma.serviceRequest.findMany({ where, orderBy: { createdAt: 'desc' } });
+  // The Case's status, its stage names and its Deal link's profile are loaded only to decide how each row is tracked (trackingFlow /
+  // trackingStage, see request-response.js). The Case itself is not sent in the list.
+  return prisma.serviceRequest.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    include: { case: { select: { status: true, bitrixDealLink: { select: { profile: true } }, stageEvents: { select: { stage: true } } } } },
+  });
 }
 
 async function getRequestForUser(userId, id) {
@@ -159,6 +173,8 @@ async function getRequestForUser(userId, id) {
       case: {
         include: {
           stageEvents: { orderBy: { occurredAt: 'asc' } },
+          // Only the Deal link's profile, to decide how the request is tracked (never sent as such: see request-response.js).
+          bitrixDealLink: { select: { profile: true } },
           documents: { select: SAFE_DOCUMENT_SELECT },
           // What an Admin has asked the patient for after the approval (safe fields only).
           documentRequests: { where: { status: 'open' }, select: { id: true, description: true, reason: true, createdAt: true }, orderBy: { id: 'asc' } },

@@ -18,19 +18,45 @@ const QUOTATION_ENTITY_TYPE = 'bitrix_deal_quotation';
 const QUOTATION_FIELD = Object.freeze({ FILE: 'UF_CRM_1794985313', AMOUNT: 'UF_CRM_6A3399F56ECFF', CURRENCY: 'UF_CRM_6A23F4E86AA45' });
 // A Deal in these Category 38 stages is finished: no quotation work is queued for it.
 const CLOSED_STAGES = new Set(['C38:WON', 'C38:LOSE']);
+
+// The quotation fields of a profile as { FILE, AMOUNT, CURRENCY }, or null when they are missing or not usable. FILE must be a UF_CRM_ file
+// field; AMOUNT and CURRENCY are each a UF_CRM_ user field or the standard Deal field (OPPORTUNITY / CURRENCY_ID); the three must differ. Anything
+// else gives null, and the callers refuse (fail closed): no other profile's fields are ever substituted.
+const UF_CODE = /^UF_CRM_[A-Za-z0-9_]{1,60}$/;
+function quotationFieldsOf(fields) {
+  if (!fields || typeof fields !== 'object') return null;
+  const { FILE, AMOUNT, CURRENCY } = fields;
+  if (typeof FILE !== 'string' || !UF_CODE.test(FILE)) return null;
+  if (typeof AMOUNT !== 'string' || !(UF_CODE.test(AMOUNT) || AMOUNT === 'OPPORTUNITY')) return null;
+  if (typeof CURRENCY !== 'string' || !(UF_CODE.test(CURRENCY) || CURRENCY === 'CURRENCY_ID')) return null;
+  if (new Set([FILE, AMOUNT, CURRENCY]).size !== 3) return null;
+  return { FILE, AMOUNT, CURRENCY };
+}
 const NO_FILE = 'none';
 
 const FILE_ID = /^[1-9]\d{0,17}$/;
 
-/** { fileId: '65834' | 'none' | 'invalid', amountRaw, currencyRaw } from a Deal as crm.deal.get returns it. */
-function readQuotationSignature(deal) {
-  const value = deal ? deal[QUOTATION_FIELD.FILE] : undefined;
+// The quotation fields a profile may use, or null (fail closed). On top of quotationFieldsOf: the Quotation PDF must be a SINGLE-file field, and a
+// profile other than the test pipeline (whose single-file field was verified earlier and is left exactly as it was) must SAY so with
+// `quotationFileMultiple: false`. Missing, true or any other value is refused, so multiplicity is never assumed.
+function quotationFieldsForProfile(profile) {
+  const fields = quotationFieldsOf(profile && profile.quotationFields);
+  if (!fields) return null;
+  if (profile.name !== 'test' && profile.quotationFileMultiple !== false) return null;
+  if (profile.name === 'test' && profile.quotationFileMultiple !== undefined && profile.quotationFileMultiple !== false) return null;
+  return fields;
+}
+
+/** { fileId: '65834' | 'none' | 'invalid', amountRaw, currencyRaw } from a Deal as crm.deal.get returns it. A single-file field is ONE object
+ *  ({ id, ... }) or empty; a list with any file in it (what a multiple field returns) is 'invalid', never read as one file. */
+function readQuotationSignature(deal, fields = QUOTATION_FIELD) {
+  const value = deal ? deal[fields.FILE] : undefined;
   let fileId;
   if (value === undefined || value === null || value === false || value === '' || (Array.isArray(value) && value.length === 0)) fileId = NO_FILE;
   else if (typeof value === 'object' && !Array.isArray(value) && FILE_ID.test(String(value.id))) fileId = String(value.id);
   else if ((typeof value === 'string' || typeof value === 'number') && FILE_ID.test(String(value))) fileId = String(value);
   else fileId = 'invalid';
-  return { fileId, amountRaw: rawText(deal && deal[QUOTATION_FIELD.AMOUNT], 64), currencyRaw: rawText(deal && deal[QUOTATION_FIELD.CURRENCY], 32) };
+  return { fileId, amountRaw: rawText(deal && deal[fields.AMOUNT], 64), currencyRaw: rawText(deal && deal[fields.CURRENCY], 32) };
 }
 
 // Does the head version already record exactly this observation?
@@ -46,11 +72,16 @@ const quotationSyncKey = (caseId, headVersion, signature) => `bitrix.quotation.s
 
 /**
  * -> { queued: boolean, reason }. `db` is the Prisma client (or a transaction). Safe to call any number of times.
- * reasons: queued | deal_closed | unchanged | file_unreadable | already_queued
+ * reasons: queued | deal_closed | unchanged | file_unreadable | already_queued | quotation_not_configured
+ * `profile` (a profile object of bitrix-profiles.js) selects the pipeline's quotation fields and closed stages and is stamped on the event; a profile
+ * whose quotation fields are not configured queues nothing (fail closed). With no profile it is the test pipeline, exactly as before.
  */
-async function detectAndEnqueueQuotationSync(db, caseRecord, deal) {
-  if (CLOSED_STAGES.has(deal && deal.STAGE_ID)) return { queued: false, reason: 'deal_closed' };
-  const signature = readQuotationSignature(deal);
+async function detectAndEnqueueQuotationSync(db, caseRecord, deal, profile = null) {
+  const fields = profile ? quotationFieldsForProfile(profile) : QUOTATION_FIELD;
+  if (!fields) return { queued: false, reason: 'quotation_not_configured' };
+  const closed = profile ? new Set(profile.closedStageIds) : CLOSED_STAGES;
+  if (closed.has(deal && deal.STAGE_ID)) return { queued: false, reason: 'deal_closed' };
+  const signature = readQuotationSignature(deal, fields);
   if (signature.fileId === 'invalid') return { queued: false, reason: 'file_unreadable' };
   const head = await db.caseQuotation.findFirst({
     where: { caseId: caseRecord.id }, orderBy: { versionNumber: 'desc' },
@@ -62,7 +93,7 @@ async function detectAndEnqueueQuotationSync(db, caseRecord, deal) {
       data: {
         eventType: QUOTATION_SYNC_EVENT, entityType: QUOTATION_ENTITY_TYPE, entityId: String(deal.ID), caseId: caseRecord.id,
         idempotencyKey: quotationSyncKey(caseRecord.id, head ? head.versionNumber : 0, signature),
-        payload: { caseId: caseRecord.id, dealId: String(deal.ID), fileId: signature.fileId }, // identifiers only
+        payload: { caseId: caseRecord.id, dealId: String(deal.ID), fileId: signature.fileId, ...(profile ? { profile: profile.name } : {}) }, // identifiers only
         status: 'pending', nextAttemptAt: new Date(),
       },
     });
@@ -74,6 +105,6 @@ async function detectAndEnqueueQuotationSync(db, caseRecord, deal) {
 }
 
 module.exports = {
-  QUOTATION_SYNC_EVENT, QUOTATION_ENTITY_TYPE, QUOTATION_FIELD, CLOSED_STAGES, NO_FILE,
+  QUOTATION_SYNC_EVENT, QUOTATION_ENTITY_TYPE, QUOTATION_FIELD, CLOSED_STAGES, NO_FILE, quotationFieldsOf, quotationFieldsForProfile,
   readQuotationSignature, sameAsHead, quotationSyncKey, detectAndEnqueueQuotationSync,
 };

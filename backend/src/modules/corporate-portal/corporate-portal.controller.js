@@ -1,6 +1,7 @@
-const path = require('path');
 const { prisma } = require('../../db/prisma');
-const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
+const { ingestUpload, discardStored, discardTemp } = require('../../storage/ingest');
+const { AREAS, keyFromStoredReference } = require('../../storage/keys');
+const { sendStoredFile } = require('../../storage/respond');
 const {
   getDashboardStats,
   listCorporateNotifications,
@@ -196,13 +197,24 @@ async function listDocuments(req, res, next) {
 async function postDocument(req, res, next) {
   try {
     if (!req.file) return res.status(400).json({ error: 'file is required' });
-    if (!req.body.type) return res.status(400).json({ error: 'type is required' });
-    const doc = await addCorporateDocument(req.user.corporateId, {
-      type: req.body.type,
-      name: req.body.name?.trim() || req.file.originalname,
-      fileUrl: `/uploads/${req.file.filename}`,
-      fileSizeBytes: req.file.size,
-    });
+    if (!req.body.type) {
+      await discardTemp(req.file);
+      return res.status(400).json({ error: 'type is required' });
+    }
+    // Checked, virus-scanned (refused unless ClamAV says clean) and stored under a generated key before the row exists.
+    const stored = await ingestUpload({ file: req.file, area: AREAS.CORPORATE_DOCUMENTS, policy: 'organization' });
+    let doc;
+    try {
+      doc = await addCorporateDocument(req.user.corporateId, {
+        type: req.body.type,
+        name: req.body.name?.trim() || req.file.originalname,
+        fileUrl: stored.key,
+        fileSizeBytes: stored.size,
+      });
+    } catch (err) {
+      await discardStored(stored.key);
+      throw err;
+    }
     res.status(201).json(doc);
   } catch (err) {
     next(err);
@@ -212,7 +224,7 @@ async function postDocument(req, res, next) {
 async function downloadDocument(req, res, next) {
   try {
     const doc = await getCorporateDocumentForDownload(req.user.corporateId, req.params.id);
-    res.download(path.join(UPLOAD_DIR, path.basename(doc.fileUrl)), doc.name, { dotfiles: 'allow' });
+    await sendStoredFile(res, { key: keyFromStoredReference(doc.fileUrl), filename: doc.name });
   } catch (err) {
     next(err);
   }

@@ -103,6 +103,7 @@ function workerEnv(env, { live }) {
   return {
     ...env,
     BITRIX_SYNC_ENABLED: 'true',
+    BITRIX_DEAL_PROFILE: 'test',
     BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true',
     PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true',
     ...(live ? {} : { BITRIX24_WEBHOOK_URL: '', BITRIX_INBOUND_APPLICATION_TOKEN: '' }),

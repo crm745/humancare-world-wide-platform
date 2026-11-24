@@ -6,9 +6,11 @@
 //   { fields: { patientAge: 'Age must be a whole number from 1 to 120.', ... }, data, legacy }
 // `data` is only meaningful when `fields` is empty.
 //
-// Cities: origin and destination are { geonameId } selections. The caller looks each id up in the
-// local GeoNames table first (geo.service#resolveCityRefs) and passes the verified cities in as
-// `cities`; this file never trusts a name, country or timezone from the client.
+// Cities: origin and destination are either a { geonameId } selection or a manually entered { name,
+// countryCode? } (GeoNames has no match). The caller looks each id up in the local GeoNames table first
+// (geo.service#resolveCityRefs) and passes the verified cities in as `cities`; this file never trusts a
+// name, country or timezone sent with a geonameId. A manual city is stored as typed (cleaned), with no
+// GeoNames id, no timezone, and the country the person gave (an origin falls back to the request's country).
 //
 // Not covered here, on purpose: documents, Bitrix and encryption.
 const { COUNTRIES } = require('../../common/constants/countries');
@@ -16,24 +18,29 @@ const { normalizeMobile } = require('../../common/utils/phone');
 const { isValidTimeZone, todayInTimeZone } = require('../../common/utils/local-date');
 const { readCityRef } = require('../geo/city-ref');
 const {
-  MOBILITY, URGENCY, EQUIPMENT, GENDERS, CARE_LEVEL_KEYS, CARE_LEVEL_EXCLUSIVE, CARE_LEVEL_LEGACY_LABELS,
+  GENDERS, TRAVEL_TYPES, CRITICAL_LEVELS, OXYGEN_FLOW_MIN, OXYGEN_FLOW_MAX,
   PRIVATE_CHARTER_KEY, PRIVATE_CHARTER_SERVICE_TYPE,
 } = require('../../common/constants/request.constants');
 
 const ISO_COUNTRY_CODES = new Set(COUNTRIES.map((country) => country.code));
-const EQUIPMENT_FIELDS = EQUIPMENT.map(([field]) => field);
 
 // Fields a Private Charter request may carry. Anything else is refused, not dropped.
 // `patientLocation` is not one of them: it only repeated `origin`, so it is refused (see
 // SPECIFIC_FIELD_MESSAGES) instead of being stored twice.
 const ALLOWED_FIELDS = new Set([
   'serviceKey', 'serviceType', 'patientName', 'patientAge', 'patientGender', 'patientContact',
-  'country', 'origin', 'destination', 'preferredDate', 'careLevel', 'description', 'mobility', 'urgency',
-  ...EQUIPMENT_FIELDS,
+  'country', 'origin', 'destination', 'preferredDate', 'travelType', 'description', 'criticalLevel',
+  'oxygenRequired', 'oxygenFlowLpm',
 ]);
 const DECEASED_FIELDS = new Set(['deceasedRelation', 'placeOfDeath', 'dateOfDeath']);
 const SPECIFIC_FIELD_MESSAGES = {
   patientLocation: 'Location is not accepted for Private Charter requests; send the origin city as origin.',
+  careLevel: 'Care level is no longer accepted for Private Charter requests; send criticalLevel.',
+  mobility: 'Mobility is no longer accepted for Private Charter requests.',
+  urgency: 'Urgency is no longer accepted for Private Charter requests.',
+  equipOxygen: 'Send oxygenRequired (and oxygenFlowLpm) instead of equipOxygen.',
+  equipCardiacMonitor: 'On-board equipment is no longer accepted for Private Charter requests.',
+  equipVentilator: 'On-board equipment is no longer accepted for Private Charter requests.',
 };
 
 const NAME_MIN = 2;
@@ -45,11 +52,6 @@ const PHONE_INPUT_MAX = 32;
 const length = (text) => Array.from(text).length;
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const missing = (value) => value === undefined || value === null;
-
-// Care-level labels from every app language, to the key they stand for (NFC-normalised).
-const LEGACY_CARE_LABEL_TO_KEY = new Map(
-  Object.entries(CARE_LEVEL_LEGACY_LABELS).flatMap(([key, labels]) => labels.map((label) => [label.normalize('NFC'), key])),
-);
 
 // "YYYY-MM-DD" that is a real calendar day ("2026-02-30" is refused), or null.
 function calendarDate(value) {
@@ -135,17 +137,30 @@ function validatePrivateCharterRequest(body, { now = Date.now(), cities = {} } =
     fail('country', 'Country must be a two-letter ISO 3166-1 code, for example "AE".');
   }
 
-  // --- Origin and destination: a verified city, picked from the list -----------------------
-  // The body carries only { geonameId }. The label (what every other part of the system shows),
-  // the name, the country code and (origin) the timezone come from the verified record.
+  // --- Origin and destination: a verified city picked from the list, or one entered by hand --
+  // A picked city carries only { geonameId }: the label (what every other part of the system shows),
+  // the name, the country code and (origin) the timezone come from the verified record. A manual city
+  // is { name, countryCode? }: stored with no geonameId and no timezone.
   let originTimeZone = null;
+  let originManual = false;
   for (const field of ['origin', 'destination']) {
     const label = field === 'origin' ? 'Origin city' : 'Destination city';
     if (missing(body[field]) || body[field] === '') { fail(field, `${label} is required.`); continue; }
     const ref = readCityRef(body[field]);
+    if (ref.manual) {
+      // Country context: the one given with the city; else, for the origin (which is held to the request's country), that country.
+      // A destination may be in any country, so it never borrows the request's.
+      const code = ref.manual.countryCode || (field === 'origin' && typeof body.country === 'string' && ISO_COUNTRY_CODES.has(body.country) ? body.country : null);
+      const countryName = code ? (COUNTRIES.find((country) => country.code === code) || {}).name : null;
+      data[field] = countryName ? `${ref.manual.name}, ${countryName}` : ref.manual.name;
+      data[`${field}CityName`] = ref.manual.name;
+      data[`${field}CountryCode`] = code;
+      if (field === 'origin') originManual = true;
+      continue;
+    }
     if (!ref.id) { fail(field, ref.problem); continue; }
     const city = cities[field];
-    if (!city || city.geonameId !== ref.id) { fail(field, 'Select a valid city from the list.'); continue; }
+    if (!city || city.geonameId !== ref.id) { fail(field, 'Select a valid city from the list, or enter the city name.'); continue; }
     if (field === 'origin') {
       // The "no past date" rule runs in the origin city's own timezone: refuse a city without one.
       if (!isValidTimeZone(city.timezone)) { fail(field, 'This city cannot be used because its timezone is not available. Choose another city.'); continue; }
@@ -188,67 +203,62 @@ function validatePrivateCharterRequest(body, { now = Date.now(), cities = {} } =
     fail('preferredDate', 'Preferred date must be a valid date in the form YYYY-MM-DD.');
   } else if (originTimeZone && body.preferredDate < todayInTimeZone(originTimeZone, now)) {
     fail('preferredDate', 'Preferred date cannot be in the past.');
+  } else if (originManual && body.preferredDate < todayInTimeZone('Etc/GMT+12', now)) {
+    // A manual city has no timezone: judge against the westernmost one (UTC-12), so no real local "today" is ever refused.
+    fail('preferredDate', 'Preferred date cannot be in the past.');
   } else {
     data.preferredDate = body.preferredDate;
   }
 
-  // --- Care level: one or more keys (multi-select); "care_na" (Not Applicable) can only be chosen on its own. The wire format
-  //     is a list of keys; it is stored as the keys joined with commas, in the fixed order of CARE_LEVEL_KEYS. A repeated key is
-  //     refused, never silently collapsed. Recognised translated labels are still accepted during the compatibility period
-  //     (older builds send the label(s) as one string joined with ", ").
-  if (missing(body.careLevel) || body.careLevel === '' || (Array.isArray(body.careLevel) && !body.careLevel.length)) {
-    fail('careLevel', 'Select a care level.');
-  } else {
-    // Older builds send one string: the labels joined with ", ".
-    const items = Array.isArray(body.careLevel) ? body.careLevel : typeof body.careLevel === 'string' ? body.careLevel.split(',') : null;
-    const keys = [];
-    let usedLabel = false;
-    let valid = items !== null;
-    for (const item of items || []) {
-      if (typeof item !== 'string') { valid = false; break; }
-      const text = item.trim().normalize('NFC');
-      if (CARE_LEVEL_KEYS.includes(text) && typeof body.careLevel !== 'string') keys.push(text);
-      else if (LEGACY_CARE_LABEL_TO_KEY.has(text)) { keys.push(LEGACY_CARE_LABEL_TO_KEY.get(text)); usedLabel = true; }
-      else { valid = false; break; }
-    }
-    if (!valid) fail('careLevel', `Care level must be one of: ${CARE_LEVEL_KEYS.join(', ')}.`);
-    else if (new Set(keys).size !== keys.length) fail('careLevel', 'Each care level can be selected only once.');
-    else if (keys.length > 1 && keys.includes(CARE_LEVEL_EXCLUSIVE)) fail('careLevel', 'Not Applicable cannot be combined with another care level.');
-    else {
-      data.careLevel = CARE_LEVEL_KEYS.filter((key) => keys.includes(key)).join(',');
-      if (usedLabel || typeof body.careLevel === 'string') legacy.push('careLevel');
-    }
-  }
+  // --- Travel type: one of the allowed keys, required -----------------------------------
+  if (missing(body.travelType) || body.travelType === '') fail('travelType', 'Travel type is required.');
+  else if (typeof body.travelType === 'string' && TRAVEL_TYPES.includes(body.travelType)) data.travelType = body.travelType;
+  else fail('travelType', `Travel type must be one of: ${TRAVEL_TYPES.join(', ')}.`);
 
-  // --- Medical description: optional; only the ends are trimmed -------------------------
+  // --- Medical history (stored in `description`): optional; only the ends are trimmed -----
   if (!missing(body.description)) {
-    if (typeof body.description !== 'string') fail('description', 'Medical description must be text.');
-    else if (body.description.includes('\u0000')) fail('description', 'Medical description contains an invalid character.');
+    if (typeof body.description !== 'string') fail('description', 'Medical history must be text.');
+    else if (body.description.includes('\u0000')) fail('description', 'Medical history contains an invalid character.');
     else {
       const text = body.description.trim();
-      if (length(text) > DESCRIPTION_MAX) fail('description', `Medical description must be at most ${DESCRIPTION_MAX} characters.`);
+      if (length(text) > DESCRIPTION_MAX) fail('description', `Medical history must be at most ${DESCRIPTION_MAX} characters.`);
       else if (text) data.description = text;
     }
   }
 
-  // --- Mobility, urgency ---------------------------------------------------------------
-  // Mobility: one or more of the allowed keys (a list, or one string as older builds send). Stored joined with commas, in the
-  // fixed order of MOBILITY. At least one is required; a repeated key is refused.
-  const mobilityItems = Array.isArray(body.mobility) ? body.mobility : typeof body.mobility === 'string' && body.mobility !== '' ? [body.mobility] : null;
-  if (missing(body.mobility) || body.mobility === '' || (Array.isArray(body.mobility) && !body.mobility.length)) fail('mobility', 'Mobility is required.');
-  else if (!mobilityItems || mobilityItems.some((item) => typeof item !== 'string' || !MOBILITY.includes(item))) fail('mobility', `Mobility must be one of: ${MOBILITY.join(', ')}.`);
-  else if (new Set(mobilityItems).size !== mobilityItems.length) fail('mobility', 'Each mobility option can be selected only once.');
-  else data.mobility = MOBILITY.filter((key) => mobilityItems.includes(key)).join(',');
+  // --- Critical level: a list of one or more choices, no repeats ---------------------------
+  // Always an array (a bare string is refused). Returned in the order of the form, whatever the order sent.
+  const levels = body.criticalLevel;
+  if (missing(levels) || levels === '' || (Array.isArray(levels) && levels.length === 0)) {
+    fail('criticalLevel', 'Select at least one critical level.');
+  } else if (!Array.isArray(levels)) {
+    fail('criticalLevel', 'Critical level must be a list of one or more choices.');
+  } else if (levels.length > CRITICAL_LEVELS.length) {
+    fail('criticalLevel', `Critical level can have at most ${CRITICAL_LEVELS.length} choices.`);
+  } else if (levels.some((level) => typeof level !== 'string' || !CRITICAL_LEVELS.includes(level))) {
+    fail('criticalLevel', `Critical level must only contain: ${CRITICAL_LEVELS.join(', ')}.`);
+  } else if (new Set(levels).size !== levels.length) {
+    fail('criticalLevel', 'Critical level must not repeat a choice.');
+  } else {
+    data.criticalLevel = CRITICAL_LEVELS.filter((level) => levels.includes(level));
+  }
 
-  if (missing(body.urgency) || body.urgency === '') fail('urgency', 'Urgency is required.');
-  else if (typeof body.urgency === 'string' && URGENCY.includes(body.urgency)) data.urgency = body.urgency;
-  else fail('urgency', `Urgency must be one of: ${URGENCY.join(', ')}.`);
-
-  // --- Equipment: optional, strict booleans ----------------------------------------------
-  for (const field of EQUIPMENT_FIELDS) {
-    if (body[field] === undefined) continue;
-    if (typeof body[field] === 'boolean') data[field] = body[field];
-    else fail(field, 'This must be true or false.');
+  // --- Oxygen: Yes/No is required; the flow rate (litres per minute) only with Yes -------------
+  if (typeof body.oxygenRequired !== 'boolean') {
+    fail('oxygenRequired', missing(body.oxygenRequired) ? 'Oxygen required is required.' : 'Oxygen required must be true or false.');
+  } else {
+    data.oxygenRequired = body.oxygenRequired;
+    const flow = body.oxygenFlowLpm;
+    if (body.oxygenRequired) {
+      const whole = typeof flow === 'number' ? flow : typeof flow === 'string' && /^\d{1,3}$/.test(flow) ? Number(flow) : NaN;
+      if (missing(flow) || flow === '') fail('oxygenFlowLpm', 'Oxygen flow rate (LPM) is required when oxygen is required.');
+      else if (!Number.isInteger(whole) || whole < OXYGEN_FLOW_MIN || whole > OXYGEN_FLOW_MAX) {
+        fail('oxygenFlowLpm', `Oxygen flow rate must be a whole number from ${OXYGEN_FLOW_MIN} to ${OXYGEN_FLOW_MAX} LPM.`);
+      } else data.oxygenFlowLpm = whole;
+    } else if (!missing(flow) && flow !== '') {
+      // Refused, not dropped: a rate with "No oxygen" is contradictory.
+      fail('oxygenFlowLpm', 'Oxygen flow rate must not be sent when oxygen is not required.');
+    }
   }
 
   return { fields, data, legacy };

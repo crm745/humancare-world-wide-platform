@@ -1,5 +1,3 @@
-const fs = require('fs');
-const path = require('path');
 const {
   createRegistration,
   resendVerificationEmail,
@@ -10,7 +8,8 @@ const {
 } = require('./corporate-registration.service');
 const { signRegistrationProof, readMobileLink } = require('./registration-proof');
 const { recordAuditEvent, ACTOR } = require('../../common/audit/audit-log');
-const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
+const { ingestUpload, discardStored, discardTemp } = require('../../storage/ingest');
+const { AREAS } = require('../../storage/keys');
 
 // Keys the corporate-portal's DocumentsStep uploads under — see
 // corporate-portal/src/data/constants.js#REGISTRATION_DOCUMENTS.
@@ -30,9 +29,9 @@ const withProof = (reg) => ({ ...toPublicRegistration(reg), accessToken: signReg
 const audit = (req, event, reg, detail) =>
   recordAuditEvent(req, event, { actorType: ACTOR.REGISTRANT, actorId: reg.id, subject: `registration:${reg.id}`, detail });
 
-// Files multer already wrote are useless if the submission is refused afterwards.
+// Files multer already wrote (temporary files) are useless if the submission is refused afterwards.
 function discardUploads(files) {
-  Object.values(files || {}).flat().forEach((file) => fs.unlink(path.join(UPLOAD_DIR, file.filename), () => {}));
+  return discardTemp(Object.values(files || {}).flat());
 }
 
 // company/bank arrive as JSON-stringified form fields (multipart can't nest JSON
@@ -45,25 +44,31 @@ function postRegister(req, res, next) {
       company = JSON.parse(req.body.company);
       bank = JSON.parse(req.body.bank);
     } catch {
-      discardUploads(req.files);
+      await discardUploads(req.files);
       return res.status(400).json({ error: 'company and bank must be valid JSON.' });
     }
     if (!company?.companyName || !company?.officialEmail) {
-      discardUploads(req.files);
+      await discardUploads(req.files);
       return res.status(400).json({ error: 'company is missing required fields.' });
     }
 
-    const documents = DOCUMENT_KEYS.flatMap((key) => {
-      const file = req.files?.[key]?.[0];
-      if (!file) return [];
-      return [{ key, label: DOCUMENT_LABELS[key], fileName: file.originalname, fileUrl: `/uploads/${file.filename}`, size: file.size, status: 'Uploaded' }];
-    });
-
+    // Every document is checked, virus-scanned (the whole submission is refused unless each one is clean) and stored under a
+    // generated key. If anything fails, the objects already stored for this submission are removed again.
+    const storedKeys = [];
+    const documents = [];
     let registration;
     try {
+      for (const key of DOCUMENT_KEYS) {
+        const file = req.files?.[key]?.[0];
+        if (!file) continue;
+        const stored = await ingestUpload({ file, area: AREAS.REGISTRATION_DOCUMENTS, policy: 'organization' });
+        storedKeys.push(stored.key);
+        documents.push({ key, label: DOCUMENT_LABELS[key], fileName: file.originalname, fileUrl: stored.key, size: stored.size, status: 'Uploaded' });
+      }
       registration = await createRegistration({ company, bank, documents }, req.phoneProof);
     } catch (err) {
-      discardUploads(req.files);
+      await discardUploads(req.files);
+      await Promise.all(storedKeys.map(discardStored));
       throw err;
     }
     audit(req, 'registration_submitted', registration);

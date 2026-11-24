@@ -31,6 +31,8 @@ function classifyFailure(lastError) {
   else if (text.startsWith('not_eligible')) { category = 'eligibility'; detail = 'not_eligible'; }
   else if (text === 'deal_link_missing') { category = 'eligibility'; detail = 'deal_link_missing'; }
   else if (text.startsWith('lease_expired')) { category = 'lease'; detail = text; }
+  // Bitrix24 refused to run the call and every retry (with backoff) was used up: the queue's dead letter. A superadmin resolves it with deal-recovery.
+  else if (text.startsWith('dead_letter:')) { category = 'dead_letter'; detail = text.slice('dead_letter:'.length); }
   else if (text.startsWith('Bitrix24 Deal call:')) {
     category = 'bitrix';
     detail = (text.slice('Bitrix24 Deal call:'.length).trim().split(/[\s(]/)[0]) || 'refused';

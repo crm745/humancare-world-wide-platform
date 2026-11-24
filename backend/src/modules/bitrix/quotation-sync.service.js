@@ -21,15 +21,18 @@ const os = require('os');
 const crypto = require('crypto');
 const { prisma: defaultPrisma } = require('../../db/prisma');
 const { isQuotationSyncActive } = require('./bitrix-config');
+const { gatewayForPass } = require('./queue/dispatcher');
+const { PRIVATE_CHARTER_QUEUE } = require('./queue/service-registry');
 const { assertDealEligible } = require('./deal-outbox');
-const { DEAL, FIELD } = require('./bitrix-deal');
+const { resolveProfile, activeProfileName } = require('./bitrix-profiles');
+const { linkProfileProblem, dealProblem, isClosedStage } = require('./bitrix-profile-runtime');
 const bitrixDealApi = require('./bitrix-deal.api');
 const defaultStore = require('./quotation-sync.store');
 const { appendAuditLog } = require('../../common/audit/business-audit');
 const { parseQuotationMoney } = require('./quotation-money');
 const { contentFingerprint, decideVersion } = require('./quotation-versioning');
-const { readQuotationSignature, sameAsHead, QUOTATION_FIELD, CLOSED_STAGES, NO_FILE } = require('./quotation-outbox');
-const { createLocalStorage, keyFor } = require('./quotation-storage');
+const { readQuotationSignature, sameAsHead, quotationFieldsForProfile, NO_FILE } = require('./quotation-outbox');
+const { createQuotationStorage, keyFor } = require('./quotation-storage');
 
 const LEASE_SECONDS = 120;
 const MAX_ATTEMPTS = 8;
@@ -54,7 +57,7 @@ function buildContext(overrides = {}) {
     workerId: makeWorkerId(), now: () => new Date(), ...overrides,
   };
 }
-const storageOf = (ctx) => ctx.storage || (ctx.storage = createLocalStorage());
+const storageOf = (ctx) => ctx.storage || (ctx.storage = createQuotationStorage());
 
 // ---- audit ---------------------------------------------------------------------------------------------------------------
 const base = (claim, caseRecord) => ({ caseId: caseRecord ? caseRecord.id : claim.caseId, actorType: 'bitrix', source: 'bitrix_quotation', correlationId: `outbox:${claim.id}` });
@@ -124,7 +127,7 @@ async function writeVersion(ctx, claim, link, caseRecord, content) {
     }
     const fields = {
       bitrixDealId: claim.dealId, bitrixFileId: content.fileId, bitrixAmountRaw: content.money.amountRaw, bitrixCurrencyRaw: content.money.currencyRaw,
-      bitrixDealStageId: content.stageId, contentFingerprint: content.fingerprint, storageProvider: 'local', storageKey: content.storageKey,
+      bitrixDealStageId: content.stageId, contentFingerprint: content.fingerprint, storageProvider: content.storageProvider || 'local', storageKey: content.storageKey,
       sizeBytes: content.sizeBytes, sha256: content.sha256, amount: content.money.amount, currency: content.money.currency,
       validationError: content.money.error, lastSeenAt: ctx.now(),
     };
@@ -155,15 +158,31 @@ async function writeVersion(ctx, claim, link, caseRecord, content) {
   // A staged file that no version refers to (an identical version already existed) is removed; one that is referenced is never touched.
   if (stagedUnused) {
     const referenced = await ctx.prisma.caseQuotation.findUnique({ where: { storageKey: content.storageKey }, select: { id: true } });
-    if (!referenced) await storageOf(ctx).remove(content.storageKey).catch(() => undefined);
+    if (!referenced) await storageOf(ctx).remove(content.storageKey, content.storageProvider || 'local').catch(() => undefined);
   }
   return result;
 }
 
 // ---- one event ------------------------------------------------------------------------------------------------------------
 async function processQuotationEvent(ctx, claim) {
+  // The profile decides the pipeline's quotation fields, category, reference field and closed stages (BITRIX_DEAL_PROFILE, no default).
+  const profile = resolveProfile(ctx.env);
+  if (!profile) {
+    ctx.log.error(`[quotation-sync] event ${claim.id}: not processed (profile_not_configured).`);
+    return { outcome: 'profile_not_configured' };
+  }
   const link = await ctx.prisma.bitrixDealLink.findUnique({ where: { caseId: claim.caseId }, include: { case: { include: { serviceRequest: true } } } });
   if (!link || !link.bitrixDealId || link.bitrixDealId !== claim.dealId) return failDefinitively(ctx, claim, 'deal_not_linked');
+  // A Case's Deal of the other profile is never read: nothing is called and the event is left as it is.
+  const linkIssue = linkProfileProblem(link, profile);
+  if (linkIssue) {
+    ctx.log.error(`[quotation-sync] event ${claim.id}: not processed (${linkIssue}).`);
+    return { outcome: linkIssue };
+  }
+  // The profile's own quotation fields. If they are missing or unusable, refuse (definitively; nothing is read or stored) rather than read another
+  // pipeline's fields from this Deal.
+  const quotationFields = quotationFieldsForProfile(profile); // fields valid AND the PDF field verified single-file
+  if (!quotationFields) return failDefinitively(ctx, claim, 'quotation_not_configured');
   const caseRecord = link.case;
   try { assertDealEligible(caseRecord, caseRecord && caseRecord.serviceRequest); } catch { return failDefinitively(ctx, claim, 'case_not_eligible', caseRecord); }
   if (CLOSED_CASE_STATUSES.has(caseRecord.status)) return complete(ctx, claim, 'case_closed', 'case_closed');
@@ -172,12 +191,11 @@ async function processQuotationEvent(ctx, claim) {
   if (read.status === 'not_found') return failDefinitively(ctx, claim, 'deal_not_found', caseRecord);
   if (read.status !== 'ok') return retryLater(ctx, claim, 'bitrix_read_failed', caseRecord);
   const deal = read.deal;
-  if (String(deal.ID) !== claim.dealId) return failDefinitively(ctx, claim, 'deal_id_mismatch', caseRecord);
-  if (String(deal.CATEGORY_ID) !== String(DEAL.CATEGORY_ID)) return failDefinitively(ctx, claim, 'category_mismatch', caseRecord);
-  if (deal[FIELD.REFERENCE] !== caseRecord.referenceNumber) return failDefinitively(ctx, claim, 'reference_mismatch', caseRecord);
-  if (CLOSED_STAGES.has(deal.STAGE_ID)) return complete(ctx, claim, 'deal_closed', 'deal_closed');
+  const dealIssue = dealProblem(profile, deal, claim.dealId, caseRecord.referenceNumber);
+  if (dealIssue) return failDefinitively(ctx, claim, dealIssue, caseRecord);
+  if (isClosedStage(profile, deal.STAGE_ID)) return complete(ctx, claim, 'deal_closed', 'deal_closed');
 
-  const signature = readQuotationSignature(deal);
+  const signature = readQuotationSignature(deal, quotationFields);
   if (signature.fileId === 'invalid') return retryLater(ctx, claim, 'file_field_unreadable', caseRecord);
   const head = await ctx.prisma.caseQuotation.findFirst({ where: { caseId: caseRecord.id }, orderBy: { versionNumber: 'desc' } });
 
@@ -190,7 +208,7 @@ async function processQuotationEvent(ctx, claim) {
   if (sameAsHead(signature, head)) return complete(ctx, claim, 'unchanged', 'unchanged');
 
   // Only now the file itself: the one extra read that carries the download link, then the download.
-  const fileRead = await ctx.api.getDealFileField(claim.dealId, QUOTATION_FIELD.FILE, { env: ctx.env });
+  const fileRead = await ctx.api.getDealFileField(claim.dealId, quotationFields.FILE, { env: ctx.env });
   if (fileRead.status === 'not_found') return failDefinitively(ctx, claim, 'deal_not_found', caseRecord);
   if (fileRead.status !== 'ok') return retryLater(ctx, claim, 'bitrix_file_read_failed', caseRecord);
   if (!fileRead.file || fileRead.file.id !== signature.fileId) return retryLater(ctx, claim, 'file_changed_during_read', caseRecord);
@@ -213,7 +231,8 @@ async function processQuotationEvent(ctx, claim) {
   if (latest && decideVersion(latest, fingerprint).action === 'unchanged') return complete(ctx, claim, 'unchanged', 'unchanged_content');
 
   try {
-    await storageOf(ctx).putIfAbsent(storageKey, download.bytes, download.sha256);
+    const put = await storageOf(ctx).putIfAbsent(storageKey, download.bytes, download.sha256);
+    content.storageProvider = (put && put.provider) || storageOf(ctx).provider || 'local'; // the provider that really holds the file
   } catch (err) {
     const permanent = err && ['key_invalid', 'conflict', 'hash_mismatch', 'empty_file'].includes(err.code);
     return permanent ? failDefinitively(ctx, claim, `storage_${err.code}`, caseRecord) : retryLater(ctx, claim, `storage_${(err && err.code) || 'error'}`, caseRecord);
@@ -232,11 +251,16 @@ async function processQuotationEvent(ctx, claim) {
 async function runQuotationSync(overrides = {}) {
   const ctx = buildContext(overrides);
   if (!isQuotationSyncActive(ctx.env)) return { active: false, claimed: 0 };
+  // Every Bitrix call of this worker passes the shared gateway at the API layer; here it is only asked BEFORE anything is claimed, so an open circuit
+  // pauses the pass without using up a single delivery attempt.
+  ctx.gateway = ctx.gateway || gatewayForPass(overrides);
+  const start = ctx.gateway.canStart(PRIVATE_CHARTER_QUEUE);
+  if (!start.ok) return { active: true, claimed: 0, results: [], paused: start.reason };
   const scope = ctx.scope;
   await ctx.store.recoverExpiredLeases(ctx.prisma, { maxClaims: MAX_CLAIMS_RECOVERY, ...(scope && { caseIds: scope.caseIds }) });
   let claimed = 0;
   const results = [];
-  for (const id of await ctx.store.findCandidateIds(ctx.prisma, BATCH_SIZE, scope)) {
+  for (const id of await ctx.store.findCandidateIds(ctx.prisma, BATCH_SIZE, scope, activeProfileName(ctx.env))) {
     const claim = await ctx.store.claim(ctx.prisma, { id, workerId: ctx.workerId, leaseSeconds: LEASE_SECONDS });
     if (!claim) continue;
     claimed += 1;

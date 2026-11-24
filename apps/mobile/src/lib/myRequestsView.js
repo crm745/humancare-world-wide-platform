@@ -8,6 +8,7 @@ import SERVICES from '../data/services.json';
 import { SERVICE_TILES } from '../data/mock';
 import { serviceKeyFromTitle } from './requestShape';
 import { TRACKING_STEPS, cityName, trackingPosition } from './requestTracking';
+import { ACTUAL_STAGE_KEYS, TRACKING_FLOW_FIVE_STAGE } from './tracking/privateCharterTracking';
 import { COLORS } from '../theme/colors';
 
 export const STEP_COUNT = TRACKING_STEPS.length; // 5
@@ -45,8 +46,17 @@ export const shortPlace = (place) => cityName(place);
 //   { kind: 'step', step, filled, color, stageKey }   submitted / in progress: "Step n of 5 · <stage>"
 //   { kind: 'completed', filled: 5, color }           "Completed"
 //   { kind: 'cancelled', filled: 0 }                  "Cancelled", all segments grey
-export function progressOf(rawStatus) {
+// `tracking` ({ trackingFlow, trackingStage } of the list item) switches a Private Charter request in the five-stage journey to its own five
+// stage names (Request Received ... Completed); every other request keeps the generic step names above.
+export function progressOf(rawStatus, tracking = null) {
   if (rawStatus === 'cancelled') return { kind: 'cancelled', filled: 0, color: SEGMENT_TODO };
+  const stage = tracking && tracking.trackingFlow === TRACKING_FLOW_FIVE_STAGE ? ACTUAL_STAGE_KEYS.indexOf(tracking.trackingStage) : -1;
+  if (tracking && tracking.trackingFlow === TRACKING_FLOW_FIVE_STAGE) {
+    // The stage the backend reports; an unknown or missing one reads as the first stage, never as another request's wording.
+    const index = stage >= 0 ? stage : 0;
+    if (index === ACTUAL_STAGE_KEYS.length - 1 || rawStatus === 'completed') return { kind: 'completed', filled: STEP_COUNT, color: SEGMENT_COMPLETED };
+    return { kind: 'step', step: index + 1, filled: index + 1, color: SEGMENT_DONE, stageKey: `acs_${ACTUAL_STAGE_KEYS[index]}` };
+  }
   if (rawStatus === 'completed') return { kind: 'completed', filled: STEP_COUNT, color: SEGMENT_COMPLETED };
   const { index } = trackingPosition({ status: rawStatus });
   return { kind: 'step', step: index + 1, filled: index + 1, color: SEGMENT_DONE, stageKey: TRACKING_STEPS[index].title };
@@ -60,7 +70,7 @@ export function cardView(item, t) {
   const statusKey = `status_${item.status}`;
   const statusLabel = t(statusKey) === statusKey ? String(item.status || '') : t(statusKey);
   const [badgeBg, badgeFg] = BADGE[item.status] || BADGE_OTHER;
-  const progress = progressOf(item.rawStatus || item.status);
+  const progress = progressOf(item.rawStatus || item.status, item);
   const from = shortPlace(item.origin);
   const to = shortPlace(item.destination);
   const fullFrom = String(item.origin || '').trim();

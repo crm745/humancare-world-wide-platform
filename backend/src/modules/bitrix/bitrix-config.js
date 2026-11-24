@@ -77,9 +77,43 @@ function bitrixHostProblem(env = process.env, webhookUrl = env.BITRIX24_WEBHOOK_
   return host === allowed ? null : 'host_not_allowed';
 }
 
+// ---- the shared Bitrix24 rate limit --------------------------------------------------------------------------------------
+// ONE limiter (queue/dispatcher.js) paces every Bitrix24 call of every worker. Its size is configurable:
+//   BITRIX_RATE_LIMIT_PER_SECOND     sustained calls per second     default 2   a positive number (decimals allowed, e.g. 0.5), at most 50
+//   BITRIX_RATE_LIMIT_BURST          bucket size (calls at once)    default 10  a positive whole number, at most 1000
+//   BITRIX_MAX_CONCURRENT_REQUESTS   calls in flight at once        default 1   a positive whole number, at most 20
+// Absent (or empty) = the default. Anything else that is not a plain positive decimal number within its bounds (0, negative, "abc", "1e3", "2x", a
+// value too large) is NOT silently replaced: assertBitrixConfiguration refuses to start the API or the worker and names the variable.
+const RATE_LIMIT_DEFAULTS = Object.freeze({ ratePerSecond: 2, burst: 10, maxConcurrent: 1 });
+const RATE_LIMIT_VARIABLES = Object.freeze([
+  Object.freeze({ name: 'BITRIX_RATE_LIMIT_PER_SECOND', key: 'ratePerSecond', max: 50, whole: false }),
+  Object.freeze({ name: 'BITRIX_RATE_LIMIT_BURST', key: 'burst', max: 1000, whole: true }),
+  Object.freeze({ name: 'BITRIX_MAX_CONCURRENT_REQUESTS', key: 'maxConcurrent', max: 20, whole: true }),
+]);
+const PLAIN_DECIMAL = /^\d+(\.\d+)?$/;
+
+// -> { settings: { ratePerSecond, burst, maxConcurrent }, problems: [text] }. `settings` always holds a usable value for every key (the default for a
+// missing or invalid one); callers that must not run with an invalid value check `problems` first.
+function bitrixRateLimitSettings(env = process.env) {
+  const settings = { ...RATE_LIMIT_DEFAULTS };
+  const problems = [];
+  for (const { name, key, max, whole } of RATE_LIMIT_VARIABLES) {
+    const raw = env[name];
+    if (raw === undefined || raw === null || String(raw).trim() === '') continue;
+    const text = String(raw).trim();
+    const value = PLAIN_DECIMAL.test(text) ? Number(text) : NaN;
+    const shown = text.length > 20 ? `${text.slice(0, 20)}...` : text;
+    if (!Number.isFinite(value) || value <= 0) problems.push(`${name} must be a positive number (got "${shown}").`);
+    else if (whole && !Number.isInteger(value)) problems.push(`${name} must be a positive whole number (got "${shown}").`);
+    else if (value > max) problems.push(`${name} must be at most ${max} (got "${shown}").`);
+    else settings[key] = value;
+  }
+  return { settings, problems };
+}
+
 // The reasons the current settings cannot be used (empty when they can).
 function bitrixConfigurationProblems(env = process.env) {
-  const problems = [];
+  const problems = [...bitrixRateLimitSettings(env).problems];
   // A configured webhook that is not on the allowlist is refused at start-up when any Bitrix switch is on.
   if ((isBitrixSyncEnabled(env) || isPrivateCharterDealRequested(env)) && env.BITRIX24_WEBHOOK_URL) {
     const hostProblem = bitrixHostProblem(env);
@@ -115,6 +149,8 @@ module.exports = {
   isQuotationSyncActive,
   bitrixConfigurationProblems,
   assertBitrixConfiguration,
+  bitrixRateLimitSettings,
+  RATE_LIMIT_DEFAULTS,
   webhookHost,
   bitrixHostProblem,
 };

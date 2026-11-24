@@ -38,8 +38,8 @@ export const INITIAL_DRAFT = {
   sentRequest: null, // Private Charter: { id, referenceNumber, title } once the request is saved, so a retry never saves it twice
   uploaded: [], // Private Charter: the uri of each report file the server has accepted
   uploadErrors: {}, // Private Charter: { uri: message } for the files that failed on the last attempt
-  originCity: null, // Private Charter: the verified city picked for Location, { geonameId, name, label, countryCode }
-  destCity: null, // Private Charter: the same for Destination
+  originCity: null, // Private Charter: the city for Origin City: picked from GeoNames { geonameId, name, label, countryCode }, or typed by hand { manual: true, name, label, countryCode }
+  destCity: null, // Private Charter: the same for Destination City
   country: '', // the country's name, as it is sent to the backend
   countryIso: '', // its ISO code, which the phone code follows (see pickRequestCountry)
   cc: '+91', // the calling code sent with the contact number: always the dial code of phoneCountry
@@ -63,6 +63,11 @@ export const INITIAL_DRAFT = {
   equipCardiac: false,
   equipVentilator: false,
   urgency: '', // 'critical_6h' | 'urgent_24h' | 'planned'
+  // Private Charter only (revised form): replace care level, mobility, on-board equipment and urgency for that service.
+  travelType: '', // 'patient_transfer' | 'organ_transfer'
+  criticalLevel: [], // multi-select: any of 'icu' | 'ventilated' | 'tracheostomy' | 'ecmo'; at least one is required
+  oxygenRequired: null, // true | false; null until answered
+  oxygenFlowLpm: '', // text; only meaningful (and only sent) when oxygenRequired is true
   changingService: false, // set while the person is picking another service from the request form
 };
 

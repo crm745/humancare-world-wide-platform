@@ -39,6 +39,9 @@ export function toListItem(request) {
     origin: request.origin || '',
     destination: request.destination || '',
     createdAt: request.createdAt || null,
+    // Private Charter only: how the backend says the request is tracked ("five_stage" | null) and, for five_stage, the stage it is at.
+    trackingFlow: request.trackingFlow === 'five_stage' ? 'five_stage' : null,
+    trackingStage: typeof request.trackingStage === 'string' ? request.trackingStage : null,
   };
 }
 

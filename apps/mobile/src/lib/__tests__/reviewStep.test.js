@@ -22,6 +22,7 @@ const FULL = {
   location: 'City General Hospital, Andheri West, Mumbai, Maharashtra, India', dest: 'Sunrise Heart Institute, Baner, Pune, Maharashtra, India',
   date: '2026-11-15', urgency: 'urgent_24h', desc: 'Post-operative cardiac patient needing monitoring during the transfer.',
   care: ['care_stable'], mobility: 'wheelchair', equipOxygen: true, equipCardiac: true, equipVentilator: false,
+  travelType: 'organ_transfer', criticalLevel: ['ecmo'], oxygenRequired: true, oxygenFlowLpm: '4',
   airlineMode: 'stretcher', mortalTransfer: 'domestic', relation: 'Father', deathPlace: 'Sunrise Heart Institute, Pune', deathDate: '2026-10-01',
   files: [
     { uri: 'file:///x/discharge-summary.pdf', name: 'discharge-summary.pdf', mimeType: 'application/pdf', size: 1258291 },
@@ -60,7 +61,10 @@ describe('everything filled in', () => {
   test('Trip: From, To, and the date written like "15 Nov 2026", not "2026-11-15"', () => {
     expect(v.trip.from).toBe(FULL.location);
     expect(v.trip.to).toBe(FULL.dest);
-    expect(v.trip.rows).toEqual([{ key: 'date', label: 'Date of service', value: '15 Nov 2026', full: false }]);
+    expect(v.trip.rows).toEqual([
+      { key: 'date', label: 'Date of service', value: '15 Nov 2026', full: false },
+      { key: 'travelType', label: 'Travel type', value: 'Organ Transfer', full: false },
+    ]);
   });
   test('Medical: urgency chip, condition, care level, mobility, and only the equipment that is on', () => {
     expect(v.medical.urgency).toMatchObject({ bg: '#FDF0DA', fg: '#8F4C08' });
@@ -149,7 +153,7 @@ describe('every service shows every field its form collects', () => {
 
   test('every key of the form\'s draft is either shown somewhere or is bookkeeping (nothing collected is left off)', () => {
     const known = new Set([
-      ...Object.keys(FORM_FIELDS.always), ...Object.keys(FORM_FIELDS.transport), ...Object.keys(FORM_FIELDS.commercialair), ...Object.keys(FORM_FIELDS.mortal), ...NOT_SHOWN,
+      ...Object.keys(FORM_FIELDS.always), ...Object.keys(FORM_FIELDS.transport), ...Object.keys(FORM_FIELDS.commercialair), ...Object.keys(FORM_FIELDS.mortal), ...Object.keys(FORM_FIELDS.privatecharter), ...NOT_SHOWN,
     ]);
     expect(draftKeys.length).toBeGreaterThan(25);
     expect(draftKeys.filter((k) => !known.has(k))).toEqual([]);
@@ -174,6 +178,10 @@ describe('every service shows every field its form collects', () => {
     equipCardiac: (v) => !!v.medical.equipment && v.medical.equipment.items.includes('Cardiac monitor'),
     equipVentilator: () => true, // false in FULL (see below: checked with a draft that has it on)
     airlineMode: (v) => v.trip.rows.some((r) => r.key === 'travel'),
+    travelType: (v) => v.trip.rows.some((r) => r.key === 'travelType' && r.value === 'Organ Transfer'),
+    criticalLevel: (v) => v.medical.criticalLevel === 'ECMO',
+    oxygenRequired: (v) => v.medical.oxygen === 'Yes, 4 LPM',
+    oxygenFlowLpm: (v) => v.medical.oxygen === 'Yes, 4 LPM',
     mortalTransfer: (v) => v.trip.rows.some((r) => r.key === 'transfer'),
     relation: (v) => v.patient.fields.some((f) => f.key === 'relation'),
     deathPlace: (v) => v.patient.fields.some((f) => f.key === 'deathPlace' && f.value === FULL.deathPlace),
@@ -190,6 +198,18 @@ describe('every service shows every field its form collects', () => {
         expect({ service: key, field, shown: SHOWN[field](v) }).toEqual({ service: key, field, shown: true });
       });
     });
+  });
+
+  test('Private Charter shows travel type, critical level and oxygen (with its rate only for Yes); the other services show none of them', () => {
+    const pc = reviewView(FULL, svc('privatecharter'), t);
+    expect(pc.medical.criticalLevel).toBe('ECMO');
+    expect(pc.medical.oxygen).toBe('Yes, 4 LPM');
+    expect(reviewView({ ...FULL, oxygenRequired: false, oxygenFlowLpm: '' }, svc('privatecharter'), t).medical.oxygen).toBe('No');
+    expect(reviewView({ ...FULL, oxygenRequired: null }, svc('privatecharter'), t).medical.oxygen).toBe('');
+    const ground = reviewView(FULL, svc('ground'), t);
+    expect(ground.medical.criticalLevel).toBe('');
+    expect(ground.medical.oxygen).toBe('');
+    expect(ground.trip.rows.map((r) => r.key)).toEqual(['date']);
   });
 
   test('a field of another service is not drawn (no care level on a hospital request, no death fields on an ambulance)', () => {

@@ -9,7 +9,7 @@ import { usePageTitle } from '@/hooks/usePageTitle';
 import { DetailSection, Field, FieldList } from '../../requests/components/DetailSection';
 import { documentActions } from '../../requests/documentActions.mjs';
 import { formatDateTime } from '../../requests/format';
-import { capitalise, careLevelLabel, formatBytes } from '../../requests/requestDetails.mjs';
+import { capitalise, careLevelLabel, cityLabels, criticalLevelLabel, formatBytes, oxygenLabel, travelTypeLabel } from '../../requests/requestDetails.mjs';
 import { useDocumentActions } from '../../requests/useDocumentActions';
 import { useRequestDetails } from '../../requests/useRequestDetails';
 import { caseSource, caseStatusLabel, caseStatusTone, caseUrgencyLabel, documentView, linkedRequest, sortStageEvents, sourceDocumentFor, validCaseId } from '../caseView.mjs';
@@ -109,10 +109,14 @@ export default function CaseDetailsPage() {
             <FieldList>
               <Field label="Service type" value={c.serviceType} />
               <Field label="Urgency" value={caseUrgencyLabel(c.urgency)} optional />
-              <Field label="Origin" value={c.origin} />
-              <Field label="Destination" value={c.destination} />
+              <Field label={cityLabels(source.request?.serviceKey).origin} value={c.origin} />
+              <Field label={cityLabels(source.request?.serviceKey).destination} value={c.destination} />
               <Field label="Country" value={c.country} optional />
               <Field label="Care level" value={careLevelLabel(c.careLevel)} optional />
+              {/* Private Charter (revised form): read from the source request; absent on older requests and other services. */}
+              <Field label="Travel type" value={travelTypeLabel(source.request?.travelType)} optional />
+              <Field label="Critical level" value={criticalLevelLabel(source.request?.criticalLevel)} optional />
+              <Field label="Oxygen required" value={source.request ? oxygenLabel(source.request) : null} optional />
               <Field label="Policy reference" value={c.policyReference} optional />
               <Field label="Description" value={c.description} wide optional />
               <Field label="Additional information" value={c.additionalInfo} wide optional />

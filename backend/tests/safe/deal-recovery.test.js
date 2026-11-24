@@ -73,7 +73,7 @@ function makePrisma() {
 }
 
 let prisma; let api;
-const recover = (over = {}) => recoverDealEvent({ prisma, api, env: {}, actor: ADMIN, caseId: 7, eventId: 1, mode: 'requeue', reasonCode: 'data_corrected', ...over });
+const recover = (over = {}) => recoverDealEvent({ prisma, api, env: { BITRIX_DEAL_PROFILE: 'test' }, actor: ADMIN, caseId: 7, eventId: 1, mode: 'requeue', reasonCode: 'data_corrected', ...over });
 const code = (promise) => promise.then(() => null, (err) => (err instanceof RecoveryError ? `${err.status}:${err.code}` : err));
 
 beforeEach(() => {
@@ -307,7 +307,7 @@ describe('events with call evidence: reconciliation first, explicit manual resol
     review('no_match_after_waiting_period');
     const original = { ...events[0] };
     const result = await recover({ mode: 'confirm_no_deal', reasonCode: 'checked_in_bitrix' });
-    expect(api.findDealsByReference).toHaveBeenCalledWith(REF, { env: {} });
+    expect(api.findDealsByReference).toHaveBeenCalledWith(REF, { env: { BITRIX_DEAL_PROFILE: 'test' } });
     expect(events[0]).toEqual(original);
     expect(result.status).toBe('pending');
     expect(audit[0]).toMatchObject({ action: 'bitrix.deal.recovery', isOverride: true, reasonCode: 'checked_in_bitrix' });

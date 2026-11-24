@@ -16,13 +16,17 @@ function cleanCode(text) {
   return String(text).replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, MAX_ERROR_LENGTH);
 }
 
-async function findDueIds(db, limit) {
+// `profile` is the active Bitrix profile name. An event belongs to the profile of the Deal link it names; an event for a Deal that has no
+// link (yet) reads as a test-pipeline event, so the actual profile only ever sees Deals that are linked to it. With no profile, nothing is offered.
+async function findDueIds(db, limit, profile = null) {
   const rows = await db.$queryRaw`
-    SELECT id FROM integration_inbox
-    WHERE source = ${SOURCE} AND event_type = ${DEAL_EVENT} AND status = 'received'
-      AND next_attempt_at <= UTC_TIMESTAMP(3)
-      AND (locked_until IS NULL OR locked_until <= UTC_TIMESTAMP(3))
-    ORDER BY id
+    SELECT i.id AS id FROM integration_inbox i
+    LEFT JOIN bitrix_deal_links l ON l.bitrix_deal_id = i.entity_id
+    WHERE i.source = ${SOURCE} AND i.event_type = ${DEAL_EVENT} AND i.status = 'received'
+      AND i.next_attempt_at <= UTC_TIMESTAMP(3)
+      AND (i.locked_until IS NULL OR i.locked_until <= UTC_TIMESTAMP(3))
+      AND COALESCE(l.profile, 'test') = ${profile}
+    ORDER BY i.id
     LIMIT ${limit}`;
   return rows.map((row) => Number(row.id));
 }

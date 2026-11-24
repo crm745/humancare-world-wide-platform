@@ -13,6 +13,7 @@
 const crypto = require('crypto');
 const { isPrivateCharterDealEnabled, bitrixHostProblem } = require('./bitrix-config');
 const { DEAL, FIELD, DOCUMENTS_FIELD } = require('./bitrix-deal');
+const { gatewayFor, BLOCKING_BITRIX_CODES } = require('./queue/dispatcher');
 
 const REQUEST_TIMEOUT_MS = 15000; // same policy as bitrix.service.js
 const MAX_DETAIL = 200;
@@ -35,7 +36,19 @@ function safeDetail(text) {
 // Connection failures that happen before any byte reaches Bitrix: the Deal cannot exist.
 const NOT_SENT_CODES = new Set(['ENOTFOUND', 'ECONNREFUSED', 'EAI_AGAIN']);
 
-async function post(method, payload, { env = process.env, fetchImpl = (...args) => fetch(...args) } = {}) {
+// Every Bitrix24 call of every worker leaves through here (or downloadBitrixFile below): ONE shared rate limiter and circuit breaker (queue/dispatcher.js)
+// protect the portal for all of them. A call the gateway refuses is never sent; it carries code 'gate_closed' and the generic 'ambiguous' outcome, which
+// every caller already handles without a terminal failure (the Deal worker recognises the code and retries later). Callers that inject their own
+// fetch (tests, guarded scripts) get no shared gate unless they pass `gateway`.
+const gateRefusal = (reason) => new BitrixDealCallError('ambiguous', 'gate_closed', reason);
+
+async function post(method, payload, options = {}) {
+  const gate = gatewayFor(options);
+  if (!gate) return exchange(method, payload, options);
+  return gate.run(() => exchange(method, payload, options), { refuse: gateRefusal });
+}
+
+async function exchange(method, payload, { env = process.env, fetchImpl = (...args) => fetch(...args) } = {}) {
   if (!isPrivateCharterDealEnabled(env)) throw new BitrixDealCallError('definitive', 'switch_off', 'a Bitrix switch is off');
   const base = env.BITRIX24_WEBHOOK_URL;
   if (!base) throw new BitrixDealCallError('definitive', 'webhook_not_configured');
@@ -68,12 +81,16 @@ async function post(method, payload, { env = process.env, fetchImpl = (...args) 
   try { data = JSON.parse(text); } catch { data = null; }
   const status = res.status;
 
-  if (status >= 500 || status === 408) throw new BitrixDealCallError('ambiguous', 'server_error', `HTTP ${status}`);
+  // Bitrix24 answers a rate-limit refusal (QUERY_LIMIT_EXCEEDED) with HTTP 503 and a JSON error: that call was NOT executed, so it is handled as the
+  // refusal below (retry later), not as an unknown 5xx. A 5xx without such a body stays ambiguous.
+  const refusedToRun = data && typeof data === 'object' && typeof data.error === 'string' && BLOCKING_BITRIX_CODES.has(data.error.toUpperCase());
+  if (!refusedToRun && (status >= 500 || status === 408)) throw new BitrixDealCallError('ambiguous', 'server_error', `HTTP ${status}`);
   if (data && typeof data === 'object' && data.error) {
     // Bitrix answered with an API error (bad field, no permission, rate limit...): it rejected the call.
-    throw new BitrixDealCallError('definitive', 'bitrix_error', `HTTP ${status} ${safeDetail(String(data.error))}: ${safeDetail(data.error_description)}`);
+    // httpStatus / bitrixCode let the dispatcher tell "the portal refused to run this at all" (rate limit, credential) from a refusal of the content.
+    throw Object.assign(new BitrixDealCallError('definitive', 'bitrix_error', `HTTP ${status} ${safeDetail(String(data.error))}: ${safeDetail(data.error_description)}`), { httpStatus: status, bitrixCode: safeDetail(String(data.error)).slice(0, 64) });
   }
-  if (!res.ok) throw new BitrixDealCallError('definitive', 'http_error', `HTTP ${status}`);
+  if (!res.ok) throw Object.assign(new BitrixDealCallError('definitive', 'http_error', `HTTP ${status}`), { httpStatus: status });
   if (data === null || typeof data !== 'object') throw new BitrixDealCallError('ambiguous', 'unreadable_response');
   if (data.result === undefined || data.result === null) throw new BitrixDealCallError('ambiguous', 'no_result');
   return data;
@@ -105,15 +122,22 @@ async function createDeal(fields, options) {
 //   "uncertain"  anything else: the lookup failed, the answer was truncated (a next page exists), or Bitrix
 //                returned Deals that do not carry the reference (the filter may not be honoured). Never "none".
 // Bitrix's filter is only a request; every returned Deal is re-checked here for category and exact reference.
+// The pipeline searched is options.profile ({ categoryId, referenceField }, a profile object of bitrix-profiles.js); with none it is the Test
+// Pipeline (Category 38), exactly as before. A profile that is not usable (a category that is not a whole number, a reference field that is neither
+// UF_CRM_ user field; the Deal title is never accepted) is refused without a call. A Deal of another category is never matched.
 async function findDealsByReference(reference, options) {
   if (typeof reference !== 'string' || reference === '' || reference !== reference.trim()) {
     return { status: 'uncertain', dealIds: [], reason: 'reference_invalid' };
   }
+  const wanted = options && options.profile ? options.profile : { categoryId: DEAL.CATEGORY_ID, referenceField: FIELD.REFERENCE };
+  if (!Number.isInteger(wanted.categoryId) || wanted.categoryId < 0 || !/^UF_CRM_[A-Za-z0-9_]{1,60}$/.test(String(wanted.referenceField))) {
+    return { status: 'uncertain', dealIds: [], reason: 'profile_invalid' };
+  }
   let data;
   try {
     data = await post('crm.deal.list', {
-      filter: { CATEGORY_ID: DEAL.CATEGORY_ID, [`=${FIELD.REFERENCE}`]: reference },
-      select: ['ID', 'CATEGORY_ID', 'STAGE_ID', FIELD.REFERENCE],
+      filter: { CATEGORY_ID: wanted.categoryId, [`=${wanted.referenceField}`]: reference },
+      select: ['ID', 'CATEGORY_ID', 'STAGE_ID', wanted.referenceField],
       order: { ID: 'ASC' },
       start: 0,
     }, options);
@@ -126,7 +150,7 @@ async function findDealsByReference(reference, options) {
   const verified = new Map(); // exact Deal ID -> its stage
   for (const deal of data.result) {
     const id = deal && exactDealId(deal.ID);
-    if (id !== null && id !== undefined && String(deal.CATEGORY_ID) === String(DEAL.CATEGORY_ID) && deal[FIELD.REFERENCE] === reference) verified.set(id, typeof deal.STAGE_ID === 'string' ? deal.STAGE_ID : null);
+    if (id !== null && id !== undefined && String(deal.CATEGORY_ID) === String(wanted.categoryId) && deal[wanted.referenceField] === reference) verified.set(id, typeof deal.STAGE_ID === 'string' ? deal.STAGE_ID : null);
   }
   if (data.result.length > 0 && verified.size === 0) return { status: 'uncertain', dealIds: [], reason: 'filter_not_honoured' };
   const dealIds = [...verified.keys()];
@@ -176,11 +200,34 @@ function fileIdsOf(value) {
 //     pair [name, base64]; a file whose id is left out of the list is deleted by Bitrix without warning, so every file to keep is listed.
 const DEAL_ENTITY_TYPE_ID = 2;
 const DOCUMENTS_ITEM_KEY = 'ufCrm_1794832401'; // DOCUMENTS_FIELD in camelCase, as crm.item.fields reports it
+// The Deal's Documents field. With no option it is the test pipeline's (the existing behaviour); a different pipeline passes its own
+// field as options.documentsField ("UF_CRM_1795171237"), and the camelCase key is derived from it. Anything that is not a UF_CRM_ name is refused.
+const DOCUMENTS_FIELD_NAME = /^UF_CRM_[A-Za-z0-9]{1,60}$/;
+// Whether the field holds several files or ONE is never assumed: a caller that names a field must also say `documentsMultiple` (true or
+// false), or the call is refused. With no field named it is the test pipeline's field, which is multiple.
+function documentsFieldOf(options) {
+  const name = options && options.documentsField;
+  if (name === undefined) return { field: DOCUMENTS_FIELD, key: DOCUMENTS_ITEM_KEY, multiple: true };
+  if (typeof name !== 'string' || !DOCUMENTS_FIELD_NAME.test(name)) return null;
+  if (typeof options.documentsMultiple !== 'boolean') return null;
+  return { field: name, key: `ufCrm_${name.slice('UF_CRM_'.length)}`, multiple: options.documentsMultiple };
+}
+
+// A SINGLE-file field comes back from crm.item.get as null (empty) or ONE object with a numeric id; as ids it reads [] or [id], so the
+// document worker's list logic (what was there before, what is new) works unchanged.
+function singleFileIdsOf(value) {
+  if (value === undefined || value === null || value === false || value === '') return [];
+  if (Array.isArray(value) || typeof value !== 'object') return null;
+  const id = exactDealId(value.id);
+  return id === null ? null : [id];
+}
 
 // Reads the ids of the files on a Deal's Documents field (crm.item.get). Resolves { status, ids } ("ok" with the exact ids, in Bitrix's
 // order), "not_found", or "uncertain" (switch off, timeout, error, a different Deal, an unreadable shape): try again later.
 async function getDealFiles(dealId, options) {
   if (!/^[1-9]\d*$/.test(String(dealId)) || !Number.isSafeInteger(Number(dealId))) return { status: 'uncertain', reason: 'deal_id_invalid' };
+  const documents = documentsFieldOf(options);
+  if (!documents) return { status: 'uncertain', reason: 'documents_field_invalid' };
   let data;
   try {
     data = await post('crm.item.get', { entityTypeId: DEAL_ENTITY_TYPE_ID, id: Number(dealId), useOriginalUfNames: 'Y' }, options);
@@ -191,7 +238,7 @@ async function getDealFiles(dealId, options) {
   const item = data.result && typeof data.result === 'object' && !Array.isArray(data.result) ? data.result.item : null;
   if (!item || typeof item !== 'object' || Array.isArray(item)) return { status: 'uncertain', reason: 'unexpected_shape' };
   if (String(item.id) !== String(dealId)) return { status: 'uncertain', reason: 'wrong_deal' };
-  const ids = fileIdsOf(item[DOCUMENTS_FIELD]);
+  const ids = documents.multiple ? fileIdsOf(item[documents.field]) : singleFileIdsOf(item[documents.field]);
   if (ids === null) return { status: 'uncertain', reason: 'unexpected_files_shape' };
   return { status: 'ok', ids };
 }
@@ -204,6 +251,24 @@ async function getDealFiles(dealId, options) {
 async function updateDealFiles(dealId, entries, options = {}) {
   if (!/^[1-9]\d*$/.test(String(dealId)) || !Number.isSafeInteger(Number(dealId))) throw new BitrixDealCallError('definitive', 'deal_id_invalid');
   if (!Array.isArray(entries) || (entries.length === 0 && !options.allowEmpty)) throw new BitrixDealCallError('definitive', 'file_list_invalid');
+  const documents = documentsFieldOf(options);
+  if (!documents) throw new BitrixDealCallError('definitive', 'documents_field_invalid');
+  // A single-file field: the only write supported is putting ONE new file into an EMPTY field. Bitrix replaces the file in a single field,
+  // so a write with a kept file (the field is occupied) or with no new file (clearing the field, a form that has not been verified) is
+  // refused before any call. Nothing is overwritten and nothing is deleted.
+  if (!documents.multiple) {
+    const adds = entries.filter((entry) => entry && typeof entry === 'object' && Array.isArray(entry.fileData));
+    if (entries.length !== 1 || adds.length !== 1) throw new BitrixDealCallError('definitive', entries.length > 1 ? 'single_file_field_occupied' : 'single_file_change_unsupported');
+    const [name, base64] = adds[0].fileData;
+    if (typeof name !== 'string' || name === '' || typeof base64 !== 'string' || base64 === '') throw new BitrixDealCallError('definitive', 'file_entry_invalid');
+    const { allowEmpty: _a, documentsField: _d, documentsMultiple: _m, ...single } = options; // eslint-disable-line no-unused-vars
+    const answer = await post('crm.item.update', {
+      entityTypeId: DEAL_ENTITY_TYPE_ID, id: Number(dealId), useOriginalUfNames: 'N', fields: { [documents.key]: [name, base64] },
+    }, single);
+    const changed = answer.result && typeof answer.result === 'object' && !Array.isArray(answer.result) ? answer.result.item : null;
+    if (!changed || typeof changed !== 'object' || String(changed.id) !== String(dealId)) throw new BitrixDealCallError('ambiguous', 'unexpected_result');
+    return { ok: true };
+  }
   const kept = new Set();
   const list = entries.map((entry) => {
     const keepId = entry && typeof entry === 'object' && entry.fileData === undefined ? exactDealId(entry.id) : null;
@@ -217,9 +282,9 @@ async function updateDealFiles(dealId, entries, options = {}) {
     if (!add) throw new BitrixDealCallError('definitive', 'file_entry_invalid');
     return [entry.fileData[0], entry.fileData[1]];
   });
-  const { allowEmpty, ...callOptions } = options; // eslint-disable-line no-unused-vars
+  const { allowEmpty, documentsField, documentsMultiple, ...callOptions } = options; // eslint-disable-line no-unused-vars
   const data = await post('crm.item.update', {
-    entityTypeId: DEAL_ENTITY_TYPE_ID, id: Number(dealId), useOriginalUfNames: 'N', fields: { [DOCUMENTS_ITEM_KEY]: list },
+    entityTypeId: DEAL_ENTITY_TYPE_ID, id: Number(dealId), useOriginalUfNames: 'N', fields: { [documents.key]: list },
   }, callOptions);
   // The documented answer is { result: { item: {...} } } for this Deal. Anything else may still have been applied: never a failure.
   const item = data.result && typeof data.result === 'object' && !Array.isArray(data.result) ? data.result.item : null;
@@ -309,7 +374,13 @@ const redirectRejection = (err) => /redirect/i.test(String(err && err.message)) 
 // connection or a 5xx, so a later retry may succeed. A download changes nothing in Bitrix, so repeating one is always safe.
 // SAFETY: it uses urlMachine ONLY, sends no credentials of its own, rejects every redirect (a redirect target is never followed), and
 // is bound to the same switches and portal allowlist as every other call in this file.
-async function downloadBitrixFile(fileObject, { env = process.env, fetchImpl = (...args) => fetch(...args), timeoutMs = DOWNLOAD_TIMEOUT_MS, maxBytes = MAX_DOWNLOAD_BYTES } = {}) {
+async function downloadBitrixFile(fileObject, options = {}) {
+  const gate = gatewayFor(options);
+  if (!gate) return downloadUnguarded(fileObject, options);
+  return gate.run(() => downloadUnguarded(fileObject, options), { refuse: gateRefusal });
+}
+
+async function downloadUnguarded(fileObject, { env = process.env, fetchImpl = (...args) => fetch(...args), timeoutMs = DOWNLOAD_TIMEOUT_MS, maxBytes = MAX_DOWNLOAD_BYTES } = {}) {
   if (!isPrivateCharterDealEnabled(env)) throw new BitrixDealCallError('definitive', 'switch_off', 'a Bitrix switch is off');
   const base = env.BITRIX24_WEBHOOK_URL;
   if (!base) throw new BitrixDealCallError('definitive', 'webhook_not_configured');

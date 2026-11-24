@@ -56,7 +56,7 @@ describe('Bug 1: a place typed by hand is accepted where the backend takes text'
   });
 });
 
-describe('Private Charter still needs a verified city (the backend takes { geonameId } only)', () => {
+describe('Private Charter needs a chosen city: a GeoNames suggestion, or the typed name once it is explicitly used', () => {
   test('typed text is not enough: it is told to pick a suggestion; nothing typed is rejected for being empty', () => {
     expect(locationProblem({ text: 'nahurad', city: null, countryIso: 'AL', structured: true })).toBe('pick_city');
     expect(locationProblem({ text: '', city: null, countryIso: 'AL', structured: true })).toBe('required');
@@ -69,7 +69,7 @@ describe('Private Charter still needs a verified city (the backend takes { geona
     expect(body.destination).toEqual({ geonameId: 1275339 });
   });
   test('the message says what is needed and why', () => {
-    expect(read('app/request/step1.js')).toContain("const CHOOSE_CITY = 'Pick a city from the suggestions: Private Charter needs a verified city.';");
+    expect(read('app/request/step1.js')).toContain("const CHOOSE_CITY = 'Pick a city from the suggestions, or tap \\u201cUse\\u201d to enter it as typed.';");
   });
 });
 

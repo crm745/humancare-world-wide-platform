@@ -1,13 +1,15 @@
 // The service_requests columns a validated request body fills in. Used by the request-first
 // review workflow; it must stay the same as what createRequest (requests.service.js) writes, and
 // a test (request-review.test.js) compares the two so they cannot drift apart.
+const { criticalLevelColumn } = require('../../common/constants/request.constants');
+
 function requestRecordData(userId, data) {
   const {
     serviceType, serviceKey, patientName, patientAge, patientGender, patientLocation, patientContact,
     origin, destination, originGeonameId, originCityName, originCountryCode, originTimezone,
     destinationGeonameId, destinationCityName, destinationCountryCode, country, preferredDate, careLevel,
     description, deceasedRelation, placeOfDeath, dateOfDeath, mobility, equipOxygen, equipCardiacMonitor,
-    equipVentilator, urgency,
+    equipVentilator, urgency, travelType, criticalLevel, oxygenRequired, oxygenFlowLpm,
   } = data;
   return {
     userId,
@@ -39,6 +41,10 @@ function requestRecordData(userId, data) {
     equipCardiacMonitor: equipCardiacMonitor ?? null,
     equipVentilator: equipVentilator ?? null,
     urgency: urgency || null,
+    travelType: travelType || null,
+    criticalLevel: criticalLevelColumn(criticalLevel), // an array of keys is stored joined by commas
+    oxygenRequired: oxygenRequired ?? null,
+    oxygenFlowLpm: oxygenFlowLpm ?? null,
   };
 }
 

@@ -25,16 +25,29 @@ const crypto = require('crypto');
 const { prisma: defaultPrisma } = require('../../db/prisma');
 const { isPrivateCharterDealWorkerActive } = require('./bitrix-config');
 const { assertDealEligible, assertDealCreationAllowed } = require('./deal-outbox');
-const { buildDealFields, DealMappingError, DEAL } = require('./bitrix-deal');
+const { DealMappingError } = require('./bitrix-deal');
+const { resolveProfile, eventProfileProblem, activeProfileName, referenceFieldOf, PROFILE_TEST } = require('./bitrix-profiles');
+const { buildProfileDealFields, linkProfileProblem } = require('./bitrix-profile-runtime');
 const bitrixDealApi = require('./bitrix-deal.api');
 const defaultStore = require('./deal-outbox.store');
 const { appendAuditLog } = require('../../common/audit/business-audit');
 const { reportDealFailures } = require('./deal-failure-alerts');
+const { gatewayForPass, classifyCallError } = require('./queue/dispatcher');
+const { PRIVATE_CHARTER_QUEUE } = require('./queue/service-registry');
+const { backoffSeconds } = require('./queue/backoff');
 
 const LEASE_SECONDS = 120; // well above the 15 s request timeout
 const MIN_LEASE_LEFT_BEFORE_CALL_SECONDS = bitrixDealApi.REQUEST_TIMEOUT_MS / 1000 + 30;
 const MAX_CLAIMS_BEFORE_ANY_CALL = 10;
 const BATCH_SIZE = 5;
+// The queue this worker serves (queue/service-registry.js: Private Charter is a kind of the canonical Air Ambulance service). Every Bitrix call it
+// makes passes the shared gateway at the API layer (one rate limiter and one circuit breaker for the whole portal); this worker only asks before it
+// claims anything.
+const SERVICE_KEY = PRIVATE_CHARTER_QUEUE;
+// A Deal creation that Bitrix24 REFUSED TO RUN (rate limit, rejected credential, portal unreachable before sending) is retried later with exponential
+// backoff and jitter. After this many deliveries it is dead-lettered: status 'failed' with a dead_letter: reason, which the existing failure alert
+// (deal-failure-alerts.js) raises and a superadmin resolves with the existing deal-recovery route.
+const MAX_DELIVERY_ATTEMPTS = 8;
 const RECONCILE_FIRST_DELAY_SECONDS = 60;
 const RECONCILE_INTERVAL_SECONDS = 5 * 60;
 // How long reconciliation keeps looking before it gives up and asks a person. The length is a business decision
@@ -52,6 +65,9 @@ function buildContext(overrides = {}) {
     prisma: defaultPrisma, store: defaultStore, api: bitrixDealApi, env: process.env, log: console,
     reportFailures: reportDealFailures, workerId: makeWorkerId(), ...overrides,
   };
+  // The real worker (no overrides) shares ONE gateway with every other Bitrix worker of the process; a pass with its own env/scope (tests, guarded
+  // scripts) gets its own, so its state never leaks into the real one.
+  if (!ctx.gateway) ctx.gateway = gatewayForPass(overrides);
   // A scoped pass (scope: { caseIds }, used by scripts/e2e-worker.js) never writes failure alerts about events that are
   // not in its scope: the default alert writer looks at EVERY failed event, so it is replaced unless the caller gives one.
   if (ctx.scope && !('reportFailures' in overrides)) ctx.reportFailures = async () => 0;
@@ -91,7 +107,7 @@ function completion(claim, caseRecord, dealId, stageId, adopted) {
   return {
     status: 'completed',
     lastError: null,
-    link: { bitrixDealId: dealId, categoryId: String(DEAL.CATEGORY_ID), stageId: stageId ?? null, syncStatus: 'synced', lastSyncedAt: now, lastError: null },
+    link: { bitrixDealId: dealId, categoryId: String(claim.profile.categoryId), profile: claim.profile.name, stageId: stageId ?? null, syncStatus: 'synced', lastSyncedAt: now, lastError: null },
     audit: {
       caseId: claim.caseId, entityType: 'bitrix_deal_link', entityId: claim.caseId, action: 'bitrix.deal.linked',
       actorType: 'system', source: 'system', reasonCode: adopted ? 'deal_adopted_by_reference' : 'deal_created',
@@ -129,13 +145,33 @@ async function manualReview(ctx, claim, reason) {
   });
 }
 
+// Bitrix24 refused to run the call (or was unreachable before anything was sent): no Deal can exist, so the event goes back to 'pending' for a
+// later retry with exponential backoff and jitter, and the dispatcher learns about it. Too many deliveries -> dead letter.
+async function retryLater(ctx, claim, kind, err) {
+  const reason = `retry:${kind}:${err && err.bitrixCode ? String(err.bitrixCode).toLowerCase() : err && err.code ? err.code : 'unknown'}`;
+  // A call our own gateway refused costs nothing and says nothing about the portal, so it never counts toward the dead letter.
+  if (kind !== 'deferred' && claim.attempts >= MAX_DELIVERY_ATTEMPTS) return failDefinitively(ctx, claim, `dead_letter:${reason}`);
+  const delaySeconds = backoffSeconds(claim.attempts);
+  try {
+    await ctx.prisma.$transaction(async (tx) => {
+      const written = await ctx.store.writeRetry(tx, claim, { lastError: reason, delaySeconds });
+      if (written !== 1) throw new LeaseLostError();
+      await tx.bitrixDealLink.update({ where: { caseId: claim.caseId }, data: { syncStatus: 'pending', lastError: reason, lastAttemptAt: new Date() } });
+    });
+    return true;
+  } catch (e) {
+    if (e instanceof LeaseLostError) return false; // recovery handles it: the evidence stays, so it can only be reconciled, never re-sent
+    throw e;
+  }
+}
+
 // ---- the two flows -------------------------------------------------------------------------------------------------
 
 async function createFlow(ctx, claim, caseRecord) {
   const request = caseRecord.serviceRequest;
   let fields;
   try {
-    fields = buildDealFields(caseRecord, request);
+    fields = buildProfileDealFields(claim.profile, caseRecord, request);
   } catch (err) {
     if (err instanceof DealMappingError) return failDefinitively(ctx, claim, `mapping:${err.code}`);
     throw err;
@@ -152,16 +188,20 @@ async function createFlow(ctx, claim, caseRecord) {
   try {
     created = await ctx.api.createDeal(fields, { env: ctx.env });
   } catch (err) {
+    const kind = classifyCallError(err); // the gateway has already told the breaker, once, at the API layer
+    // The portal refused to execute the call (rate limit, credential) or could not be reached before sending: nothing was created, retry later.
+    if (kind === 'blocking' || kind === 'unsent' || kind === 'deferred') return retryLater(ctx, claim, kind, err);
     if (err instanceof bitrixDealApi.BitrixDealCallError && err.outcome === 'definitive') return failDefinitively(ctx, claim, err.message);
     // Anything else (timeout, lost connection, 5xx, unusable answer, unexpected error): the Deal may exist.
     const code = err instanceof bitrixDealApi.BitrixDealCallError ? err.message : 'unexpected_error_during_call';
     return markAmbiguous(ctx, claim, code, RECONCILE_FIRST_DELAY_SECONDS);
   }
-  return complete(ctx, claim, caseRecord, created.dealId, DEAL.STAGE_ID, false);
+  return complete(ctx, claim, caseRecord, created.dealId, claim.profile.newStageId, false);
 }
 
 async function reconcileFlow(ctx, claim, caseRecord) {
-  const found = await ctx.api.findDealsByReference(caseRecord.referenceNumber, { env: ctx.env });
+  // The test pipeline is searched exactly as before; the other profile passes its own category and reference field.
+  const found = await ctx.api.findDealsByReference(caseRecord.referenceNumber, claim.profile.name === PROFILE_TEST ? { env: ctx.env } : { env: ctx.env, profile: claim.profile });
   if (found.status === 'single') return complete(ctx, claim, caseRecord, found.dealIds[0], found.stageId, true);
   if (found.status === 'multiple') return manualReview(ctx, claim, 'multiple_matching_deals');
 
@@ -173,7 +213,26 @@ async function reconcileFlow(ctx, claim, caseRecord) {
   return markAmbiguous(ctx, claim, `reconciling:${why}`, RECONCILE_INTERVAL_SECONDS);
 }
 
+// The pipeline this worker sends to is the one named by BITRIX_DEAL_PROFILE (no default), and an event may only be sent through the
+// profile it was queued for (and a Case's link only through the profile it belongs to). On any mismatch nothing is sent and the event
+// is left untouched (its lease runs out and it returns to its state). The profile then drives the category, the stage, the field
+// mapping and the reference lookup of every flow below.
+function profileGate(ctx, claim) {
+  const active = resolveProfile(ctx.env);
+  const problem = eventProfileProblem(claim.payload, active);
+  if (problem) return { problem };
+  // A Deal is never created or searched for without the profile's Case reference field (no fallback to the title).
+  if (!referenceFieldOf(active)) return { problem: 'reference_field_not_configured' };
+  return { active };
+}
+
 async function processClaim(ctx, claim) {
+  const gate = profileGate(ctx, claim);
+  if (gate.problem) {
+    ctx.log.error(`[deal-worker] event ${claim.id}: not sent (${gate.problem}).`);
+    return false;
+  }
+  claim.profile = gate.active;
   const caseRecord = await ctx.prisma.case.findUnique({
     where: { id: claim.caseId },
     include: { serviceRequest: true, bitrixDealLink: true },
@@ -186,6 +245,11 @@ async function processClaim(ctx, claim) {
   }
   const link = caseRecord.bitrixDealLink;
   if (!link) return failDefinitively(ctx, claim, 'deal_link_missing');
+  const linkProblem = linkProfileProblem(link, claim.profile);
+  if (linkProblem) {
+    ctx.log.error(`[deal-worker] event ${claim.id}: not sent (${linkProblem}).`);
+    return false;
+  }
   if (link.bitrixDealId) {
     // The Case already has its Deal: never create another; just finish the event.
     return complete(ctx, claim, caseRecord, link.bitrixDealId, link.stageId, true);
@@ -214,34 +278,40 @@ async function runDealWorker(overrides = {}) {
   const ctx = buildContext(overrides);
   if (!isPrivateCharterDealWorkerActive(ctx.env)) return { active: false, claimed: 0 };
 
-  await ctx.store.recoverExpiredLeases(ctx.prisma, { maxClaims: MAX_CLAIMS_BEFORE_ANY_CALL, ...(ctx.scope && { caseIds: ctx.scope.caseIds }) });
+  await ctx.store.recoverExpiredLeases(ctx.prisma, { maxClaims: MAX_CLAIMS_BEFORE_ANY_CALL, ...(ctx.scope && { caseIds: ctx.scope.caseIds, eventIds: ctx.scope.eventIds }) });
   let claimed = 0;
-  for (const fromStatus of ['pending', 'ambiguous']) {
-    const ids = await ctx.store.findCandidateIds(ctx.prisma, fromStatus, BATCH_SIZE, ctx.scope);
+  let paused = null;
+  passes: for (const fromStatus of ['pending', 'ambiguous']) {
+    const ids = await ctx.store.findCandidateIds(ctx.prisma, fromStatus, BATCH_SIZE, ctx.scope, activeProfileName(ctx.env));
     for (const id of ids) {
-      const claim = await ctx.store.claim(ctx.prisma, { id, fromStatus, workerId: ctx.workerId, leaseSeconds: LEASE_SECONDS });
-      if (!claim) continue;
-      claimed += 1;
+      // The shared gateway is asked BEFORE anything is claimed: an open circuit means "wait for the next pass", and no delivery attempt is used up.
+      const start = ctx.gateway.canStart(SERVICE_KEY);
+      if (!start.ok) { paused = start.reason; break passes; }
+      let claim = null;
       try {
+        claim = await ctx.store.claim(ctx.prisma, { id, fromStatus, workerId: ctx.workerId, leaseSeconds: LEASE_SECONDS });
+        if (!claim) continue;
+        claimed += 1;
         await processClaim(ctx, claim);
       } catch (err) {
         // Unknown failure: leave the event as it is. If a call had started, lease expiry makes it 'ambiguous';
         // if not, it returns to 'pending'. Log the error name only (messages could carry data).
-        ctx.log.error(`[deal-worker] event ${claim.id}: unexpected ${err && err.name ? err.name : 'error'}; left for lease recovery.`);
+        ctx.log.error(`[deal-worker] event ${claim ? claim.id : id}: unexpected ${err && err.name ? err.name : 'error'}; left for lease recovery.`);
       }
     }
   }
+  if (paused) ctx.log.warn(`[deal-worker] paused this pass: ${paused}.`);
   // Alerts for failed / manual-review events (see deal-failure-alerts.js). A problem here never affects delivery.
   try {
     await ctx.reportFailures({ prisma: ctx.prisma, log: ctx.log });
   } catch (err) {
     ctx.log.error(`[deal-worker] could not write failure alerts: ${err && err.name ? err.name : 'error'}`);
   }
-  return { active: true, claimed };
+  return { active: true, claimed, ...(paused && { paused }) };
 }
 
 module.exports = {
   runDealWorker, processClaim, LeaseLostError,
-  LEASE_SECONDS, MIN_LEASE_LEFT_BEFORE_CALL_SECONDS, MAX_CLAIMS_BEFORE_ANY_CALL, BATCH_SIZE,
+  LEASE_SECONDS, MIN_LEASE_LEFT_BEFORE_CALL_SECONDS, MAX_CLAIMS_BEFORE_ANY_CALL, BATCH_SIZE, MAX_DELIVERY_ATTEMPTS, SERVICE_KEY,
   RECONCILE_FIRST_DELAY_SECONDS, RECONCILE_INTERVAL_SECONDS, RECONCILIATION_WINDOW_SECONDS,
 };

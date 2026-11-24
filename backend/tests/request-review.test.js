@@ -34,7 +34,7 @@ const sha = (content) => crypto.createHash('sha256').update(content).digest('hex
 const pcBody = {
   serviceKey: 'privatecharter', patientName: 'Maria Fernandez', patientAge: 61, patientGender: 'female', country: 'AE',
   origin: { geonameId: IDS.MUMBAI }, destination: { geonameId: IDS.DUBAI }, patientContact: '+971501234567', preferredDate: '2099-01-01',
-  careLevel: ['care_icu'], description: 'Needs ICU transfer', mobility: 'bedridden', urgency: 'urgent_24h',
+  travelType: 'organ_transfer', description: 'Needs ICU transfer', criticalLevel: ['icu'], oxygenRequired: true, oxygenFlowLpm: 4,
 };
 
 // A SCOPED run (jest.scoped.config.js, npm run test:scoped:request-review) uses the existing, populated humancare_test
@@ -573,12 +573,13 @@ describe('Admin can see every request, including incomplete ones', () => {
 
     // Request, patient and request-information fields.
     for (const field of ['id', 'referenceNumber', 'reviewStatus', 'submittedAt', 'createdAt', 'documentsRequestReason', 'patientName', 'patientAge', 'patientGender',
-      'patientContact', 'patientLocation', 'serviceType', 'origin', 'destination', 'country', 'preferredDate', 'careLevel', 'urgency', 'mobility', 'description',
+      'patientContact', 'patientLocation', 'serviceType', 'origin', 'destination', 'country', 'preferredDate', 'careLevel', 'urgency', 'mobility', 'description', 'travelType', 'criticalLevel', 'oxygenRequired', 'oxygenFlowLpm',
       'equipOxygen', 'equipCardiacMonitor', 'equipVentilator', 'deceasedRelation', 'placeOfDeath', 'dateOfDeath']) {
       expect(body).toHaveProperty(field);
     }
-    expect(body).toMatchObject({ reviewStatus: 'in_review', patientName: 'Maria Fernandez', patientAge: 61, patientGender: 'female', urgency: 'urgent_24h', country: 'AE' });
-    expect(body.careLevel).toBe('care_icu'); // keys: the page translates them
+    expect(body).toMatchObject({ reviewStatus: 'in_review', patientName: 'Maria Fernandez', patientAge: 61, patientGender: 'female', travelType: 'organ_transfer', criticalLevel: ['icu'], oxygenRequired: true, oxygenFlowLpm: 4, country: 'AE' });
+    expect(body.travelType).toBe('organ_transfer'); // keys: the page translates them
+    expect(body.careLevel).toBeNull(); // the revised form has no care level
     // Account holder.
     expect(body.user).toEqual({ id: r.user.id, name: expect.any(String), email: expect.any(String), mobile: expect.anything() });
     // Document history, including the replaced original with its rejection and the replacement link.
@@ -900,8 +901,8 @@ describe('approving a request opens its Case and records its Bitrix Deal event',
     expect(made.referenceNumber).toBe(`CASE-${1000 + made.id}`);
     expect(made).toMatchObject({
       patientName: 'Maria Fernandez', patientAge: 61, patientGender: 'female', patientContact: '+971501234567', country: 'AE',
-      origin: 'Mumbai, Maharashtra, India', destination: 'Dubai, United Arab Emirates', careLevel: 'care_icu',
-      description: 'Needs ICU transfer', urgency: 'urgent', status: 'submitted', corporateId: null, charterStage: 'patient_details', stageVersion: 0, bitrixLeadId: null,
+      origin: 'Mumbai, Maharashtra, India', destination: 'Dubai, United Arab Emirates', careLevel: null,
+      description: 'Needs ICU transfer', urgency: 'routine', status: 'submitted', corporateId: null, charterStage: 'patient_details', stageVersion: 0, bitrixLeadId: null,
     });
     expect((await prisma.serviceRequest.findUnique({ where: { id: r.id } })).referenceNumber).toBe(`REQ-${1000 + r.id}`);
     expect(await prisma.serviceRequest.findUnique({ where: { id: r.id } })).toMatchObject({ reviewStatus: 'approved', status: 'submitted' });

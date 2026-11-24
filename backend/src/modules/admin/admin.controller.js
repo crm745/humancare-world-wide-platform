@@ -29,8 +29,8 @@ const { passwordProblem } = require('../auth/auth.service');
 const { recordAuditEvent, ACTOR } = require('../../common/audit/audit-log');
 const { updateCaseStage, getCaseById, VALID_CASE_STATUSES } = require('../cases/cases.service');
 const { prisma } = require('../../db/prisma');
-const path = require('path');
-const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
+const { keyFromStoredReference } = require('../../storage/keys');
+const { sendStoredFile } = require('../../storage/respond');
 
 async function login(req, res, next) {
   try {
@@ -167,7 +167,7 @@ async function downloadRegistrationDocument(req, res, next) {
   try {
     const doc = await getRegistrationDocument(req.params.id, req.params.key, req.admin);
     auditAdmin(req, 'registration_document_downloaded', Number(req.params.id), { key: req.params.key });
-    res.download(path.join(UPLOAD_DIR, path.basename(doc.fileUrl)), doc.fileName, { dotfiles: 'allow' });
+    await sendStoredFile(res, { key: keyFromStoredReference(doc.fileUrl), filename: doc.fileName });
   } catch (err) {
     next(err);
   }

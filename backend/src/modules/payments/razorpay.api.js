@@ -16,7 +16,8 @@ const API_HOST = 'api.razorpay.com';
 const API_BASE = `https://${API_HOST}/v1`; // fixed, never read from the environment, so it cannot be redirected elsewhere
 const REQUEST_TIMEOUT_MS = 15000;
 const ORDER_ID = /^order_[A-Za-z0-9]{1,58}$/;
-const RECEIPT = /^HCP[1-9]\d{0,9}$/; // "HCP" + the HumanCare payment id; at most 13 characters (Razorpay allows 40)
+const PAYMENT_ID = /^pay_[A-Za-z0-9]{1,60}$/;
+const RECEIPT =/^HCP[1-9]\d{0,9}$/; // "HCP" + the HumanCare payment id; at most 13 characters (Razorpay allows 40)
 const ERROR_CODE = /^[A-Z][A-Z0-9_]{0,63}$/;
 const NOT_SENT_CODES = new Set(['ENOTFOUND', 'ECONNREFUSED', 'EAI_AGAIN']);
 const LIST_PAGE = 10;
@@ -27,6 +28,7 @@ class RazorpayCallError extends Error {
     this.name = 'RazorpayCallError';
     this.outcome = outcome; // "definitive" | "ambiguous"
     this.code = code;
+    this.detail = detail || ''; // only ever "HTTP <status>[ <ERROR_CODE>]" or a network error code: validated above, never Razorpay text
   }
 }
 
@@ -172,4 +174,67 @@ async function fetchOrder(orderId, options) {
   return { status: 'ok', order };
 }
 
-module.exports = { createOrder, findOrdersByReceipt, fetchOrder, RazorpayCallError, API_HOST, ORDER_ID, RECEIPT };
+// A payment object as Razorpay returned it, reduced to the few fields reconciliation compares, or null when it is not a well-formed payment.
+function readPayment(item) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  if (typeof item.id !== 'string' || !PAYMENT_ID.test(item.id)) return null;
+  if (item.entity !== undefined && item.entity !== 'payment') return null;
+  if (typeof item.order_id !== 'string' || !ORDER_ID.test(item.order_id)) return null;
+  if (!Number.isSafeInteger(item.amount) || item.amount <= 0) return null;
+  if (typeof item.currency !== 'string' || !/^[A-Z]{3}$/.test(item.currency)) return null;
+  if (typeof item.status !== 'string' || !/^[a-z_]{1,24}$/.test(item.status)) return null;
+  if (typeof item.captured !== 'boolean') return null;
+  const refunded = item.amount_refunded === undefined || item.amount_refunded === null ? 0 : item.amount_refunded;
+  if (!Number.isSafeInteger(refunded) || refunded < 0) return null;
+  return {
+    paymentId: item.id,
+    orderId: item.order_id,
+    amountMinor: item.amount,
+    currency: item.currency,
+    status: item.status, // "created" | "authorized" | "captured" | "refunded" | "failed"
+    captured: item.captured,
+    amountRefundedMinor: refunded,
+    createdAtSeconds: Number.isSafeInteger(item.created_at) ? item.created_at : null,
+    method: typeof item.method === 'string' && /^[a-z_]{1,24}$/.test(item.method) ? item.method : null,
+  };
+}
+
+// Reads ONE payment (GET only: nothing is created, captured or refunded). Resolves { status: "ok", payment } | { status: "not_found" } |
+// { status: "uncertain", reason }. Never throws for a gateway problem. The payment returned must be the one asked for.
+async function fetchPayment(paymentId, options) {
+  if (typeof paymentId !== 'string' || !PAYMENT_ID.test(paymentId)) return { status: 'uncertain', reason: 'payment_id_invalid' };
+  let data;
+  try {
+    data = await call('GET', `/payments/${paymentId}`, options);
+  } catch (err) {
+    if (err && err.code === 'not_found') return { status: 'not_found' };
+    return { status: 'uncertain', reason: (err && err.code) || 'lookup_failed', ...(err && err.detail && { detail: err.detail }) };
+  }
+  const payment = readPayment(data);
+  if (!payment || payment.paymentId !== paymentId) return { status: 'uncertain', reason: 'unexpected_payment' };
+  return { status: 'ok', payment };
+}
+
+// Lists the payment attempts of ONE order (GET only). Resolves { status: "ok", payments } | { status: "not_found" } | { status: "uncertain", reason }.
+// Every item must be a well-formed payment of THIS order; anything else, or a page that may be truncated, is "uncertain" (never a partial list).
+async function fetchOrderPayments(orderId, options) {
+  if (typeof orderId !== 'string' || !ORDER_ID.test(orderId)) return { status: 'uncertain', reason: 'order_id_invalid' };
+  let data;
+  try {
+    data = await call('GET', `/orders/${orderId}/payments`, options);
+  } catch (err) {
+    if (err && err.code === 'not_found') return { status: 'not_found' };
+    return { status: 'uncertain', reason: (err && err.code) || 'lookup_failed', ...(err && err.detail && { detail: err.detail }) };
+  }
+  if (!Array.isArray(data.items)) return { status: 'uncertain', reason: 'unexpected_shape' };
+  if (data.items.length >= 100) return { status: 'uncertain', reason: 'truncated' };
+  const payments = [];
+  for (const item of data.items) {
+    const payment = readPayment(item);
+    if (!payment || payment.orderId !== orderId) return { status: 'uncertain', reason: 'unexpected_payment' };
+    payments.push(payment);
+  }
+  return { status: 'ok', payments };
+}
+
+module.exports = { createOrder, findOrdersByReceipt, fetchOrder, fetchPayment, fetchOrderPayments, RazorpayCallError, API_HOST, ORDER_ID, PAYMENT_ID, RECEIPT };

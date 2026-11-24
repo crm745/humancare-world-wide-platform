@@ -21,13 +21,13 @@ const clamav = require('../../integrations/clamav/clamav');
 const { SCAN_RETRY, scanBackoffMs, isStorageErrorCode } = require('../request-review/request-review.config');
 const { isQuotationSyncActive } = require('./bitrix-config');
 const { appendAuditLog } = require('../../common/audit/business-audit');
-const { createLocalStorage, hashFile } = require('./quotation-storage');
+const { createQuotationStorage } = require('./quotation-storage');
 
 const SCAN = { PENDING: 'pending', CLEAN: 'clean', INFECTED: 'infected', ERROR: 'error' };
 const clip = (text, max) => (text == null ? null : String(text).slice(0, max));
 
 function buildContext(overrides = {}) {
-  return { prisma: defaultPrisma, storage: null, scanner: clamav.scanFile, health: clamav.ping, clock: Date.now, rng: Math.random, log: console, env: process.env, ...overrides };
+  return { prisma: defaultPrisma, storage: null, scanner: clamav.scanFile, streamScanner: clamav.scanStream, health: clamav.isReady, clock: Date.now, rng: Math.random, log: console, env: process.env, ...overrides };
 }
 // What a log line may say about an error: its name, a Prisma / system code (P2002, EIO ...) and, for a constraint failure, the NAME of the
 // constraint or columns (meta.target). Never the message (it can quote values), the query, the parameters or any file content.
@@ -41,7 +41,7 @@ function describeError(err) {
   if (text) parts.push(`target=${text.replace(SAFE_TOKEN, '_').slice(0, 120)}`);
   return parts.join(' ');
 }
-const storageOf = (ctx) => ctx.storage || (ctx.storage = createLocalStorage());
+const storageOf = (ctx) => ctx.storage || (ctx.storage = createQuotationStorage());
 
 // The identity of ONE stored file: its storage key without the folder and extension ("ev466-<sha256>"). A storage key is unique per stored
 // object (the table has UNIQUE storage_key) and is derived from the sync event that stored it, so two versions or two replacements with the
@@ -107,24 +107,31 @@ async function attemptScan(ctx, id) {
   const { row, attempts } = claim;
   const storage = storageOf(ctx);
 
+  const provider = row.storageProvider || 'local';
+  const objectStore = provider === 's3';
   let verdict;
   try {
-    const file = storage.pathOf(row.storageKey);
-    const before = await hashFile(file);
+    // The scan is bound to the stored file's SHA-256: the object must be what was recorded before it is scanned, and unchanged after,
+    // otherwise "clean" would describe different bytes than the ones kept. Local files are scanned from disk, S3 objects as a stream.
+    const before = await storage.hashOf(row.storageKey, provider);
     if (before !== row.sha256) verdict = { final: true, detail: 'the stored file does not match its checksum' };
     else {
-      verdict = await ctx.scanner(file);
-      if (verdict && verdict.status === SCAN.CLEAN && (await hashFile(file)) !== before) verdict = { final: true, detail: 'the file changed while it was being scanned' };
+      verdict = objectStore
+        ? await ctx.streamScanner((await storage.openStream(row.storageKey, provider)).stream)
+        : await ctx.scanner(storage.pathOf(row.storageKey));
+      if (verdict && verdict.status === SCAN.CLEAN && (await storage.hashOf(row.storageKey, provider)) !== before) verdict = { final: true, detail: 'the file changed while it was being scanned' };
     }
   } catch (err) {
-    if (err && err.code === 'ENOENT') {
-      // Missing file: if the storage folder itself is there the file is really gone (final); otherwise the storage is in trouble and no attempt is used up.
-      const folderOk = await fs.promises.stat(path.dirname(storage.pathOf(row.storageKey))).then(() => true, () => false);
+    if (err && (err.code === 'ENOENT' || err.code === 'not_found')) {
+      // Missing file: if the storage itself is there the file is really gone (final); otherwise the storage is in trouble and no attempt is used up.
+      // (An S3 "not found" is an answer from a reachable bucket, so it is final.)
+      const folderOk = objectStore ? true : await fs.promises.stat(path.dirname(storage.pathOf(row.storageKey))).then(() => true, () => false);
       verdict = folderOk ? { final: true, detail: 'the stored file is missing' } : { storage: true, detail: 'the quotation storage is not reachable' };
-    } else if (isStorageErrorCode(err && err.code)) verdict = { storage: true, detail: `storage error (${err.code})` };
+    } else if (isStorageErrorCode(err && err.code) || (err && ['download_failed', 'metadata_failed', 'config_missing', 'config_invalid'].includes(err.code))) verdict = { storage: true, detail: `storage error (${err.code})` };
     else verdict = { retry: true, detail: `the scan could not be completed (${clip((err && (err.code || err.message)) || 'error', 80)})` };
   }
 
+  if (!verdict) verdict = { retry: true, detail: 'the scanner gave no verdict' };
   if (verdict.final) {
     const done = await saveOutcome(ctx, row, attempts, { status: SCAN.ERROR, detail: verdict.detail, audit: scanAudit('quotation.scan_failed', row, 'file_unverifiable') });
     if (done) ctx.log.error(`[ALERT] quotation ${row.id}: the malware scan cannot succeed (${verdict.detail}). A replacement file is needed.`);
@@ -138,14 +145,14 @@ async function attemptScan(ctx, id) {
     return { id, outcome: 'storage_unavailable' };
   }
   if (verdict.status === SCAN.CLEAN) {
-    const done = await saveOutcome(ctx, row, attempts, { status: SCAN.CLEAN, detail: 'stream: OK', definite: true, audit: scanAudit('quotation.scan_clean', row, 'clean') });
+    const done = await saveOutcome(ctx, row, attempts, { status: SCAN.CLEAN, detail: (clamav.lastSummary && clamav.lastSummary()) || 'stream: OK', definite: true, audit: scanAudit('quotation.scan_clean', row, 'clean') });
     return { id, outcome: done ? 'clean' : 'discarded' };
   }
   if (verdict.status === SCAN.INFECTED) {
     const done = await saveOutcome(ctx, row, attempts, { status: SCAN.INFECTED, detail: `infected: ${clip(verdict.signature, 120)}`, definite: true, audit: scanAudit('quotation.scan_infected', row, 'infected') });
     if (done) {
       ctx.log.error(`[ALERT] quotation ${row.id}: malware detected; the file is quarantined and the version can never be confirmed.`);
-      try { await storage.quarantine(row.storageKey); } catch (err) { ctx.log.error(`[ALERT] quotation ${row.id}: the infected file could not be moved to quarantine (${(err && err.code) || 'error'}); it must be moved by hand.`); }
+      try { await storage.quarantine(row.storageKey, provider); } catch (err) { ctx.log.error(`[ALERT] quotation ${row.id}: the infected file could not be moved to quarantine (${(err && err.code) || 'error'}); it must be moved by hand.`); }
     }
     return { id, outcome: done ? 'infected' : 'discarded' };
   }

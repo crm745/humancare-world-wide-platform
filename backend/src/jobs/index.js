@@ -12,5 +12,6 @@ const adminAuditPurgeJob = require('./admin-audit-purge.job');
 const invoiceFromQuotationJob = require('./invoice-from-quotation.job');
 const paymentOrderRecoveryJob = require('./payment-order-recovery.job');
 const razorpayWebhookInboxJob = require('./razorpay-webhook-inbox.job');
+const quotationAutoPublishJob = require('./quotation-auto-publish.job');
 
-module.exports = { jobs: [bitrixRetryJob, bitrixDealJob, bitrixDealInboxJob, bitrixDealReconcileJob, bitrixDealDocumentJob, bitrixQuotationJob, scanCaseQuotationsJob, invoiceFromQuotationJob, securityLogPurgeJob, scanRequestDocumentsJob, adminAuditPurgeJob, paymentOrderRecoveryJob, razorpayWebhookInboxJob] };
+module.exports = { jobs: [bitrixRetryJob, bitrixDealJob, bitrixDealInboxJob, bitrixDealReconcileJob, bitrixDealDocumentJob, bitrixQuotationJob, scanCaseQuotationsJob, invoiceFromQuotationJob, securityLogPurgeJob, scanRequestDocumentsJob, adminAuditPurgeJob, paymentOrderRecoveryJob, razorpayWebhookInboxJob, quotationAutoPublishJob] };

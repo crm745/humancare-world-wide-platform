@@ -21,6 +21,26 @@ export function toCityChoice(city) {
   return { geonameId: city.geonameId, name: city.name, label: city.label, countryCode: city.countryCode };
 }
 
+// A city the person typed because GeoNames has no match, and chose to use as typed ("Use ..."). It has no geonameId (none is ever invented)
+// and says so with `manual: true`. `countryCode` is the country context, or null when there is none.
+export const MANUAL_CITY_MAX = 100;
+export function toManualCity(text, countryCode) {
+  const name = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+  return { manual: true, name, label: name, countryCode: countryCode ? String(countryCode).toUpperCase() : null };
+}
+export const isManualCity = (city) => !!city && city.manual === true;
+// Is this text acceptable as a manual city (the backend's rule: 2-100 characters, a letter, plain place-name characters)?
+export const isManualCityName = (text) => {
+  const name = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+  return Array.from(name).length >= 2 && Array.from(name).length <= MANUAL_CITY_MAX && /\p{L}/u.test(name) && /^[\p{L}\p{M}\p{N} .,'\u2019()\-/&]+$/u.test(name);
+};
+// What a city is sent as: { geonameId } for a picked one, { name, countryCode? } for one typed by hand (undefined when there is none).
+export function cityRef(city) {
+  if (!city) return undefined;
+  if (isManualCity(city)) return city.countryCode ? { name: city.name, countryCode: city.countryCode } : { name: city.name };
+  return { geonameId: city.geonameId };
+}
+
 // The contact number as the server stores it (E.164), worked out with the same library and the
 // same steps as the backend's normalizeMobile: national digits behind the calling code, trunk
 // prefix dropped by the country's own rules. null when it is not a valid number.
@@ -43,6 +63,27 @@ export const isPrivateCharterAge = (value) => {
   return /^\d{1,3}$/.test(text) && Number(text) >= 1 && Number(text) <= PRIVATE_CHARTER_MAX_AGE;
 };
 
+// The revised Private Charter form's choices (the same keys as the backend's request.constants).
+export const TRAVEL_TYPES = ['patient_transfer', 'organ_transfer'];
+export const CRITICAL_LEVELS = ['icu', 'ventilated', 'tracheostomy', 'ecmo'];
+// Critical Level is a multi-select: the chosen keys, each at most once, in the order of the form (a bare key from an older draft is a list of one).
+export const orderedCriticalLevels = (value) => {
+  const list = Array.isArray(value) ? value : value ? [value] : [];
+  return CRITICAL_LEVELS.filter((key) => list.includes(key));
+};
+// Tapping a choice selects it, tapping it again deselects it.
+export const toggleCriticalLevel = (value, key) => {
+  const list = orderedCriticalLevels(value);
+  return orderedCriticalLevels(list.includes(key) ? list.filter((k) => k !== key) : [...list, key]);
+};
+export const OXYGEN_FLOW_MIN = 1;
+export const OXYGEN_FLOW_MAX = 60;
+// The flow rate is a whole number of litres per minute, 1 to 60.
+export const isOxygenFlow = (value) => {
+  const text = String(value ?? '').trim();
+  return /^\d{1,3}$/.test(text) && Number(text) >= OXYGEN_FLOW_MIN && Number(text) <= OXYGEN_FLOW_MAX;
+};
+
 // Mobility is a list of keys (several for Private Charter). An older draft, or a caller, may still hold one key as text.
 export const mobilityList = (value) => (Array.isArray(value) ? value : value ? [value] : []);
 
@@ -50,7 +91,7 @@ export const mobilityList = (value) => (Array.isArray(value) ? value : value ? [
 export const singleChoice = (list) => (list.length === 1 ? list[0] : '');
 
 // The request body for POST /requests, in the formats the backend stores: gender in lower case,
-// the contact number in E.164, the country as an ISO code, each city as { geonameId } only, the
+// the contact number in E.164, the country as an ISO code, each city as { geonameId } (picked) or { name, countryCode? } (typed by hand), the
 // care level and mobility as lists of the chosen keys (one or more; the server refuses 'care_na' combined with another and any repeat), the equipment as booleans, the date as YYYY-MM-DD. There is no patientLocation, and no
 // deceased fields. Optional values the person left empty are left out.
 export function buildPrivateCharterPayload(draft) {
@@ -63,16 +104,15 @@ export function buildPrivateCharterPayload(draft) {
     patientGender: draft.gender ? String(draft.gender).toLowerCase() : undefined,
     patientContact: contact || (draft.phone ? `${draft.cc} ${draft.phone}` : undefined),
     country: draft.countryIso || undefined,
-    origin: draft.originCity ? { geonameId: draft.originCity.geonameId } : undefined,
-    destination: draft.destCity ? { geonameId: draft.destCity.geonameId } : undefined,
+    origin: cityRef(draft.originCity),
+    destination: cityRef(draft.destCity),
     preferredDate: draft.date || undefined,
-    careLevel: draft.care && draft.care.length ? [...draft.care] : undefined,
+    travelType: draft.travelType || undefined,
     description: draft.desc || undefined,
-    mobility: mobilityList(draft.mobility).length ? [...mobilityList(draft.mobility)] : undefined,
-    equipOxygen: !!draft.equipOxygen,
-    equipCardiacMonitor: !!draft.equipCardiac,
-    equipVentilator: !!draft.equipVentilator,
-    urgency: draft.urgency || undefined,
+    criticalLevel: orderedCriticalLevels(draft.criticalLevel),
+    oxygenRequired: typeof draft.oxygenRequired === 'boolean' ? draft.oxygenRequired : undefined,
+    // The rate is sent only with "Yes"; with "No" (or unanswered) it is never sent, whatever was typed before.
+    oxygenFlowLpm: draft.oxygenRequired === true && isOxygenFlow(draft.oxygenFlowLpm) ? Number(String(draft.oxygenFlowLpm).trim()) : undefined,
   };
 }
 
@@ -88,13 +128,11 @@ export const API_FIELD_LOCATION = {
   destination: { step: 1, anchor: 'dest' },
   patientContact: { step: 1, anchor: 'phone' },
   preferredDate: { step: 1, anchor: 'date' },
-  careLevel: { step: 2, anchor: 'care' },
+  travelType: { step: 1, anchor: 'travelType' },
   description: { step: 2, anchor: 'desc' },
-  mobility: { step: 2, anchor: 'mobility' },
-  equipOxygen: { step: 2, anchor: 'equipment' },
-  equipCardiacMonitor: { step: 2, anchor: 'equipment' },
-  equipVentilator: { step: 2, anchor: 'equipment' },
-  urgency: { step: 2, anchor: 'urgency' },
+  criticalLevel: { step: 2, anchor: 'critical' },
+  oxygenRequired: { step: 2, anchor: 'oxygen' },
+  oxygenFlowLpm: { step: 2, anchor: 'oxygen' },
 };
 
 // Draft key -> the API field it feeds. Changing one clears that field's server error.
@@ -103,9 +141,8 @@ const DRAFT_TO_API = {
   phone: ['patientContact'], cc: ['patientContact'], phoneCountry: ['patientContact'],
   country: ['country'], countryIso: ['country'],
   location: ['origin'], originCity: ['origin'], dest: ['destination'], destCity: ['destination'],
-  date: ['preferredDate'], care: ['careLevel'], desc: ['description'], mobility: ['mobility'],
-  equipOxygen: ['equipOxygen'], equipCardiac: ['equipCardiacMonitor'], equipVentilator: ['equipVentilator'],
-  urgency: ['urgency'],
+  date: ['preferredDate'], travelType: ['travelType'], desc: ['description'], criticalLevel: ['criticalLevel'],
+  oxygenRequired: ['oxygenRequired', 'oxygenFlowLpm'], oxygenFlowLpm: ['oxygenFlowLpm'],
 };
 
 // The `fields` object of a 400 response, as { apiField: message } (text values only), or null.
@@ -142,8 +179,8 @@ export function firstErrorLocation(errors) {
 
 // Page order of the anchors on each step: where a step scrolls to first.
 const ANCHOR_ORDER = {
-  1: ['name', 'age', 'country', 'location', 'dest', 'phone', 'date'],
-  2: ['desc', 'care', 'mobility', 'equipment', 'urgency'],
+  1: ['name', 'age', 'travelType', 'country', 'location', 'dest', 'phone', 'date'],
+  2: ['desc', 'critical', 'oxygen'],
 };
 export function firstAnchorOnStep(errors, step) {
   const here = new Set(Object.keys(errors || {}).map((field) => API_FIELD_LOCATION[field]).filter((l) => l && l.step === step).map((l) => l.anchor));

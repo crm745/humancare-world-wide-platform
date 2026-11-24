@@ -1,13 +1,13 @@
-const path = require('path');
 const { getDocumentForUser } = require('./documents.service');
-const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
+const { keyFromStoredReference } = require('../../storage/keys');
+const { sendStoredFile } = require('../../storage/respond');
 const { findWorkflowSource, assertCaseDocumentServable, readVerifiedFile } = require('../request-review/request-review.files');
 
 async function downloadDocument(req, res, next) {
   try {
     // Ownership (the patient, or the corporate the Case is assigned to) is checked first, as ever.
     const document = await getDocumentForUser(req.params.id, req.user);
-    const filename = path.basename(document.fileUrl); // fileUrl is "/uploads/<filename>"
+    const key = keyFromStoredReference(document.fileUrl); // fileUrl is a storage key, or "/uploads/<filename>" for files stored before object storage
 
     // A file that came through the request-first review workflow is owned by a request_documents row
     // (found by its unique storage key). It is served only if that row is linked to THIS document, was
@@ -24,7 +24,7 @@ async function downloadDocument(req, res, next) {
 
     // Every other document is a legacy one, from before the workflow: it has no scan or checksum data
     // and is served exactly as it always was. Having no such data is not a reason to refuse it.
-    return res.download(path.join(UPLOAD_DIR, filename), document.name, { dotfiles: 'allow' });
+    return await sendStoredFile(res, { key, filename: document.name });
   } catch (err) {
     next(err);
   }

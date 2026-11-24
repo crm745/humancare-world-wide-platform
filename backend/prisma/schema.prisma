@@ -547,6 +547,14 @@ model ServiceRequest {
   equipCardiacMonitor Boolean? @map("equip_cardiac_monitor")
   equipVentilator   Boolean?  @map("equip_ventilator")
   urgency           String?   @db.VarChar(16) // "critical_6h" | "urgent_24h" | "planned"
+  // Private Charter only (revised form; null for every other service and for older requests, which keep
+  // their care level / mobility / equipment / urgency above): "patient_transfer" | "organ_transfer",
+  // "icu" | "ventilated" | "tracheostomy" | "ecmo", whether oxygen is needed, and its flow in litres/minute
+  // (set only when oxygen is required).
+  travelType        String?   @map("travel_type") @db.VarChar(24)
+  criticalLevel     String?   @map("critical_level") @db.VarChar(64)
+  oxygenRequired    Boolean?  @map("oxygen_required")
+  oxygenFlowLpm     Int?      @map("oxygen_flow_lpm")
   // Private Charter only (null for every other service and for older requests): the cities the
   // patient picked, as the server verified them against the GeoNames table (geonames_cities).
   // `origin` / `destination` above keep the readable label ("Mumbai, Maharashtra, India") that
@@ -582,6 +590,7 @@ model ServiceRequest {
   documentsRequestReason String?   @db.Text @map("documents_request_reason")
   requestDocuments       RequestDocument[]
   requestEvents          RequestEvent[]
+  notifications          Notification[]
 
   @@index([reviewStatus, createdAt])
   @@map("service_requests")
@@ -723,6 +732,7 @@ model Case {
   outboxEvents        IntegrationOutbox[]
   invoices            Invoice[]
   quotations          CaseQuotation[] @relation("CaseToQuotation")
+  notifications       Notification[]
 
   @@index([corporateId, status])
   @@map("cases")
@@ -914,6 +924,9 @@ model BitrixDealLink {
   case               Case      @relation(fields: [caseId], references: [id], onDelete: Restrict)
   bitrixDealId       String?   @unique @db.VarChar(32) @map("bitrix_deal_id")
   categoryId         String?   @db.VarChar(16) @map("category_id") // Bitrix CATEGORY_ID (the pipeline), as returned
+  // The Bitrix profile this Deal belongs to: "test" (Category 38) | "actual" (Category 0). Stamped when the link is created (from BITRIX_DEAL_PROFILE) and
+  // checked by every worker; NULL only where no profile was configured, which is read as "test" and NEVER as "actual".
+  profile            String?   @db.VarChar(16)
   stageId            String?   @db.VarChar(64) @map("stage_id") // Bitrix STAGE_ID (e.g. "C38:NEW"), as returned
   syncStatus         String    @default("pending") @db.VarChar(24) @map("sync_status") // "pending" | "synced" | "error"
   lastAttemptAt      DateTime? @map("last_attempt_at")
@@ -1459,6 +1472,7 @@ model CaseQuotation {
   supersededById     Int?      @map("superseded_by_id")
   supersededBy       CaseQuotation?  @relation("QuotationSuccession", fields: [supersededById, caseId], references: [id, caseId], onDelete: Restrict, onUpdate: Restrict)
   supersedes         CaseQuotation[] @relation("QuotationSuccession")
+  notifications      Notification[]
 
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
@@ -1521,12 +1535,77 @@ model Notification {
   body          String?   @db.Text
   readAt        DateTime? @map("read_at")
   createdAt     DateTime  @default(now()) @map("created_at")
-  // M8: Prisma back-relation only; no column is added to `notifications`. A Notification remains the in-app
-  // message and keeps its meaning, including being deleted by its owner.
+  // Notification System Phase 1. All additive and nullable/defaulted, so code written before this still works.
+  // `recipientType`/`recipientId` stay polymorphic with no foreign key; the Case / ServiceRequest / CaseQuotation
+  // references below are CONTEXT only, never the source of who is notified. Cross-entity consistency and recipient
+  // ownership are validated by the notification service, not by composite foreign keys.
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+  // Soft delete: a patient/corporate "delete" sets this; the row, its deliveries and its idempotencyKey are kept.
+  deletedAt        DateTime? @map("deleted_at")
+  // Unique when set (utf8mb4_bin in the migration). NULL on rows created before Phase 1 (MySQL allows many NULLs).
+  idempotencyKey   String?   @unique(map: "notifications_idempotency_key_key") @db.VarChar(191) @map("idempotency_key")
+  // Snapshot of the backend catalogue's mandatory rule at creation. Never client-set.
+  isMandatory      Boolean   @default(false) @map("is_mandatory")
+  caseId           Int?      @map("case_id")
+  serviceRequestId Int?      @map("service_request_id")
+  quotationId      Int?      @map("quotation_id")
+  // Safe navigation metadata only (screen, entity type, entity id). No medical details.
+  data             Json?
+  case             Case?           @relation(fields: [caseId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  serviceRequest   ServiceRequest? @relation(fields: [serviceRequestId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  quotation        CaseQuotation?  @relation(fields: [quotationId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  // M8: Prisma back-relation only.
   deliveries    NotificationDelivery[]
 
   @@index([recipientType, recipientId, readAt])
+  @@index([recipientType, recipientId, deletedAt, createdAt], map: "notifications_recipient_active_idx")
+  @@index([caseId])
+  @@index([serviceRequestId])
+  @@index([quotationId])
   @@map("notifications")
+}
+
+// Notification System Phase 1. One registered mobile installation of one owner (polymorphic, no FK, like
+// notifications.recipient_*). `deviceId` is a UUID generated and stored by the app, GLOBALLY unique, and
+// `expoPushToken` is GLOBALLY unique, so one installation / one token belongs to exactly one owner at a time.
+// When another account logs in on the same installation the registration service MUST, in one transaction,
+// cancel the previous owner's pending deliveries for this device and only then update ownerType/ownerId (and the
+// token); it must never create a second row. A device is deactivated (status "inactive", disabledAt set), not
+// deleted, so delivery history keeps its reference. users.push_token is untouched during the compatibility
+// period. Nothing here is a worker: no delivery rows are created in Phase 1.
+model NotificationDevice {
+  id               Int       @id @default(autoincrement())
+  ownerType        String    @db.VarChar(32) @map("owner_type") // "patient" | "corporate_user"
+  ownerId          Int       @map("owner_id")
+  deviceId         String    @unique(map: "notification_devices_device_id_key") @db.VarChar(36) @map("device_id") // utf8mb4_bin in the migration
+  expoPushToken    String    @unique(map: "notification_devices_expo_push_token_key") @db.VarChar(191) @map("expo_push_token") // utf8mb4_bin in the migration
+  platform         String    @db.VarChar(16) // "android" | "ios"
+  status           String    @default("active") @db.VarChar(16) // "active" | "inactive"
+  lastRegisteredAt DateTime  @default(now()) @map("last_registered_at")
+  lastSeenAt       DateTime? @map("last_seen_at")
+  disabledAt       DateTime? @map("disabled_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+  deliveries       NotificationDelivery[]
+
+  @@index([ownerType, ownerId, status])
+  @@map("notification_devices")
+}
+
+// Notification System Phase 1. One row per owner (polymorphic). Defaults are ON. Mandatory notifications
+// (security and payment) ignore these flags; that rule lives in the backend catalogue, not here.
+model NotificationPreference {
+  id                  Int      @id @default(autoincrement())
+  ownerType           String   @db.VarChar(32) @map("owner_type") // "patient" | "corporate_user"
+  ownerId             Int      @map("owner_id")
+  inAppEnabled        Boolean  @default(true) @map("in_app_enabled")
+  pushEnabled         Boolean  @default(true) @map("push_enabled")
+  categoryPreferences Json?    @map("category_preferences")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([ownerType, ownerId], map: "notification_preferences_owner_key")
+  @@map("notification_preferences")
 }
 
 // M8. The delivery record of ONE channel ("push" or "sms") for ONE in-app Notification. The Notification stays
@@ -1538,16 +1617,19 @@ model Notification {
 // the app); this migration changes none of that. "sms" is a channel the schema can describe; no SMS provider
 // is chosen or implied, and `provider` is free text ("expo" for the current push path).
 //
-// One row per (notification, channel): a notification is tracked at most once per channel. Retries are
-// attempts of the same delivery (NotificationDeliveryAttempt), never a second delivery row.
+// One row per (notification, channel, destinationKey): a notification is tracked at most once per channel and
+// destination, so a push notification has one delivery row per registered device (several rows when the owner has
+// several devices). Retries are attempts of the same delivery (NotificationDeliveryAttempt), never a second
+// delivery row.
 //
 // DELETE BEHAVIOUR: a user can delete a Notification (notifications.service.js deleteNotification), so the
 // foreign key is ON DELETE SET NULL, not RESTRICT (RESTRICT would break that existing feature). The delivery
 // row and its attempts are kept as history; recipientType/recipientId are copied here when the row is
 // created so history still says whose message it was. A delivery whose Notification is gone has no message to
-// send: the future service MUST cancel it if it is still pending. A delivery stores NO message text and NO
-// destination (no push token, no phone number): the future service reads the title/body from the Notification
-// and the destination from the recipient's current record at send time.
+// send: the future service MUST cancel it if it is still pending. A delivery stores NO message text, and NO raw
+// push token or phone number. It stores only `deviceId` (a reference to the NotificationDevice row) and
+// `destinationKey`; the future service reads the title/body from the Notification and the push token from the
+// device row at send time.
 //
 // status — what is actually known, and no more:
 //   "pending"   not yet sent; due when nextAttemptAt has passed.
@@ -1574,10 +1656,18 @@ model Notification {
 // providerMessageId is the provider's reference for the accepted message (case-sensitive, utf8mb4_bin in the
 // migration), kept so a later receipt can be matched.
 // CHECKs in the migration (channel and status values, attemptCount >= 0, accepted/delivered need their
-// timestamp) were all tested against MySQL Community Server - GPL 26.7.0 on humancare_test, using temporary,
-// prefixed copies of the tables: the compatibility test passed and did not modify existing application tables
-// or data. The M8 migration itself has NOT yet been applied. The service still validates every rule. The
-// CHECKs cover no column used by the SET NULL foreign key, because MySQL forbids that.
+// timestamp) were tested against MySQL Community Server - GPL 26.7.0 using temporary, prefixed copies of the
+// tables (that compatibility test is historical and is not a live connection). The M8 migration
+// (20261113000700_private_charter_m8_notification_delivery) IS applied to humancare_dev (verified in
+// _prisma_migrations). The service still validates every rule. The CHECKs cover no column used by the SET NULL
+// foreign key, because MySQL forbids that.
+//
+// Notification System Phase 1 (migration 20261123000100_notification_system_phase1_foundation) extends this
+// table for device-specific delivery: `deviceId` (nullable, SET NULL) and a NON-NULL `destinationKey` ("device:<id>"
+// for push, "user" for a future non-device channel). The uniqueness is therefore one row per
+// (notification, channel, destination), replacing the earlier (notification, channel). The statement above that a
+// delivery stores no destination still holds for tokens and phone numbers: only a reference to the device row is
+// kept, and the token is read from the device at send time. Phase 1 creates NO delivery rows.
 model NotificationDelivery {
   id                Int                           @id @default(autoincrement())
   notificationId    Int?                          @map("notification_id")
@@ -1599,9 +1689,13 @@ model NotificationDelivery {
   lastError         String?                       @db.VarChar(512) @map("last_error")
   createdAt         DateTime                      @default(now()) @map("created_at")
   updatedAt         DateTime                      @updatedAt @map("updated_at")
+  deviceId          Int?                          @map("device_id")
+  device            NotificationDevice?           @relation(fields: [deviceId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  destinationKey    String                        @db.VarChar(64) @map("destination_key") // "device:<id>" | "user"; never empty (CHECK in the migration)
   attempts          NotificationDeliveryAttempt[]
 
-  @@unique([notificationId, channel])
+  @@unique([notificationId, channel, destinationKey], map: "notification_deliveries_dest_key")
+  @@index([deviceId])
   @@index([status, nextAttemptAt])
   @@index([recipientType, recipientId])
   @@map("notification_deliveries")

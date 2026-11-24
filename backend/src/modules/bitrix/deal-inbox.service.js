@@ -24,12 +24,15 @@ const os = require('os');
 const crypto = require('crypto');
 const { prisma: defaultPrisma } = require('../../db/prisma');
 const { isPrivateCharterDealWorkerActive, isQuotationSyncActive } = require('./bitrix-config');
+const { gatewayForPass } = require('./queue/dispatcher');
+const { PRIVATE_CHARTER_QUEUE } = require('./queue/service-registry');
 const { assertDealEligible } = require('./deal-outbox');
 const { detectAndEnqueueQuotationSync } = require('./quotation-outbox');
-const { DEAL, FIELD } = require('./bitrix-deal');
+const { resolveProfile, activeProfileName } = require('./bitrix-profiles');
+const { linkProfileProblem, dealProblem, lookupProfileStage } = require('./bitrix-profile-runtime');
 const bitrixDealApi = require('./bitrix-deal.api');
 const defaultStore = require('./deal-inbox.store');
-const { lookupStage, LOST_REASON_FIELD } = require('./bitrix-deal-stages');
+const { LOST_REASON_FIELD } = require('./bitrix-deal-stages');
 const { appendAuditLog } = require('../../common/audit/business-audit');
 const { sendExpoPush } = require('../../integrations/push/expo-push.service');
 
@@ -210,12 +213,24 @@ async function applyStage(ctx, claim, caseRecord, deal, entry, modifiedAt) {
 
 // ---- one event ---------------------------------------------------------------------------------------------------
 async function processInboxEvent(ctx, claim) {
+  // The profile this processor works for (BITRIX_DEAL_PROFILE, no default). It decides the category, the reference field and the stage table.
+  const active = resolveProfile(ctx.env);
+  if (!active) {
+    ctx.log.error(`[deal-inbox] event ${claim.id}: not processed (profile_not_configured).`);
+    return false;
+  }
   const link = await ctx.prisma.bitrixDealLink.findUnique({
     where: { bitrixDealId: claim.dealId },
     include: { case: { include: { serviceRequest: true } } },
   });
   if (!link) {
     return claim.attempts < NOT_LINKED_RETRIES ? retryLater(ctx, claim, 'deal_not_linked_yet') : quarantine(ctx, claim, 'deal_not_linked');
+  }
+  // A Deal of the other profile is never touched: the event is left as it is (nothing is written, nothing is consumed).
+  const linkIssue = linkProfileProblem(link, active);
+  if (linkIssue) {
+    ctx.log.error(`[deal-inbox] event ${claim.id}: not processed (${linkIssue}).`);
+    return false;
   }
   const caseRecord = link.case;
   try {
@@ -229,9 +244,8 @@ async function processInboxEvent(ctx, claim) {
   if (read.status !== 'ok') return retryLater(ctx, claim, 'bitrix_read_failed', caseRecord);
 
   const deal = read.deal;
-  if (String(deal.ID) !== claim.dealId) return quarantine(ctx, claim, 'deal_id_mismatch', caseRecord);
-  if (String(deal.CATEGORY_ID) !== String(DEAL.CATEGORY_ID)) return quarantine(ctx, claim, 'category_mismatch', caseRecord);
-  if (deal[FIELD.REFERENCE] !== caseRecord.referenceNumber) return quarantine(ctx, claim, 'reference_mismatch', caseRecord);
+  const dealIssue = dealProblem(active, deal, claim.dealId, caseRecord.referenceNumber);
+  if (dealIssue) return quarantine(ctx, claim, dealIssue, caseRecord);
 
   // Quotation synchronization (off unless BITRIX_QUOTATION_SYNC_ENABLED=true): the Deal was just verified as this Case's Deal, so
   // the Quotation PDF / amount / currency it carries are compared with the stored head version and, if they differ, ONE idempotent
@@ -239,14 +253,14 @@ async function processInboxEvent(ctx, claim) {
   // still noticed). If recording the event fails the whole inbox event is retried: a lost trigger would not come back by itself.
   if (isQuotationSyncActive(ctx.env)) {
     try {
-      await detectAndEnqueueQuotationSync(ctx.prisma, caseRecord, deal);
+      await detectAndEnqueueQuotationSync(ctx.prisma, caseRecord, deal, active);
     } catch (err) {
       ctx.log.warn(`[deal-inbox] event ${claim.id}: quotation event not recorded (${err && err.name ? err.name : 'error'}).`);
       return retryLater(ctx, claim, 'quotation_enqueue_failed', caseRecord);
     }
   }
 
-  const stage = lookupStage(deal.STAGE_ID, deal, { lostReasonField: ctx.lostReasonField });
+  const stage = lookupProfileStage(active, deal.STAGE_ID, deal, { lostReasonField: ctx.lostReasonField });
   if (!stage.ok) return quarantine(ctx, claim, stage.code, caseRecord);
 
   const modifiedAt = new Date(deal.DATE_MODIFY);
@@ -259,10 +273,15 @@ async function processInboxEvent(ctx, claim) {
 async function runInboxWorker(overrides = {}) {
   const ctx = buildContext(overrides);
   if (!isPrivateCharterDealWorkerActive(ctx.env)) return { active: false, claimed: 0 };
+  // Every Bitrix call of this worker passes the shared gateway at the API layer; here it is only asked BEFORE anything is claimed, so an open circuit
+  // pauses the pass without using up a single delivery attempt.
+  ctx.gateway = ctx.gateway || gatewayForPass(overrides);
+  const start = ctx.gateway.canStart(PRIVATE_CHARTER_QUEUE);
+  if (!start.ok) return { active: true, claimed: 0, paused: start.reason };
 
   await ctx.store.recoverExpiredLeases(ctx.prisma, { maxAttempts: MAX_ATTEMPTS });
   let claimed = 0;
-  for (const id of await ctx.store.findDueIds(ctx.prisma, BATCH_SIZE)) {
+  for (const id of await ctx.store.findDueIds(ctx.prisma, BATCH_SIZE, activeProfileName(ctx.env))) {
     const claim = await ctx.store.claim(ctx.prisma, { id, workerId: ctx.workerId, leaseSeconds: LEASE_SECONDS });
     if (!claim) continue;
     claimed += 1;

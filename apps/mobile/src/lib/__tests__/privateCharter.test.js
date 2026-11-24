@@ -6,7 +6,7 @@ const path = require('path');
 const {
   PRIVATE_CHARTER_KEY, PRIVATE_CHARTER_SERVICE_TYPE, normalizeServiceKey, isPrivateCharter, buildPrivateCharterPayload,
   contactE164, isPrivateCharterAge, fieldErrorsFromError, clearErrorsForPatch, firstErrorLocation, firstAnchorOnStep, unplacedMessages,
-  toCityChoice, API_FIELD_LOCATION, mobilityList, singleChoice,
+  toCityChoice, API_FIELD_LOCATION, toManualCity, isManualCity, isManualCityName, cityRef, orderedCriticalLevels, toggleCriticalLevel,
 } = require('../privateCharter');
 const { COUNTRIES } = require('../../data/countryList');
 const SERVICES = require('../../data/services.json');
@@ -37,8 +37,8 @@ const DUBAI = { geonameId: 292223, name: 'Dubai', label: 'Dubai, United Arab Emi
 const draft = (over = {}) => ({
   service: 'privatecharter', name: 'Maria Fernandez', age: '61', gender: 'Female', location: MUMBAI.label, originCity: MUMBAI,
   dest: DUBAI.label, destCity: DUBAI, country: 'United Arab Emirates', countryIso: 'AE', cc: '+971', phoneCountry: 'AE', phone: '50 123 4567',
-  date: '2099-01-01', care: ['care_icu'], desc: 'Post-angioplasty', mobility: ['bedridden'],
-  equipOxygen: true, equipCardiac: false, equipVentilator: false, urgency: 'urgent_24h', files: [], ...over,
+  date: '2099-01-01', travelType: 'patient_transfer', desc: 'Post-angioplasty', criticalLevel: ['icu'],
+  oxygenRequired: true, oxygenFlowLpm: '4', files: [], ...over,
 });
 const wire = (d) => JSON.parse(JSON.stringify(buildPrivateCharterPayload(d))); // what actually goes over the network
 
@@ -69,9 +69,11 @@ describe('the Private Charter payload', () => {
   it('has exactly the fields the backend allows, and no patientLocation', () => {
     const body = wire(draft());
     expect(Object.keys(body).sort()).toEqual([
-      'careLevel', 'country', 'description', 'destination', 'equipCardiacMonitor', 'equipOxygen', 'equipVentilator', 'mobility', 'origin',
-      'patientAge', 'patientContact', 'patientGender', 'patientName', 'preferredDate', 'serviceKey', 'serviceType', 'urgency',
+      'country', 'criticalLevel', 'description', 'destination', 'origin', 'oxygenFlowLpm', 'oxygenRequired',
+      'patientAge', 'patientContact', 'patientGender', 'patientName', 'preferredDate', 'serviceKey', 'serviceType', 'travelType',
     ]);
+    // The removed fields are never sent.
+    for (const gone of ['careLevel', 'mobility', 'urgency', 'equipOxygen', 'equipCardiacMonitor', 'equipVentilator']) expect(body).not.toHaveProperty(gone);
     expect(body).not.toHaveProperty('patientLocation');
     expect(body).not.toHaveProperty('deceasedRelation');
   });
@@ -80,8 +82,7 @@ describe('the Private Charter payload', () => {
     expect(wire(draft())).toMatchObject({
       serviceKey: 'privatecharter', serviceType: 'Private Charter Air Ambulance Service', patientName: 'Maria Fernandez', patientAge: 61,
       patientGender: 'female', patientContact: '+971501234567', country: 'AE', preferredDate: '2099-01-01',
-      careLevel: ['care_icu'], description: 'Post-angioplasty', mobility: ['bedridden'],
-      equipOxygen: true, equipCardiacMonitor: false, equipVentilator: false, urgency: 'urgent_24h',
+      travelType: 'patient_transfer', description: 'Post-angioplasty', criticalLevel: ['icu'], oxygenRequired: true, oxygenFlowLpm: 4,
     });
   });
 
@@ -98,17 +99,15 @@ describe('the Private Charter payload', () => {
     expect(data).toMatchObject({
       serviceKey: 'privatecharter', patientName: 'Maria Fernandez', patientAge: 61, patientGender: 'female', patientContact: '+971501234567',
       country: 'AE', origin: MUMBAI.name, originGeonameId: 1275339, destinationGeonameId: 292223, preferredDate: '2099-01-01',
-      careLevel: 'care_icu', description: 'Post-angioplasty', mobility: 'bedridden', urgency: 'urgent_24h',
-      equipOxygen: true, equipCardiacMonitor: false, equipVentilator: false,
+      travelType: 'patient_transfer', description: 'Post-angioplasty', criticalLevel: ['icu'], oxygenRequired: true, oxygenFlowLpm: 4,
     });
   });
 
-  it('accepts every care-level choice, mobility, urgency, gender and a missing description', () => {
+  it('accepts every travel type, critical level, gender, oxygen answer and a missing medical history', () => {
     const variants = [
-      draft({ care: ['care_na'] }), draft({ care: ['care_ambulatory'], mobility: ['walking'], urgency: 'planned' }),
-      draft({ care: ['care_stable'], mobility: ['wheelchair'], urgency: 'critical_6h' }),
+      draft({ travelType: 'organ_transfer' }), draft({ criticalLevel: ['ventilated'] }), draft({ criticalLevel: ['tracheostomy'] }), draft({ criticalLevel: ['ecmo'] }), draft({ criticalLevel: ['ecmo', 'icu'] }),
       draft({ gender: 'Male' }), draft({ gender: 'Other' }), draft({ desc: '' }),
-      draft({ equipOxygen: true, equipCardiac: true, equipVentilator: true }),
+      draft({ oxygenRequired: false, oxygenFlowLpm: '' }), draft({ oxygenFlowLpm: '1' }), draft({ oxygenFlowLpm: '60' }),
     ];
     for (const result of validate(variants.map(wire))) {
       expect(result.fields).toEqual({});
@@ -179,42 +178,42 @@ describe('missing or invalid data is refused by the backend, not hidden by the a
   });
 
   it('a city the server does not know is refused', () => {
-    expect(validateOne(wire(draft({ destCity: { geonameId: 123456789 } }))).fields.destination).toBe('Select a valid city from the list.');
+    expect(validateOne(wire(draft({ destCity: { geonameId: 123456789 } }))).fields.destination).toBe('Select a valid city from the list, or enter the city name.');
   });
 
-  it('several care levels and several mobility options are sent as lists and stored in the fixed order', () => {
-    const body = wire(draft({ care: ['care_stable', 'care_icu'], mobility: ['walking', 'bedridden'] }));
-    expect(body.careLevel).toEqual(['care_stable', 'care_icu']);
-    expect(body.mobility).toEqual(['walking', 'bedridden']);
-    const { fields, data, legacy } = validateOne(body);
-    expect(fields).toEqual({});
-    expect(legacy).toEqual([]);
-    expect(data.careLevel).toBe('care_icu,care_stable');
-    expect(data.mobility).toBe('bedridden,walking');
+  it('Oxygen No sends no flow rate, even if one was typed before', () => {
+    const body = wire(draft({ oxygenRequired: false, oxygenFlowLpm: '8' }));
+    expect(body.oxygenRequired).toBe(false);
+    expect(body).not.toHaveProperty('oxygenFlowLpm');
+    expect(validateOne(body).fields).toEqual({});
   });
 
-  it('Not Applicable together with another care level is refused by the server', () => {
-    const { fields, data } = validateOne(wire(draft({ care: ['care_na', 'care_icu'] })));
-    expect(fields.careLevel).toBe('Not Applicable cannot be combined with another care level.');
-    expect(data.careLevel).toBeUndefined();
+  it('Oxygen Yes needs a whole flow rate from 1 to 60; the server refuses anything else', () => {
+    const bodies = [wire(draft({ oxygenFlowLpm: '' })), { ...wire(draft()), oxygenFlowLpm: 0 }, { ...wire(draft()), oxygenFlowLpm: 61 }, { ...wire(draft()), oxygenFlowLpm: 2.5 }];
+    for (const r of validate(bodies)) expect(r.fields.oxygenFlowLpm).toBeTruthy();
+    expect(validateOne({ ...wire(draft({ oxygenRequired: false })), oxygenFlowLpm: 3 }).fields.oxygenFlowLpm).toMatch(/must not be sent/);
   });
 
-  it('a draft that still holds one mobility key as text is sent as a one-key list', () => {
-    expect(wire(draft({ mobility: 'wheelchair' })).mobility).toEqual(['wheelchair']);
-    expect(mobilityList('')).toEqual([]);
-    expect(singleChoice(['walking'])).toBe('walking');
-    expect(singleChoice(['walking', 'bedridden'])).toBe('');
+  it('the removed fields are refused by the server, not silently dropped', () => {
+    const fields = validateOne({ ...wire(draft()), careLevel: ['care_icu'], mobility: ['walking'], urgency: 'planned', equipOxygen: true }).fields;
+    for (const gone of ['careLevel', 'mobility', 'urgency', 'equipOxygen']) expect(fields[gone]).toBeTruthy();
   });
 
-  it('no care level, no mobility, no urgency, a past date, an age over 120', () => {
+  it('no travel type, no critical level, no oxygen answer, a past date, an age over 120', () => {
     const fields = validate([
-      wire(draft({ care: [] })), wire(draft({ mobility: [] })), wire(draft({ urgency: '' })), wire(draft({ date: '2001-01-01' })), wire(draft({ age: '121' })),
+      wire(draft({ travelType: '' })), wire(draft({ criticalLevel: [] })), wire(draft({ oxygenRequired: null })), wire(draft({ date: '2001-01-01' })), wire(draft({ age: '121' })),
     ]).map((r) => r.fields);
-    expect(fields[0].careLevel).toBe('Select a care level.');
-    expect(fields[1].mobility).toBe('Mobility is required.');
-    expect(fields[2].urgency).toBe('Urgency is required.');
+    expect(fields[0].travelType).toBe('Travel type is required.');
+    expect(fields[1].criticalLevel).toBe('Select at least one critical level.');
+    expect(fields[2].oxygenRequired).toBe('Oxygen required is required.');
     expect(fields[3].preferredDate).toBe('Preferred date cannot be in the past.');
-    expect(fields[4].patientAge).toBe('Age must be a whole number from 1 to 120.');
+    expect(fields[4].patientAge).toBeTruthy();
+  });
+
+  it('an unknown travel type or critical level is refused', () => {
+    const r = validateOne({ ...wire(draft()), travelType: 'cargo', criticalLevel: ['stable'] }).fields;
+    expect(r.travelType).toMatch(/must be one of/);
+    expect(r.criticalLevel).toMatch(/must only contain/);
   });
 
   it('the form applies the same age limit before sending', () => {
@@ -255,8 +254,9 @@ describe('API validation errors go back onto the form', () => {
   });
 
   it('takes the person to the earliest step with an error and its first field', () => {
-    expect(firstErrorLocation({ urgency: 'm', patientName: 'm' })).toEqual({ step: 1, anchor: 'name' });
-    expect(firstErrorLocation({ urgency: 'm', careLevel: 'm' })).toEqual({ step: 2, anchor: 'care' });
+    expect(firstErrorLocation({ oxygenRequired: 'm', patientName: 'm' })).toEqual({ step: 1, anchor: 'name' });
+    expect(firstErrorLocation({ oxygenRequired: 'm', criticalLevel: 'm' })).toEqual({ step: 2, anchor: 'critical' });
+    expect(firstErrorLocation({ travelType: 'm', criticalLevel: 'm' })).toEqual({ step: 1, anchor: 'travelType' });
     expect(firstErrorLocation({ serviceKey: 'm' })).toEqual({ step: 0, anchor: null });
     expect(firstAnchorOnStep({ preferredDate: 'm', origin: 'm', patientGender: 'm' }, 1)).toBe('age');
     expect(firstAnchorOnStep({ preferredDate: 'm', origin: 'm' }, 1)).toBe('location');
@@ -264,13 +264,13 @@ describe('API validation errors go back onto the form', () => {
   });
 
   it('changing a field clears only that field\'s error, and the errors object is never edited in place', () => {
-    const errors = { patientContact: 'a', origin: 'b', careLevel: 'c' };
-    expect(clearErrorsForPatch(errors, { phone: '5' })).toEqual({ origin: 'b', careLevel: 'c' });
-    expect(clearErrorsForPatch(errors, { originCity: MUMBAI, location: MUMBAI.label })).toEqual({ patientContact: 'a', careLevel: 'c' });
+    const errors = { patientContact: 'a', origin: 'b', criticalLevel: 'c' };
+    expect(clearErrorsForPatch(errors, { phone: '5' })).toEqual({ origin: 'b', criticalLevel: 'c' });
+    expect(clearErrorsForPatch(errors, { originCity: MUMBAI, location: MUMBAI.label })).toEqual({ patientContact: 'a', criticalLevel: 'c' });
     expect(clearErrorsForPatch(errors, { files: [] })).toBe(errors);
     expect(clearErrorsForPatch({ origin: 'b' }, { location: 'x' })).toBeNull();
     expect(clearErrorsForPatch(null, { name: 'x' })).toBeNull();
-    expect(errors).toEqual({ patientContact: 'a', origin: 'b', careLevel: 'c' });
+    expect(errors).toEqual({ patientContact: 'a', origin: 'b', criticalLevel: 'c' });
   });
 
   it('the answers are untouched by an error: building the payload again gives the same body', () => {
@@ -279,7 +279,89 @@ describe('API validation errors go back onto the form', () => {
     fieldErrorsFromError(apiError({ origin: 'x' }));
     expect(JSON.stringify(wire(d))).toBe(before);
     expect(d.originCity).toEqual(MUMBAI);
-    expect(d.care).toEqual(['care_icu']);
+    expect(d.criticalLevel).toEqual(['icu']);
+  });
+});
+
+describe('Critical Level: multi-select', () => {
+  it('tapping selects, tapping again deselects, and the list stays in the order of the form', () => {
+    let list = [];
+    list = toggleCriticalLevel(list, 'ecmo');
+    expect(list).toEqual(['ecmo']);
+    list = toggleCriticalLevel(list, 'icu');
+    expect(list).toEqual(['icu', 'ecmo']);
+    list = toggleCriticalLevel(list, 'tracheostomy');
+    expect(list).toEqual(['icu', 'tracheostomy', 'ecmo']);
+    list = toggleCriticalLevel(list, 'icu'); // deselected
+    expect(list).toEqual(['tracheostomy', 'ecmo']);
+    list = toggleCriticalLevel(toggleCriticalLevel(list, 'ecmo'), 'tracheostomy');
+    expect(list).toEqual([]);
+  });
+  it('an older draft holding one key, or junk, is read as a clean list', () => {
+    expect(orderedCriticalLevels('icu')).toEqual(['icu']);
+    expect(orderedCriticalLevels('')).toEqual([]);
+    expect(orderedCriticalLevels(undefined)).toEqual([]);
+    expect(orderedCriticalLevels(['ecmo', 'ecmo', 'bogus', 'icu'])).toEqual(['icu', 'ecmo']);
+  });
+  it('is sent as an array and accepted by the backend for every combination of the four', () => {
+    const bodies = [];
+    for (let mask = 1; mask < 16; mask += 1) bodies.push(wire(draft({ criticalLevel: ['icu', 'ventilated', 'tracheostomy', 'ecmo'].filter((_, i) => mask & (1 << i)) })));
+    for (const [i, result] of validate(bodies).entries()) {
+      expect(Array.isArray(bodies[i].criticalLevel)).toBe(true);
+      expect(result.fields).toEqual({});
+      expect(result.data.criticalLevel).toEqual(bodies[i].criticalLevel);
+    }
+  });
+  it('nothing chosen is sent as an empty list, which the backend refuses', () => {
+    const body = wire(draft({ criticalLevel: [] }));
+    expect(body.criticalLevel).toEqual([]);
+    expect(validateOne(body).fields.criticalLevel).toBe('Select at least one critical level.');
+  });
+  it('a repeated or unknown key is cleaned before sending; the backend refuses them if one still arrives', () => {
+    expect(wire(draft({ criticalLevel: ['ecmo', 'ecmo', 'bogus'] })).criticalLevel).toEqual(['ecmo']);
+    expect(validateOne({ ...wire(draft()), criticalLevel: ['icu', 'icu'] }).fields.criticalLevel).toMatch(/repeat/);
+    expect(validateOne({ ...wire(draft()), criticalLevel: 'icu' }).fields.criticalLevel).toMatch(/list/);
+  });
+});
+
+describe('Origin City / Destination City: a GeoNames city or one entered by hand', () => {
+  it('a manual city has no geonameId, keeps what was typed (cleaned) and the country context', () => {
+    expect(toManualCity('  Smallville   North ', 'ae')).toEqual({ manual: true, name: 'Smallville North', label: 'Smallville North', countryCode: 'AE' });
+    expect(toManualCity('Karachi', null)).toEqual({ manual: true, name: 'Karachi', label: 'Karachi', countryCode: null });
+    expect(isManualCity(toManualCity('Karachi'))).toBe(true);
+    expect(isManualCity(MUMBAI)).toBe(false);
+    expect(toManualCity('Karachi')).not.toHaveProperty('geonameId');
+  });
+  it('is sent as { name, countryCode? }, a picked city as { geonameId }; nothing chosen sends nothing', () => {
+    expect(cityRef(MUMBAI)).toEqual({ geonameId: 1275339 });
+    expect(cityRef(toManualCity('Smallville', 'AE'))).toEqual({ name: 'Smallville', countryCode: 'AE' });
+    expect(cityRef(toManualCity('Karachi', null))).toEqual({ name: 'Karachi' });
+    expect(cityRef(null)).toBeUndefined();
+    const body = wire(draft({ originCity: toManualCity('Smallville', 'IN'), destCity: DUBAI }));
+    expect(body.origin).toEqual({ name: 'Smallville', countryCode: 'IN' });
+    expect(body.destination).toEqual({ geonameId: 292223 });
+  });
+  it('the backend accepts a manual Origin City, a manual Destination City, or both, and stores no GeoNames id for them', () => {
+    const [origin, destination, both] = validate([
+      wire(draft({ originCity: toManualCity('Smallville', 'IN') })),
+      wire(draft({ destCity: toManualCity('Karachi', null) })),
+      wire(draft({ originCity: toManualCity('Smallville', 'IN'), destCity: toManualCity('Karachi', 'PK') })),
+    ]);
+    for (const r of [origin, destination, both]) expect(r.fields).toEqual({});
+    expect(origin.data).toMatchObject({ origin: 'Smallville, India', originCityName: 'Smallville', originCountryCode: 'IN' });
+    expect(origin.data).not.toHaveProperty('originGeonameId');
+    expect(origin.data.destinationGeonameId).toBe(292223); // the picked one keeps its id
+    expect(destination.data).toMatchObject({ destination: 'Karachi', destinationCityName: 'Karachi', destinationCountryCode: null });
+    expect(destination.data).not.toHaveProperty('destinationGeonameId');
+    expect(both.data).toMatchObject({ destination: 'Karachi, Pakistan', destinationCountryCode: 'PK' });
+  });
+  it('a city GeoNames does not know can be typed; text typed but not chosen is still never sent', () => {
+    expect(JSON.stringify(wire(draft({ originCity: null, location: 'Nowhereville' })))).not.toContain('Nowhereville');
+    expect(validateOne(wire(draft({ destCity: toManualCity('Nowhereville', null) }))).fields).toEqual({});
+  });
+  it('the form checks a manual name with the same rule as the backend', () => {
+    for (const ok of ['Zürich', "St. John's", 'Saint-Étienne', '東京', 'Ab', 'A'.repeat(100)]) expect(isManualCityName(ok)).toBe(true);
+    for (const bad of ['', ' ', 'A', '12345', '<b>x</b>', 'A'.repeat(101), 'Town?', null, undefined]) expect(isManualCityName(bad)).toBe(false);
   });
 });
 

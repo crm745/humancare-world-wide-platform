@@ -4,7 +4,7 @@ import { apiGet } from '../../lib/api';
 import {
   GEONAMES_ATTRIBUTION_FALLBACK, SEARCH_DEBOUNCE_MS, describeCityError, normaliseCityText, searchCitiesCached, searchableQuery,
 } from '../../lib/citySearch';
-import { toCityChoice } from '../../lib/privateCharter';
+import { isManualCityName, toCityChoice } from '../../lib/privateCharter';
 import { suggestionsFor } from '../../lib/locationRules';
 import { FieldLabel, Input, Text } from '../ui';
 import { Spinner } from '../Spinner';
@@ -20,9 +20,10 @@ import { COLORS } from '../../theme/colors';
 //   - The list closes when the field loses focus (a tap anywhere else, or another field) and opens again when the field is focused.
 //   - `countryIso` / `countryName` / `restrictToCountry`: when the field is held to the form's country, only the suggestions of that country are listed
 //     (a city of another country cannot be picked), and the empty message says which country was searched. Typed text is never filtered.
-//   - `structured` (Private Charter): the backend accepts a city only as a verified { geonameId }, so `city` holds the picked city; typing again
-//     clears it (the form clears it in onChangeText) until another is picked. Without `structured` (every other service) the text is the answer.
-export default function CityField({ label, required, value = '', city = null, onChangeText, onSelect, error, testID, structured = false, countryIso = '', countryName = '', restrictToCountry = false }) {
+//   - `structured` (Private Charter): `city` holds the chosen city; typing again clears it (the form clears it in onChangeText) until another is
+//     chosen. A city is chosen by tapping a GeoNames suggestion, or, when GeoNames has no match, by tapping the explicit "Use “<text>”" option
+//     (`onManual`): the typed name is then kept as a manual city (no GeoNames id). Without `structured` (every other service) the text is the answer.
+export default function CityField({ label, required, value = '', city = null, onChangeText, onSelect, error, testID, structured = false, countryIso = '', countryName = '', restrictToCountry = false, onManual, t = (key) => key }) {
   const reveal = useReveal();
   // The list gets what is left above the keyboard, at most 220 px (the top bars, the label, the field and the Continue bar take the rest).
   const listMax = useListMaxHeight({ reserved: 300, min: 110, max: 220 });
@@ -115,7 +116,16 @@ export default function CityField({ label, required, value = '', city = null, on
     return () => clearTimeout(t);
   }, [visible, state, listed.length, reveal]);
 
-  const chosen = structured && city ? city.geonameId : null;
+  const chosen = structured && city && !city.manual ? city.geonameId : null;
+  // The explicit way past a missing GeoNames match: offered for typed text no city has been chosen for (never while a search is still running).
+  const canUseTyped = structured && !!onManual && !city && state !== 'loading' && isManualCityName(value);
+  const useTyped = () => {
+    pressing.current = false;
+    clearTimeout(timer.current);
+    latest.current += 1;
+    onManual(value);
+    setOpen(false);
+  };
   return (
     <View testID={testID}>
       <FieldLabel required={required}>{label}</FieldLabel>
@@ -125,6 +135,18 @@ export default function CityField({ label, required, value = '', city = null, on
         accessibilityLabel={label} autoComplete="off"
       />
       {error ? <Text className="mt-1 text-[12px] text-danger">{error}</Text> : null}
+      {structured && city && city.manual ? (
+        <Text className="mt-1 text-[12px] leading-4 text-muted" testID={testID ? `${testID}-manual-note` : undefined}>{t('city_manual_note')}</Text>
+      ) : null}
+      {canUseTyped ? (
+        <Pressable
+          onPressIn={() => { pressing.current = true; }} onPressOut={() => { pressing.current = false; }}
+          onPress={useTyped} accessibilityRole="button" accessibilityLabel={t('city_use_typed', { city: value.trim() })} testID={testID ? `${testID}-use-typed` : undefined}
+          className="mt-1.5 min-h-[44px] justify-center rounded-xl border-[1.5px] border-primary px-3.5 py-2 active:opacity-80"
+        >
+          <Text className="font-inter-bold text-[14px] leading-5 text-primary" style={WRAP}>{t('city_use_typed', { city: value.trim() })}</Text>
+        </Pressable>
+      ) : null}
 
       {visible ? (
         <View
@@ -140,7 +162,7 @@ export default function CityField({ label, required, value = '', city = null, on
           ) : null}
           {state === 'done' && listed.length === 0 ? (
             <Text className="px-3.5 py-3 text-[13px] leading-[19px] text-muted">
-              {structured ? `No matching city${inCountry}. Check the spelling, or try the nearest larger city.` : `No matching city${inCountry}. You can keep what you typed.`}
+              {structured ? `No matching city${inCountry}. Check the spelling, or use what you typed.` : `No matching city${inCountry}. You can keep what you typed.`}
             </Text>
           ) : null}
           {state === 'error' && problem ? (

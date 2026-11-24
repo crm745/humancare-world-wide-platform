@@ -7,7 +7,7 @@
 //   - change any Payment, Invoice or Case. Completion belongs EXCLUSIVELY to the verified webhook processor. What the browser reports (a callback, a
 //     redirect, a result word) is only ever used to choose WHICH MESSAGE the app shows while it polls GET /invoices/:invoiceId.
 //
-// SINGLE USE WITHOUT A MIGRATION: redeeming a session writes ONE audit row (entity "payment", action payment.checkout_opened) whose idempotency key is
+// SINGLE USE (WITH A 30-SECOND REPLAY FOR THE SAME BROWSER LOAD) WITHOUT A MIGRATION: redeeming a session writes ONE audit row (entity "payment", action payment.checkout_opened) whose idempotency key is
 // "checkout:<session id>". audit_logs is unique on (entityType, entityId, idempotencyKey), so the database decides, atomically, which of several
 // simultaneous requests wins; a duplicate key (Prisma P2002) means the session was already used. The row is also the audit trail of the checkout.
 // Nothing is deleted, so a used session can never become valid again.
@@ -29,6 +29,11 @@ const APP_RETURN = 'humancare://payment-return';
 //   returned     the patient came back with no information
 const RESULTS = Object.freeze(['submitted', 'failed', 'cancelled', 'unavailable', 'expired', 'returned']);
 const PAYMENT_ID = /^pay_[A-Za-z0-9]{1,60}$/;
+// A browser may ask for the SAME address more than once while it is still opening it (Safari sends the navigation again within a second, without
+// a Referer). So a token that was redeemed only moments ago is answered again with the same page; anything later is "used". The window starts at the
+// audit row written by the first redemption, so it is measured by the database's own record, not by anything the request says.
+const REPLAY_WINDOW_MS = 30 * 1000;
+const CLOCK_SKEW_MS = 5 * 1000;
 
 function failure(statusCode, publicCode, message) {
   const err = new Error(message);
@@ -101,8 +106,15 @@ async function openCheckout({ token, db = prisma, env = process.env, now = () =>
       afterData: { paymentId: payment.id, invoiceId, razorpayOrderId: payment.razorpayOrderId },
     });
   } catch (err) {
-    if (err && err.code === 'P2002') return { outcome: 'used', invoiceId };
-    throw err;
+    if (!(err && err.code === 'P2002')) throw err;
+    // Already redeemed. Everything above (signature, expiry, ownership, eligibility, the payment still pending with its order) has just been
+    // re-checked, so the page may be repeated only if the first redemption was moments ago. Nothing is written here: no second audit row.
+    const first = await db.auditLog.findUnique({
+      where: { entityType_entityId_idempotencyKey: { entityType: 'payment', entityId: String(payment.id), idempotencyKey: `checkout:${jti}` } },
+      select: { recordedAt: true },
+    });
+    const age = first && first.recordedAt ? now().getTime() - new Date(first.recordedAt).getTime() : null;
+    if (age === null || Number.isNaN(age) || age < -CLOCK_SKEW_MS || age > REPLAY_WINDOW_MS) return { outcome: 'used', invoiceId };
   }
 
   const returnToken = signToken(KINDS.return, { userId, invoiceId, paymentId: payment.id }, { env, now: now() });
@@ -134,4 +146,4 @@ function returnLocation({ ret, result, env = process.env, now = () => new Date()
 
 const appLink = (invoiceId, result) => `${APP_RETURN}?${invoiceId ? `invoice=${invoiceId}&` : ''}result=${RESULTS.includes(result) ? result : 'unavailable'}`;
 
-module.exports = { createCheckoutSession, openCheckout, classifyReturn, returnLocation, appLink, APP_RETURN, RESULTS };
+module.exports = { createCheckoutSession, openCheckout, REPLAY_WINDOW_MS, classifyReturn, returnLocation, appLink, APP_RETURN, RESULTS };

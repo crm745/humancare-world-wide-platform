@@ -3,6 +3,8 @@
 // says "clean". Documents whose file is gone or altered, or whose attempts ran out, fail for good and leave the sweep.
 // While ClamAV is down nothing is scanned and no attempt is used up (see sweepPendingScans).
 const { sweepPendingScans } = require('../modules/request-review/request-review.service');
+const { sweepSyntheticApprovals } = require('../modules/request-review/synthetic-approval');
+const { sweepAutoApprovals } = require('../modules/request-review/auto-approval');
 
 // The last summary line printed. While nothing changes (for example ClamAV stays down and the same documents keep
 // waiting) the same line is not printed again every minute; any scan result or change prints at once.
@@ -14,6 +16,9 @@ module.exports = {
   runOnStart: true,
   run: async () => {
     const { checked, scanned, failed, waiting, due, scannerUnavailable } = await sweepPendingScans();
+    // Synthetic E2E requests only: approves a marked request once its documents are clean. Inert unless explicitly enabled; never throws.
+    await sweepSyntheticApprovals().catch(() => undefined);
+    await sweepAutoApprovals().catch(() => undefined); // genuine requests; inert unless PRIVATE_CHARTER_AUTO_APPROVE and its start time are set
     if (!checked && !scannerUnavailable) {
       lastLine = '';
       return;

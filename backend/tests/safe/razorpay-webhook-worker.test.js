@@ -55,8 +55,8 @@ describe('Bitrix isolation', () => {
   test('every Bitrix job is still registered with its own interval, in its original order, ahead of the Razorpay job', () => {
     const names = jobs.map((j) => `${j.name}:${j.intervalMs}`);
     expect(names).toEqual([
-      'bitrix-retry:300000', 'bitrix-deal:30000', 'bitrix-deal-inbox:30000', 'bitrix-deal-reconcile:600000', 'bitrix-deal-document:30000', 'bitrix-quotation:30000', 'scan-case-quotations:60000', 'invoice-from-quotation:60000',
-      'security-log-purge:86400000', 'scan-request-documents:60000', 'admin-audit-purge:86400000', 'payment-order-recovery:60000', 'razorpay-webhook-inbox:10000',
+      'bitrix-retry:300000', 'bitrix-deal:60000', 'bitrix-deal-inbox:30000', 'bitrix-deal-reconcile:600000', 'bitrix-deal-document:30000', 'bitrix-quotation:30000', 'scan-case-quotations:60000', 'invoice-from-quotation:60000',
+      'security-log-purge:86400000', 'scan-request-documents:60000', 'admin-audit-purge:86400000', 'payment-order-recovery:60000', 'razorpay-webhook-inbox:10000', 'quotation-auto-publish:60000',
     ]);
   });
   test('neither new file imports or mentions Bitrix', () => {

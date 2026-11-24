@@ -10,11 +10,12 @@
 //
 // Documents that predate the workflow (the original `documents` rows, which have no scan metadata at all)
 // are NOT handled here and are never refused for lacking it: see findWorkflowSource.
-const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
 const { prisma } = require('../../db/prisma');
-const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
+const { storageFor } = require('../../storage');
+const { hashStream } = require('../../storage/meter');
+const { StorageError } = require('../../storage/errors');
+const { keyFromStoredReference } = require('../../storage/keys');
 
 function httpError(statusCode, message, publicCode, extra) {
   const err = new Error(message);
@@ -24,62 +25,56 @@ function httpError(statusCode, message, publicCode, extra) {
   return err;
 }
 
-function hashFile(file) {
-  return new Promise((resolve, reject) => {
-    const hash = crypto.createHash('sha256');
-    fs.createReadStream(file).on('data', (chunk) => hash.update(chunk)).on('error', reject).on('end', () => resolve(hash.digest('hex')));
-  });
+// SHA-256 of a stored object (streamed, never held in memory).
+async function hashObject(key) {
+  const { stream } = await storageFor(key).download(key);
+  return (await hashStream(stream)).sha256;
 }
 
-const storedPath = (storageKey) => path.join(UPLOAD_DIR, path.basename(storageKey));
-
-// What is wrong with the stored file of a request document, or null when it is intact. Streams the file
-// through the hash, so it is cheap on memory (the approval checks every document of a request).
+// What is wrong with the stored object of a request document, or null when it is intact. Streams it through the hash, so it is
+// cheap on memory (the approval checks every document of a request). A storage outage is reported as such, not as a missing file.
 async function fileProblem(requestDocument) {
   if (!requestDocument.sha256) return { code: 'checksum_missing', message: 'No checksum was recorded for this document, so it cannot be verified.' };
-  const file = storedPath(requestDocument.storageKey);
-  let stat;
+  const key = requestDocument.storageKey;
+  let meta;
   try {
-    stat = await fs.promises.stat(file);
+    meta = await storageFor(key).getMetadata(key);
   } catch {
-    return { code: 'file_missing', message: 'The stored file is missing.' };
+    return { code: 'storage_unavailable', message: 'The document storage could not be reached.' };
   }
-  if (!stat.isFile() || stat.size !== requestDocument.sizeBytes) return { code: 'file_changed', message: 'The stored file no longer matches what was scanned.' };
+  if (!meta) return { code: 'file_missing', message: 'The stored file is missing.' };
+  if (meta.size !== requestDocument.sizeBytes) return { code: 'file_changed', message: 'The stored file no longer matches what was scanned.' };
   let actual;
   try {
-    actual = await hashFile(file);
-  } catch {
-    return { code: 'file_missing', message: 'The stored file could not be read.' };
+    actual = await hashObject(key);
+  } catch (err) {
+    return err instanceof StorageError && err.code === 'not_found'
+      ? { code: 'file_missing', message: 'The stored file is missing.' }
+      : { code: 'storage_unavailable', message: 'The document storage could not be reached.' };
   }
   return actual === requestDocument.sha256 ? null : { code: 'file_changed', message: 'The stored file no longer matches what was scanned.' };
 }
 
-const STATUS_BY_PROBLEM = { file_missing: 404, file_changed: 409, checksum_missing: 409 };
+const STATUS_BY_PROBLEM = { file_missing: 404, file_changed: 409, checksum_missing: 409, storage_unavailable: 503 };
 
-// The verified bytes of the document, or an error (404 file_missing / 409 file_changed, checksum_missing).
+// The verified bytes of the document, or an error (404 file_missing / 409 file_changed, checksum_missing / 503 storage_unavailable).
+// The object is read ONCE, hashed, and that same buffer is what is sent (uploads are capped at 10 MB).
 async function readVerifiedFile(requestDocument) {
   if (!requestDocument.sha256) throw httpError(409, 'No checksum was recorded for this document, so it will not be opened.', 'checksum_missing');
-  const file = storedPath(requestDocument.storageKey);
-  let buffer;
   try {
-    const stat = await fs.promises.stat(file);
-    if (!stat.isFile() || stat.size !== requestDocument.sizeBytes) throw httpError(409, 'The stored file no longer matches what was scanned, so it will not be opened.', 'file_changed');
-    buffer = await fs.promises.readFile(file);
+    return await require('../../storage').readVerified(requestDocument.storageKey, { sha256: requestDocument.sha256, size: requestDocument.sizeBytes });
   } catch (err) {
-    if (err.publicCode) throw err;
-    throw httpError(404, 'The stored file is missing.', 'file_missing');
+    if (err instanceof StorageError && err.code === 'file_changed') throw httpError(409, 'The stored file no longer matches what was scanned, so it will not be opened.', 'file_changed');
+    if (err instanceof StorageError && err.code === 'not_found') throw httpError(404, 'The stored file is missing.', 'file_missing');
+    throw httpError(503, 'The document storage is not available right now.', 'storage_unavailable');
   }
-  if (crypto.createHash('sha256').update(buffer).digest('hex') !== requestDocument.sha256) {
-    throw httpError(409, 'The stored file no longer matches what was scanned, so it will not be opened.', 'file_changed');
-  }
-  return buffer;
 }
 
 // A document the original (pre-workflow) code stored has no request_documents row; one that came through
 // the workflow always has, and its storage key is unique. Looking the owner of the file up by that key means
 // a `documents` row can never be used to reach a workflow file without the workflow's checks.
 function findWorkflowSource(fileUrl) {
-  return prisma.requestDocument.findUnique({ where: { storageKey: path.basename(String(fileUrl || '')) } });
+  return prisma.requestDocument.findUnique({ where: { storageKey: keyFromStoredReference(fileUrl) } });
 }
 
 // The `documents` row of a workflow document must be the one the approval created for it, and the file must
@@ -105,6 +100,6 @@ function cleanOriginalName(name) {
 }
 
 module.exports = {
-  httpError, hashFile, storedPath, fileProblem, readVerifiedFile, findWorkflowSource, assertCaseDocumentServable,
+  httpError, hashObject, fileProblem, readVerifiedFile, findWorkflowSource, assertCaseDocumentServable,
   cleanOriginalName, STATUS_BY_PROBLEM,
 };

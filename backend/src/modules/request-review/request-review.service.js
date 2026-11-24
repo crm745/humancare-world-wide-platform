@@ -23,7 +23,12 @@ const { SHARE_SELECT } = require('../bitrix/deal-document.service');
 const {
   REQUEST_STATUS, REQUEST_STATUSES, SCAN, REVIEW, ACTION, MAX_DOCUMENTS_PER_REQUEST, REASON_MIN, REASON_MAX, SCAN_RETRY, scanBackoffMs, isStorageErrorCode,
 } = require('./request-review.config');
-const { httpError, hashFile, storedPath, fileProblem, readVerifiedFile, cleanOriginalName, STATUS_BY_PROBLEM } = require('./request-review.files');
+const { httpError, hashObject, fileProblem, readVerifiedFile, cleanOriginalName, STATUS_BY_PROBLEM } = require('./request-review.files');
+const { storageFor } = require('../../storage');
+const { StorageError } = require('../../storage/errors');
+const { hashStream } = require('../../storage/meter');
+const { AREAS } = require('../../storage/keys');
+const { ingestUpload, discardStored } = require('../../storage/ingest');
 
 const QUARANTINE_DIR = path.join(UPLOAD_DIR, 'quarantine');
 
@@ -139,8 +144,12 @@ async function createReviewRequest(userId, data) {
 // moves the request into review, and any upload while changes were requested puts it back into
 // review. The file is removed again if anything fails.
 async function addPatientDocument({ userId, requestId, file, replacesDocumentId, documentRequestId }) {
+  let stored = null;
   try {
-    const sha256 = await hashFile(file.path);
+    // Checked (size, content type, extension) and moved into storage under a generated key; the temporary file is removed.
+    // The virus scan is DEFERRED: the document is saved as "pending" and nobody can open it until the scan says "clean".
+    stored = await ingestUpload({ file, area: AREAS.REQUEST_DOCUMENTS, scan: 'deferred', policy: 'patient' });
+    const sha256 = stored.sha256;
     const id = numericId(requestId, 'The request');
     return await prisma.$transaction(async (tx) => {
       const request = await lockRequest(tx, id);
@@ -171,8 +180,8 @@ async function addPatientDocument({ userId, requestId, file, replacesDocumentId,
 
       const document = await tx.requestDocument.create({
         data: {
-          serviceRequestId: id, originalName: cleanOriginalName(file.originalname), storageKey: file.filename, sizeBytes: file.size,
-          mimeType: clip(file.mimetype, 191), sha256, uploadedByUserId: userId, replacesId: replaced ? replaced.id : null,
+          serviceRequestId: id, originalName: cleanOriginalName(file.originalname), storageKey: stored.key, sizeBytes: stored.size,
+          mimeType: clip(stored.contentType, 191), sha256, uploadedByUserId: userId, replacesId: replaced ? replaced.id : null,
           documentRequestId: documentRequest ? documentRequest.id : null,
         },
       });
@@ -196,6 +205,7 @@ async function addPatientDocument({ userId, requestId, file, replacesDocumentId,
     });
   } catch (err) {
     fs.rm(file.path, { force: true }, () => {});
+    if (stored) await discardStored(stored.key); // the database refused the document: nothing may refer to the stored object
     throw err;
   }
 }
@@ -228,28 +238,37 @@ const storageFailure = (detail) => ({ status: SCAN.ERROR, storage: true, detail 
 // confirmed the answer is "not sure", and "not sure" is retried, never terminal. This only reads; it writes nothing.
 const STORAGE_WITNESSES = 5;
 async function confirmFileMissing(document) {
-  try {
-    const folder = await fs.promises.stat(UPLOAD_DIR);
-    if (!folder.isDirectory()) throw new Error('not a directory');
-    await fs.promises.access(UPLOAD_DIR, fs.constants.R_OK);
-  } catch {
-    return storageFailure('the stored file was not found and the upload folder is unavailable, so it is retried instead of failing the document');
+  const adapter = storageFor(document.storageKey);
+  if (adapter.pathOf) { // local storage: the upload folder itself must be readable
+    try {
+      const folder = await fs.promises.stat(UPLOAD_DIR);
+      if (!folder.isDirectory()) throw new Error('not a directory');
+      await fs.promises.access(UPLOAD_DIR, fs.constants.R_OK);
+    } catch {
+      return storageFailure('the stored file was not found and the upload folder is unavailable, so it is retried instead of failing the document');
+    }
   }
   const witnesses = await prisma.requestDocument.findMany({
     where: { scanStatus: SCAN.CLEAN, id: { not: document.id } }, orderBy: { id: 'desc' }, take: STORAGE_WITNESSES, select: { storageKey: true },
   });
   for (const witness of witnesses) {
     try {
-      if ((await fs.promises.stat(storedPath(witness.storageKey))).isFile()) return permanentFailure('the stored file is missing');
-    } catch { /* this one is not there either: try the next */ }
+      if (await storageFor(witness.storageKey).exists(witness.storageKey)) return permanentFailure('the stored file is missing');
+    } catch { /* this one cannot be looked at either: try the next */ }
   }
-  return storageFailure('the stored file was not found, and no other stored document could be found in the upload folder to show the storage is intact, so it is retried instead of failing the document');
+  return storageFailure('the stored file was not found, and no other stored document could be found in storage to show it is intact, so it is retried instead of failing the document');
 }
 
 // Moves an infected file out of the uploads folder (defence in depth: the verdict alone already stops every download
 // and review). It never throws and never touches the saved verdict. A failure is logged with the document, the step
 // and the error code (not the message, which holds file-system paths), because the file then needs to be moved by hand.
 function quarantineFile(document, file) {
+  if (!file) { // object storage: no folder to move it to, so the infected object is deleted (the saved verdict already blocks every use of it)
+    storageFor(document.storageKey).delete(document.storageKey).catch((err) => {
+      console.error(`[scan] document ${document.id} (request ${document.serviceRequestId}) is INFECTED but its stored object could not be deleted (${err && err.code || 'error'}); it must be removed by hand.`);
+    });
+    return true;
+  }
   const name = path.basename(document.storageKey);
   const target = path.join(QUARANTINE_DIR, name);
   let step = 'creating the quarantine folder';
@@ -344,38 +363,45 @@ async function claimScan(documentId, { clock, retry = SCAN_RETRY }) {
 }
 
 // One scan attempt. Resolves { document: the row as it is now, scannerDown: true when ClamAV was unreachable }.
-async function attemptScan(documentId, { scanner, health, clock = Date.now, rng = Math.random } = {}) {
+async function attemptScan(documentId, { scanner, streamScanner, health, clock = Date.now, rng = Math.random } = {}) {
   const scan = scanner || clamav.scanFile;
   // With an injected scanner there is no real ClamAV to ask, unless the caller injects a health check too.
-  const isScannerUp = health || (scanner ? async () => true : clamav.ping);
+  const isScannerUp = health || (scanner ? async () => true : clamav.isReady);
+  // The real scanner must be READY (answering, signatures fresh) before anything is claimed or scanned: otherwise nothing is marked clean.
+  if (!scanner && !health && !(await isScannerUp())) return { document: await prisma.requestDocument.findUnique({ where: { id: documentId } }), scannerDown: true };
   const claim = await claimScan(documentId, { clock });
   if (!claim.claimed) return { document: claim.document, scannerDown: false };
   const { document, attempts } = claim;
 
-  const file = path.join(UPLOAD_DIR, path.basename(document.storageKey));
+  const adapter = storageFor(document.storageKey);
+  const file = adapter.pathOf ? adapter.pathOf(document.storageKey) : null; // a local path only for local storage
   let verdict;
   try {
-    // The scan is bound to the upload's checksum: the file must be what was uploaded before it is
+    // The scan is bound to the upload's checksum: the stored object must be what was uploaded before it is
     // scanned, and unchanged after, otherwise "clean" would describe different bytes than the ones kept.
-    const before = await hashFile(file);
+    const before = await hashObject(document.storageKey);
     if (!document.sha256) {
       verdict = permanentFailure('no checksum was recorded for this upload, so the file cannot be verified');
     } else if (before !== document.sha256) {
       verdict = permanentFailure('the stored file does not match its upload checksum');
     } else {
-      verdict = await scan(file);
-      if (verdict && verdict.status === SCAN.CLEAN && (await hashFile(file)) !== before) {
+      verdict = file && !streamScanner
+        ? await scan(file)
+        : await (streamScanner || clamav.scanStream)((await adapter.download(document.storageKey)).stream);
+      if (verdict && verdict.status === SCAN.CLEAN && (await hashObject(document.storageKey)) !== before) {
         verdict = permanentFailure('the file changed while it was being scanned');
       }
     }
   } catch (err) {
-    verdict = err.code === 'ENOENT'
+    verdict = (err.code === 'ENOENT' || (err instanceof StorageError && err.code === 'not_found'))
       ? await confirmFileMissing(document)
+      : err instanceof StorageError && err.code !== 'key_invalid'
+        ? storageFailure(`the stored object could not be read (${err.code})`)
       : (isStorageErrorCode(err.code) ? storageFailure : transientFailure)(`the scan could not be completed (${err.code || clip(err.message, 120)})`);
   }
   const definite = verdict && (verdict.status === SCAN.CLEAN || verdict.status === SCAN.INFECTED);
   let status = definite ? verdict.status : verdict && verdict.permanent === true ? SCAN.FAILED : SCAN.ERROR;
-  let detail = clip(status === SCAN.INFECTED ? verdict.signature : verdict && verdict.detail, 255);
+  let detail = clip(status === SCAN.INFECTED ? verdict.signature : status === SCAN.CLEAN ? (verdict.detail || (!scanner && clamav.lastSummary())) || null : verdict && verdict.detail, 255); // a clean verdict records the engine and signature version
 
   // What to store with the outcome. A final outcome clears the schedule.
   const at = new Date(clock());
@@ -423,6 +449,8 @@ async function attemptScan(documentId, { scanner, health, clock = Date.now, rng 
       console.warn(`[scan] document ${documentId} (request ${document.serviceRequestId}) could not be scanned for now: ${detail}. It stays unusable and will be retried.`);
     }
     if (status === SCAN.INFECTED) quarantineFile(document, file);
+    // A clean scan alone authorizes automatic sharing with the Bitrix Deal (deal-document-auto-share.js). Post-commit, best-effort, silent while its switch is off.
+    if (status === SCAN.CLEAN) await require('../bitrix/deal-document-auto-share').afterScanClean(documentId);
   }
   return { document: await prisma.requestDocument.findUnique({ where: { id: documentId } }), scannerDown };
 }
@@ -442,7 +470,7 @@ async function scanRequestDocument(documentId, options) {
 // resolves with scannerUnavailable: true. It stops early too if ClamAV goes away during the sweep.
 // Resolves with { checked, scanned (clean or infected), failed (became permanent in this run, retries exhausted
 // included), waiting (still retryable), due (documents that were due), scannerUnavailable }.
-async function sweepPendingScans({ limit = 25, scanner, health, clock = Date.now, rng } = {}) {
+async function sweepPendingScans({ limit = 25, scanner, streamScanner, health, clock = Date.now, rng } = {}) {
   const now = clock();
   const due = await prisma.requestDocument.findMany({
     where: {
@@ -453,7 +481,7 @@ async function sweepPendingScans({ limit = 25, scanner, health, clock = Date.now
   });
   if (!due.length) return { checked: 0, scanned: 0, failed: 0, waiting: 0, due: 0, scannerUnavailable: false };
 
-  const isScannerUp = health || (scanner ? async () => true : clamav.ping);
+  const isScannerUp = health || (scanner ? async () => true : clamav.isReady);
   if (!(await isScannerUp())) return { checked: 0, scanned: 0, failed: 0, waiting: 0, due: due.length, scannerUnavailable: true };
 
   let checked = 0;
@@ -462,7 +490,7 @@ async function sweepPendingScans({ limit = 25, scanner, health, clock = Date.now
   let scannerUnavailable = false;
   for (const { id } of due) {
     try {
-      const result = await attemptScan(id, { scanner, health, clock, ...(rng && { rng }) });
+      const result = await attemptScan(id, { scanner, streamScanner, health, clock, ...(rng && { rng }) });
       const doc = result.document;
       if (doc && (doc.scanStatus === SCAN.CLEAN || doc.scanStatus === SCAN.INFECTED)) scanned += 1;
       else if (doc && doc.scanStatus === SCAN.FAILED) failed += 1;
@@ -644,7 +672,8 @@ async function copyDocumentToCase(tx, caseRecord, d) {
 
 // Approves or rejects one clean, current document. A rejection (reason shown to the patient) puts
 // the request into "changes_requested" until the patient replaces the document.
-async function reviewDocument({ requestId, documentId, adminId, decision, reason }) {
+// actorType 'system' (with a null adminId) is the automatic Private Charter approval (auto-approval.js): same rules, recorded as the system.
+async function reviewDocument({ requestId, documentId, adminId, decision, reason, actorType = 'admin' }) {
   if (decision !== REVIEW.APPROVED && decision !== REVIEW.REJECTED) throw httpError(400, 'decision must be "approved" or "rejected".');
   const text = decision === REVIEW.REJECTED ? reasonOrThrow(reason) : null;
   const docId = numericId(documentId, 'The document');
@@ -666,11 +695,11 @@ async function reviewDocument({ requestId, documentId, adminId, decision, reason
     const now = new Date();
     const updated = await tx.requestDocument.update({
       where: { id: document.id },
-      data: { reviewStatus: decision, reviewedByAdminId: adminId, reviewedAt: now, rejectionReason: text },
+      data: { reviewStatus: decision, reviewedByAdminId: adminId ?? null, reviewedAt: now, rejectionReason: text },
       select: ADMIN_DOCUMENT_SELECT,
     });
     await appendEvent(tx, {
-      serviceRequestId: request.id, documentId: document.id, actorType: 'admin', actorId: adminId,
+      serviceRequestId: request.id, documentId: document.id, actorType, actorId: adminId ?? null,
       action: decision === REVIEW.APPROVED ? ACTION.DOCUMENT_APPROVED : ACTION.DOCUMENT_REJECTED,
       detail: { previous: document.reviewStatus, ...(text && { reason: text }) },
     });
@@ -763,9 +792,10 @@ function approvalBlockers(request, currentDocuments) {
 // Idempotent: a request that is already approved returns its existing Case and writes nothing. A request that already
 // has a Case (one opened at submission by an earlier version) reuses it: the Case is unique per request, and the Deal
 // link and event are only created when they are missing (ensureDealCreation), so a Deal event can never be doubled.
-async function approveRequest({ requestId, adminId }) {
+// actorType 'system' (with a null adminId) is the automatic approval; everything else, including the transaction, is identical.
+async function approveRequest({ requestId, adminId, actorType = 'admin' }) {
   // The timeout leaves room to re-hash every stored file while the request row is locked.
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const request = await lockRequest(tx, numericId(requestId, 'The request'));
     if (!request || request.reviewStatus == null) throw httpError(404, 'Request not found');
 
@@ -791,7 +821,7 @@ async function approveRequest({ requestId, adminId }) {
     let caseCreated = false;
     if (!caseRecord) {
       caseRecord = await createCaseForRequest(tx, request, {
-        actorType: 'admin', actorId: adminId, source: 'admin_portal', reasonCode: 'request_approved',
+        actorType, actorId: adminId ?? null, source: actorType === 'system' ? 'system' : 'admin_portal', reasonCode: actorType === 'system' ? 'request_auto_approved' : 'request_approved',
         note: `Case opened when ${request.referenceNumber} was approved.`,
       });
       caseCreated = true;
@@ -804,11 +834,11 @@ async function approveRequest({ requestId, adminId }) {
     });
     await appendEvent(tx, {
       serviceRequestId: request.id, action: ACTION.REQUEST_APPROVED, fromStatus: request.reviewStatus, toStatus: REQUEST_STATUS.APPROVED,
-      actorType: 'admin', actorId: adminId, detail: { documents: documents.length },
+      actorType, actorId: adminId ?? null, detail: { documents: documents.length },
     });
     if (caseCreated) {
       await appendEvent(tx, {
-        serviceRequestId: request.id, action: ACTION.CASE_CREATED, actorType: 'admin', actorId: adminId,
+        serviceRequestId: request.id, action: ACTION.CASE_CREATED, actorType, actorId: adminId ?? null,
         detail: { caseId: caseRecord.id, caseReference: caseRecord.referenceNumber },
       });
     }
@@ -817,6 +847,10 @@ async function approveRequest({ requestId, adminId }) {
     await ensureDealCreation(tx, caseRecord, updated);
     return { request: updated, case: caseRecord, alreadyApproved: false };
   }, { timeout: 30000, maxWait: 10000 });
+  // After the commit only: documents that were scanned clean BEFORE the Case and Deal link existed are authorized for sharing now (deal-document-auto-share.js).
+  // Best-effort and silent while its switch is off; it can never change the approval.
+  if (!result.alreadyApproved) await require('../bitrix/deal-document-auto-share').afterRequestApproved(result.request.id);
+  return result;
 }
 
 module.exports = {

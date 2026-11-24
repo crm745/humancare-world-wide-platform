@@ -27,7 +27,10 @@ const os = require('os');
 const crypto = require('crypto');
 const { prisma: defaultPrisma } = require('../../db/prisma');
 const { isPrivateCharterDealWorkerActive } = require('./bitrix-config');
+const { gatewayForPass } = require('./queue/dispatcher');
+const { PRIVATE_CHARTER_QUEUE } = require('./queue/service-registry');
 const bitrixDealApi = require('./bitrix-deal.api');
+const { profileForCategory, documentsConfig, TEST_PROFILE, PROFILE_TEST } = require('./bitrix-profiles');
 const defaultStore = require('./deal-document.store');
 const { makeNotifier } = require('./deal-document-notify');
 const { appendAuditLog } = require('../../common/audit/business-audit');
@@ -222,7 +225,8 @@ async function attachFlow(ctx, claim, share, caseRecord) {
 
   // Eligibility is re-checked at send time: a document must still be exactly what was authorized.
   if (!request || request.reviewStatus !== 'approved') return failFinally(ctx, claim, share, caseRecord, 'attach', 'request_not_approved');
-  if (document.scanStatus !== 'clean' || document.reviewStatus !== 'approved') return failFinally(ctx, claim, share, caseRecord, 'attach', 'document_not_clean_and_approved');
+  // Clean scan and not rejected (Admin review is not required: a clean scan alone authorizes sharing). The code keeps its old name for the Admin API.
+  if (document.scanStatus !== 'clean' || document.reviewStatus === 'rejected') return failFinally(ctx, claim, share, caseRecord, 'attach', 'document_not_clean_and_approved');
   if (!document.sha256 || document.sha256 !== share.sha256) return failFinally(ctx, claim, share, caseRecord, 'attach', 'checksum_changed');
   if (!dealId) {
     if (ctx.now() - new Date(share.authorizedAt).getTime() > WAIT_FOR_DEAL_MAX_MS) return failFinally(ctx, claim, share, caseRecord, 'attach', 'deal_not_available');
@@ -246,7 +250,7 @@ async function attachFlow(ctx, claim, share, caseRecord) {
       }
     }
 
-    const read = await ctx.api.getDealFiles(dealId, { env: ctx.env });
+    const read = await ctx.api.getDealFiles(dealId, fileOptions(ctx, link));
     if (read.status === 'not_found') return failFinally(ctx, claim, share, caseRecord, 'attach', 'deal_not_found');
     if (read.status !== 'ok') return retryOrFail(ctx, claim, share, caseRecord, 'attach', `read_failed:${read.reason || 'unknown'}`);
 
@@ -281,7 +285,7 @@ async function attachFlow(ctx, claim, share, caseRecord) {
       return false;
     }
     try {
-      await ctx.api.updateDealFiles(dealId, entries, { env: ctx.env });
+      await ctx.api.updateDealFiles(dealId, entries, fileOptions(ctx, link));
     } catch (err) {
       const definitive = err instanceof bitrixDealApi.BitrixDealCallError && err.outcome === 'definitive';
       if (!definitive) return reconcileLater(ctx, claim, share, err instanceof bitrixDealApi.BitrixDealCallError ? err.message.slice(0, 200) : 'unexpected_error_during_call', RECONCILE_FIRST_DELAY_SECONDS);
@@ -289,11 +293,11 @@ async function attachFlow(ctx, claim, share, caseRecord) {
     }
 
     // Verify by reading the Deal again.
-    let after = await ctx.api.getDealFiles(dealId, { env: ctx.env });
+    let after = await ctx.api.getDealFiles(dealId, fileOptions(ctx, link));
     if (after.status !== 'ok') return reconcileLater(ctx, claim, share, `verify_read_failed:${after.reason || after.status}`, RECONCILE_FIRST_DELAY_SECONDS);
     let added = idsAdded(read.ids, after.ids);
     if (added.length === 0) { // one more look before calling it a failure (the field may be slow to show the file)
-      after = await ctx.api.getDealFiles(dealId, { env: ctx.env });
+      after = await ctx.api.getDealFiles(dealId, fileOptions(ctx, link));
       if (after.status !== 'ok') return reconcileLater(ctx, claim, share, `verify_read_failed:${after.reason || after.status}`, RECONCILE_FIRST_DELAY_SECONDS);
       added = idsAdded(read.ids, after.ids);
     }
@@ -324,6 +328,21 @@ async function adopt(ctx, claim, share, caseRecord, fileId, { confirmedMissing =
   }
 }
 
+// The options of every Deal-file call. The Deal's own category decides which pipeline's Documents field is read and written: the test
+// pipeline keeps its existing field (no extra option, exactly as before); the actual pipeline's Medical Report field is passed
+// explicitly. A link whose category is neither is refused (the call throws, the event is retried or failed, nothing is sent).
+function fileOptions(ctx, link) {
+  // A link with no category is a Deal linked before profiles existed: always the test pipeline (never the actual one).
+  const legacy = !link || link.categoryId == null;
+  const profile = legacy ? TEST_PROFILE : profileForCategory(link.categoryId);
+  if (!profile) throw new Error('unknown_bitrix_category');
+  if (profile.name === PROFILE_TEST) return { env: ctx.env };
+  // The other pipeline names its field AND says whether it holds one file or several. Missing or invalid metadata refuses the call.
+  const documents = documentsConfig(profile);
+  if (!documents) throw new Error('documents_field_metadata_invalid');
+  return { env: ctx.env, ...documents };
+}
+
 // ---- REMOVE ---------------------------------------------------------------------------------------------------------------------
 
 async function removeFlow(ctx, claim, share, caseRecord) {
@@ -341,7 +360,7 @@ async function removeFlow(ctx, claim, share, caseRecord) {
 
   if (!(await ctx.store.acquireFileLease(ctx.prisma, link.id, ctx.workerId, FILE_LEASE_SECONDS))) return reschedule(ctx, claim, 'deal_files_busy', BUSY_DELAY_SECONDS);
   try {
-    const read = await ctx.api.getDealFiles(dealId, { env: ctx.env });
+    const read = await ctx.api.getDealFiles(dealId, fileOptions(ctx, link));
     if (read.status === 'not_found') return failFinally(ctx, claim, share, caseRecord, 'remove', 'deal_not_found');
     if (read.status !== 'ok') return retryOrFail(ctx, claim, share, caseRecord, 'remove', `read_failed:${read.reason || 'unknown'}`);
 
@@ -363,14 +382,14 @@ async function removeFlow(ctx, claim, share, caseRecord) {
       return false;
     }
     try {
-      await ctx.api.updateDealFiles(dealId, keep.map((id) => ({ id })), { env: ctx.env, allowEmpty: keep.length === 0 });
+      await ctx.api.updateDealFiles(dealId, keep.map((id) => ({ id })), { ...fileOptions(ctx, link), allowEmpty: keep.length === 0 });
     } catch (err) {
       const definitive = err instanceof bitrixDealApi.BitrixDealCallError && err.outcome === 'definitive';
       if (!definitive) return reconcileLater(ctx, claim, share, err instanceof bitrixDealApi.BitrixDealCallError ? err.message.slice(0, 200) : 'unexpected_error_during_call', RECONCILE_FIRST_DELAY_SECONDS);
       return isRetryable(err) ? retryOrFail(ctx, claim, share, caseRecord, 'remove', err.code) : failFinally(ctx, claim, share, caseRecord, 'remove', `bitrix:${err.code}`);
     }
 
-    const after = await ctx.api.getDealFiles(dealId, { env: ctx.env });
+    const after = await ctx.api.getDealFiles(dealId, fileOptions(ctx, link));
     if (after.status !== 'ok') return reconcileLater(ctx, claim, share, `verify_read_failed:${after.reason || after.status}`, RECONCILE_FIRST_DELAY_SECONDS);
     if (after.ids.includes(String(target))) return retryOrFail(ctx, claim, share, caseRecord, 'remove', 'removal_not_confirmed');
     const lost = idsMissing(keep, after.ids);
@@ -413,6 +432,11 @@ async function processClaim(ctx, claim) {
 async function runDealDocumentWorker(overrides = {}) {
   const ctx = buildContext(overrides);
   if (!isPrivateCharterDealWorkerActive(ctx.env)) return { active: false, claimed: 0 };
+  // Every Bitrix call of this worker passes the shared gateway at the API layer; here it is only asked BEFORE anything is claimed, so an open circuit
+  // pauses the pass without using up a single delivery attempt.
+  ctx.gateway = ctx.gateway || gatewayForPass(overrides);
+  const start = ctx.gateway.canStart(PRIVATE_CHARTER_QUEUE);
+  if (!start.ok) return { active: true, claimed: 0, paused: start.reason };
 
   await ctx.store.recoverExpiredLeases(ctx.prisma, { maxClaims: MAX_CLAIMS_BEFORE_ANY_CALL, ...(ctx.scope && { caseIds: ctx.scope.caseIds }) });
   let claimed = 0;
@@ -435,7 +459,7 @@ async function runDealDocumentWorker(overrides = {}) {
 }
 
 module.exports = {
-  runDealDocumentWorker, processClaim, remoteFileName,
+  runDealDocumentWorker, processClaim, remoteFileName, fileOptions,
   LEASE_SECONDS, FILE_LEASE_SECONDS, MIN_LEASE_LEFT_BEFORE_CALL_SECONDS, RETRY_DELAYS_SECONDS, MAX_ATTEMPTS,
   RECONCILE_FIRST_DELAY_SECONDS, RECONCILE_INTERVAL_SECONDS, RECONCILE_WINDOW_SECONDS, REMOTE_NAME_MAX,
 };

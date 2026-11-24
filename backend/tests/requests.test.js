@@ -379,7 +379,7 @@ describe('POST /requests: Private Charter persistence', () => {
   });
   afterAll(() => prisma.geonamesCity.deleteMany());
 
-  it('saves the validated, normalised values and copies the urgency to the Case', async () => {
+  it('saves the validated, normalised values; the Case keeps its default urgency (the revised form has none)', async () => {
     const { token } = await createPatient();
     const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`).send({
       serviceKey: 'privatecharter',
@@ -391,10 +391,11 @@ describe('POST /requests: Private Charter persistence', () => {
       destination: { geonameId: IDS.MUMBAI },
       patientContact: '+971 50 123 4567', // legacy spaced format, stored as E.164
       preferredDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-      careLevel: 'ICU / Critical', // legacy label, stored as the key
+      travelType: 'organ_transfer',
       description: ' BP <90/60 ',
-      mobility: 'bedridden',
-      urgency: 'urgent_24h',
+      criticalLevel: ['ecmo', 'icu'],
+      oxygenRequired: true,
+      oxygenFlowLpm: '6',
     });
     expect(res.status).toBe(201);
     expect(res.body.request).toMatchObject({
@@ -405,9 +406,13 @@ describe('POST /requests: Private Charter persistence', () => {
       patientGender: 'female',
       country: 'AE',
       patientContact: '+971501234567',
-      careLevel: 'care_icu',
+      travelType: 'organ_transfer',
+      criticalLevel: ['icu', 'ecmo'],
+      oxygenRequired: true,
+      oxygenFlowLpm: 6,
       description: 'BP <90/60',
-      urgency: 'urgent_24h',
+      careLevel: null,
+      urgency: null,
       // the cities as the server verified them, and the readable labels everything else shows
       origin: 'Dubai, United Arab Emirates',
       originCityName: 'Dubai',
@@ -420,8 +425,9 @@ describe('POST /requests: Private Charter persistence', () => {
     expect(res.body.request).not.toHaveProperty('originTimezone');
     const storedRequest = await prisma.serviceRequest.findUnique({ where: { id: res.body.request.id } });
     expect(storedRequest).toMatchObject({ originGeonameId: IDS.DUBAI, originTimezone: 'Asia/Dubai', destinationGeonameId: IDS.MUMBAI });
+    expect(storedRequest.criticalLevel).toBe('icu,ecmo'); // several choices: one column, keys joined by commas, in the order of the form
     const saved = await prisma.case.findUnique({ where: { serviceRequestId: res.body.request.id } });
-    expect(saved.urgency).toBe('urgent');
+    expect(saved.urgency).toBe('routine');
     expect(saved).toMatchObject({ origin: 'Dubai, United Arab Emirates', destination: 'Mumbai, Maharashtra, India' });
   });
 

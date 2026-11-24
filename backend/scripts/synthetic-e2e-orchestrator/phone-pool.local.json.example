@@ -1,0 +1,11 @@
+{
+  "_comment": "Copy this file to phone-pool.local.json (gitignored) in this same directory. Add the fictional phone numbers you configured under Firebase Console > Authentication > Sign-in method > Phone > Phone numbers for testing, each mapped to the SAME fixed test code (or different codes, as you prefer). Never commit the real file. Never use a real, reachable phone number here.",
+  "testCode": "123456",
+  "numbers": [
+    "+917000000001",
+    "+917000000002",
+    "+917000000003",
+    "+917000000004",
+    "+917000000005"
+  ]
+}

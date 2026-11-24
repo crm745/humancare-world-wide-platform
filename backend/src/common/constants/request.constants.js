@@ -63,7 +63,36 @@ const CARE_LEVEL_LABEL_EN = {
   care_na: 'Not Applicable',
 };
 
+// Private Charter form (revised): Travel Type is a single choice, Critical Level a multi-select; Oxygen Required is yes/no and,
+// only when yes, carries a flow rate in litres per minute. These replace care level, mobility, on-board equipment
+// and urgency for NEW Private Charter requests. Those older columns stay (other services use them, and older
+// Private Charter requests keep their values).
+const TRAVEL_TYPES = ['patient_transfer', 'organ_transfer'];
+const TRAVEL_TYPE_LABEL = { patient_transfer: 'Patient Transfer', organ_transfer: 'Organ Transfer' };
+const CRITICAL_LEVELS = ['icu', 'ventilated', 'tracheostomy', 'ecmo'];
+const CRITICAL_LEVEL_LABEL = { icu: 'ICU', ventilated: 'Ventilated', tracheostomy: 'Tracheostomy', ecmo: 'ECMO' };
+const OXYGEN_FLOW_MIN = 1;
+const OXYGEN_FLOW_MAX = 60;
+
+// Critical Level is a MULTI-select: the request carries an array of keys; it is stored in one column as the keys joined
+// with commas, in the order of CRITICAL_LEVELS (so the same choice is always stored the same way). A value stored
+// before the multi-select (one key) is a list of one. Unknown keys in a stored value are dropped when read.
+const CRITICAL_LEVEL_COLUMN_MAX = 64;
+const criticalLevelList = (value) => {
+  const raw = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+  const keys = raw.map((item) => (typeof item === 'string' ? item.trim() : '')).filter((key) => CRITICAL_LEVELS.includes(key));
+  return CRITICAL_LEVELS.filter((key) => keys.includes(key));
+};
+const criticalLevelColumn = (value) => { const list = criticalLevelList(value); return list.length ? list.join(',') : null; };
+const criticalLevelText = (value) => criticalLevelList(value).map((key) => CRITICAL_LEVEL_LABEL[key]).join(', ');
+
+// A city typed by hand (not found in GeoNames): its name, in characters as a person counts them.
+const CITY_NAME_MIN = 2;
+const CITY_NAME_MAX = 100;
+
 module.exports = {
+  TRAVEL_TYPES, TRAVEL_TYPE_LABEL, CRITICAL_LEVELS, CRITICAL_LEVEL_LABEL, OXYGEN_FLOW_MIN, OXYGEN_FLOW_MAX,
+  CRITICAL_LEVEL_COLUMN_MAX, criticalLevelList, criticalLevelColumn, criticalLevelText, CITY_NAME_MIN, CITY_NAME_MAX,
   CARE_LEVEL_LABEL_EN,
   MOBILITY, MOBILITY_LABEL, mobilityText, URGENCY, URGENCY_LABEL, URGENCY_TO_CASE, EQUIPMENT, isTransportKey,
   PRIVATE_CHARTER_KEY, PRIVATE_CHARTER_SERVICE_TYPE, GENDERS, CARE_LEVEL_KEYS, CARE_LEVEL_EXCLUSIVE, CARE_LEVEL_LEGACY_LABELS,

@@ -40,7 +40,7 @@ function PaySection({ invoice, raw, requestId, onChanged, t }) {
     phase === 'paid' ? t(pay.fullyPaid ? 'payment_success_full' : 'payment_success_partial')
       : phase === 'confirming' ? t('payment_confirming')
       : pay.messageKey ? t(pay.messageKey) : null;
-  const showButton = invoice.payable && phase !== 'paid' && phase !== 'confirming';
+  const showButton = invoice.payable && pay.payNowOffered;
   if (!message && !showButton && phase !== 'working') return null;
   return (
     <View className="mt-3">

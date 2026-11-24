@@ -168,19 +168,20 @@ describe('PDF and Bitrix read the same stored value the same way', () => {
     }
   });
 
-  it('what the Private Charter validator stores is what these read', async () => {
+  it('the revised Private Charter form stores no care level, and a care level stored earlier is still read the same way', async () => {
     const { validatePrivateCharterRequest } = require('../src/modules/requests/private-charter.validation');
     const { IDS, ROWS } = require('./fixtures/geo-cities');
     const city = (id) => { const c = ROWS.find((r) => r.geonameId === id); return { geonameId: c.geonameId, name: c.name, label: c.name, countryCode: c.countryCode, timezone: c.timezone }; };
     const body = {
       serviceKey: 'privatecharter', serviceType: 'Private Charter Air Ambulance Service', patientName: 'Maria Fernandez', patientAge: 61,
       patientGender: 'female', country: 'AE', origin: { geonameId: IDS.MUMBAI }, destination: { geonameId: IDS.DUBAI },
-      patientContact: '+971501234567', preferredDate: '2099-01-01', careLevel: ['care_icu', 'care_stable'], description: 'x', mobility: 'bedridden', urgency: 'planned',
+      patientContact: '+971501234567', preferredDate: '2099-01-01', travelType: 'patient_transfer', description: 'x', criticalLevel: ['icu'], oxygenRequired: false,
     };
     const { data, fields } = validatePrivateCharterRequest(body, { cities: { origin: city(IDS.MUMBAI), destination: city(IDS.DUBAI) } });
     expect(fields).toEqual({});
-    expect(data.careLevel).toBe('care_icu,care_stable');
-    expect(await careInPdf(data.careLevel)).toBe('ICU / Critical, Stable / Monitored');
-    expect(bitrixLine(data.careLevel)).toBe('ICU / Critical, Stable / Monitored');
+    expect(data.careLevel).toBeUndefined();
+    // Requests saved before the revision keep their stored care level, and it still reads the same way.
+    expect(await careInPdf('care_icu,care_stable')).toBe('ICU / Critical, Stable / Monitored');
+    expect(bitrixLine('care_icu,care_stable')).toBe('ICU / Critical, Stable / Monitored');
   });
 });

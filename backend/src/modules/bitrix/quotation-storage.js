@@ -1,8 +1,13 @@
-// Where a quotation's PDF is kept: the local uploads folder (UPLOAD_DIR), in its own sub-folder. Never in MySQL, never served as a
-// static file (app.js serves no uploads), never overwritten, and always verified against its SHA-256 before it is trusted.
+// Where a quotation's PDF is kept. Never in MySQL, never served as a static file (app.js serves no uploads), never overwritten, and
+// always verified against its SHA-256 before it is trusted.
 //
-// The interface is deliberately tiny (putIfAbsent / hashOf / pathOf / readVerified / remove / quarantine) so another provider can
-// replace this one later without touching the sync or the scanner. Only "local" exists today.
+// createQuotationStorage() is what the services use. It routes every call by the PROVIDER RECORDED ON THE QUOTATION ROW
+// (case_quotations.storage_provider, "local" | "s3"), so a historical local file stays readable when S3 is switched on, and an S3 file
+// stays readable if STORAGE_PROVIDER is switched back. NEW files go to the active provider (see ../../storage) and the row records
+// which one that was (`storage.provider`). createLocalStorage() below is the hardened local implementation (kept for "local" rows).
+//
+// Interface: putIfAbsent / hashOf / pathOf (local only) / readVerified / openStream / remove / quarantine. Every call that reads or
+// removes an existing object takes the row's provider as its LAST argument.
 //
 // STORAGE KEY: "quotations/case-<caseId>/<name>.pdf", relative to the uploads folder, opaque and unique per file (the table has
 // UNIQUE storage_key). The sync names a file after the outbox event that creates it ("ev<eventId>-<sha256>"), so a retry of the same
@@ -94,4 +99,84 @@ function createLocalStorage({ root } = {}) {
   return { provider: PROVIDER, putIfAbsent, hashOf, pathOf, readVerified, remove, quarantine };
 }
 
-module.exports = { createLocalStorage, keyFor, sha256Of, hashFile, StorageError, KEY, PROVIDER };
+// ---- provider routing (local rows and S3 rows) ----------------------------------------------------------------------------------
+function createQuotationStorage({ local: injectedLocal, s3, activeProvider } = {}) {
+  let localStorage = injectedLocal;
+  const getLocal = () => localStorage || (localStorage = createLocalStorage());
+  const shared = () => require('../../storage');
+  const s3Adapter = () => s3 || shared().storageForProvider('s3');
+  const active = () => (activeProvider ? activeProvider() : shared().activeProvider());
+  const isS3 = (provider) => provider === 's3';
+  const checkKey = (key) => { if (typeof key !== 'string' || !KEY.test(key) || key.includes('..')) throw new StorageError('key_invalid'); };
+
+  async function readAll(adapter, key) {
+    const { stream } = await adapter.download(key);
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    return Buffer.concat(chunks);
+  }
+
+  async function hashOf(key, provider) {
+    if (!isS3(provider)) return getLocal().hashOf(key);
+    checkKey(key);
+    const { stream } = await s3Adapter().download(key);
+    return (await require('../../storage/meter').hashStream(stream)).sha256;
+  }
+
+  return {
+    get provider() { return active(); },
+    pathOf: (key) => getLocal().pathOf(key),
+
+    /** Stores into the ACTIVE provider. { created, provider }. Same rules as the local one: never replaces an object with other content. */
+    async putIfAbsent(key, bytes, sha256) {
+      if (active() !== 's3') return { ...(await getLocal().putIfAbsent(key, bytes, sha256)), provider: 'local' };
+      if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw new StorageError('empty_file');
+      if (sha256Of(bytes) !== sha256) throw new StorageError('hash_mismatch');
+      checkKey(key);
+      const adapter = s3Adapter();
+      if (await adapter.exists(key)) {
+        let existing;
+        try { existing = await hashOf(key, 's3'); } catch { throw new StorageError('conflict'); }
+        if (existing === sha256) return { created: false, provider: 's3' };
+        throw new StorageError('conflict');
+      }
+      const stored = await adapter.upload(key, bytes, { contentType: 'application/pdf' });
+      if (stored.sha256 !== sha256) { await adapter.delete(key).catch(() => undefined); throw new StorageError('verify_failed'); }
+      return { created: true, provider: 's3' };
+    },
+
+    hashOf,
+
+    /** The bytes of a stored object, only if they still match `sha256`. */
+    async readVerified(key, sha256, provider) {
+      if (!isS3(provider)) return getLocal().readVerified(key, sha256);
+      checkKey(key);
+      const bytes = await readAll(s3Adapter(), key);
+      if (sha256Of(bytes) !== sha256) throw new StorageError('file_changed');
+      return bytes;
+    },
+
+    /** { stream } of the stored object, for the scanner. */
+    async openStream(key, provider) {
+      if (!isS3(provider)) return { stream: fs.createReadStream(getLocal().pathOf(key)) };
+      checkKey(key);
+      return s3Adapter().download(key);
+    },
+
+    async remove(key, provider) {
+      if (!isS3(provider)) return getLocal().remove(key);
+      checkKey(key);
+      return s3Adapter().delete(key);
+    },
+
+    /** Local: moved to uploads/quarantine. S3: the infected object is deleted (the saved verdict already blocks every use). */
+    async quarantine(key, provider) {
+      if (!isS3(provider)) return getLocal().quarantine(key);
+      checkKey(key);
+      await s3Adapter().delete(key);
+      return null;
+    },
+  };
+}
+
+module.exports = { createLocalStorage, createQuotationStorage, keyFor, sha256Of, hashFile, StorageError, KEY, PROVIDER };

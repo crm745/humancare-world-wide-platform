@@ -14,7 +14,7 @@ import { resolveTypedCity } from '../../lib/citySearch';
 import { locationProblems } from '../../lib/locationRules';
 import { pickRequestCountry, pickRequestPhoneCountry } from '../../lib/requestForm';
 import { isValidAge, isValidDateString, isValidMobileNumber, isValidName } from '../../lib/validators';
-import { isPrivateCharter, isPrivateCharterAge, firstAnchorOnStep, toCityChoice } from '../../lib/privateCharter';
+import { isPrivateCharter, isPrivateCharterAge, firstAnchorOnStep, toCityChoice, toManualCity, TRAVEL_TYPES } from '../../lib/privateCharter';
 import { CountryPicker } from '../../components/NationalityPhone';
 import CityField from '../../components/request/CityField';
 import { Anchor, RequestFrame } from '../../components/request/RequestFrame';
@@ -27,7 +27,7 @@ const RELATION_LABELS = (t) => Object.fromEntries(DECEASED_RELATIONS.map((r) => 
 const TRANSFER_LABELS = (t) => Object.fromEntries(MORTAL_TRANSFERS.map((m) => [m, t(`rd_transfer_${m}`)]));
 
 // Private Charter, a place typed by hand that is not a verified city: the backend takes only a verified city for this service (see lib/locationRules.js).
-const CHOOSE_CITY = 'Pick a city from the suggestions: Private Charter needs a verified city.';
+const CHOOSE_CITY = 'Pick a city from the suggestions, or tap \u201cUse\u201d to enter it as typed.';
 
 function dateStringToObj(value) {
   if (value && isValidDateString(value)) {
@@ -158,6 +158,7 @@ export default function RequestStep1() {
   const problemsFor = (d) => [
     ['name', !isValidName(d.name)],
     ['age', draft.age.trim() === '' || !isValidAge(draft.age) || (charter && !isPrivateCharterAge(draft.age)) || !draft.gender],
+    ...(charter ? [['travelType', !draft.travelType]] : []),
     ...(mortal ? [['relation', !draft.relation], ['deathPlace', !draft.deathPlace.trim()], ['deathDate', !isNotFuture(draft.deathDate)]] : []),
     ['country', !draft.country || (charter && !draft.countryIso)],
     ['location', locationProblems(d, charter).location !== null],
@@ -189,7 +190,7 @@ export default function RequestStep1() {
     if (problem === 'wrong_country') return `This city is not in ${draft.country}. Pick a city in ${draft.country}, or change the country.`;
     if (problem && !attempted) return undefined;
     if (problem === 'pick_city') return CHOOSE_CITY;
-    if (problem === 'required') return charter ? 'Select a city from the list.' : 'This field is required.';
+    if (problem === 'required') return charter ? 'Select a city from the list, or type its name.' : 'This field is required.';
     return charter ? serverError(apiField) : undefined;
   };
 
@@ -219,6 +220,16 @@ export default function RequestStep1() {
           </View>
         </View>
       </Anchor>
+      {charter && (
+        <Anchor id="travelType">
+          <FieldLabel required>{t('field_travel_type')}</FieldLabel>
+          <Select
+            value={draft.travelType} options={TRAVEL_TYPES} labels={Object.fromEntries(TRAVEL_TYPES.map((k) => [k, t(`travel_${k}`)]))}
+            onChange={(travelType) => updateDraft({ travelType })} title={t('field_travel_type')} placeholder={t('travel_type_placeholder')}
+          />
+          {attempted && !draft.travelType ? <Text className="mt-1 text-[12px] text-danger">{t('req_required')}</Text> : serverError('travelType') ? <Text className="mt-1 text-[12px] text-danger">{serverError('travelType')}</Text> : null}
+        </Anchor>
+      )}
       {mortal && (
         <>
           <Anchor id="relation">
@@ -254,7 +265,8 @@ export default function RequestStep1() {
       </Anchor>
       <Anchor id="location">
         <CityField
-          required label={t('field_location')} testID="origin-city" structured={charter}
+          required label={t(charter ? 'field_origin_city' : 'field_location')} testID="origin-city" structured={charter} t={t}
+          onManual={(text) => updateDraft({ originCity: toManualCity(text, draft.countryIso), location: toManualCity(text, draft.countryIso).label })}
           value={draft.location} city={draft.originCity}
           countryIso={draft.countryIso} countryName={draft.country} restrictToCountry
           // typing again makes it a typed place (manual) until a suggestion is tapped; a tapped suggestion keeps its verified city (and country)
@@ -265,7 +277,8 @@ export default function RequestStep1() {
       </Anchor>
       <Anchor id="dest">
         <CityField
-          required label={t('field_destination')} testID="destination-city" structured={charter}
+          required label={t(charter ? 'field_destination_city' : 'field_destination')} testID="destination-city" structured={charter} t={t}
+          onManual={(text) => updateDraft({ destCity: toManualCity(text, null), dest: toManualCity(text, null).label })}
           value={draft.dest} city={draft.destCity}
           onChangeText={(dest) => updateDraft({ dest, destCity: null })}
           onSelect={(city) => updateDraft({ destCity: city, dest: city.label })}

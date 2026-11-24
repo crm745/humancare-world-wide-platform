@@ -10,7 +10,7 @@ const { runDealWorker } = require('../../src/modules/bitrix/deal-worker.service'
 const api = require('../../src/modules/bitrix/bitrix-deal.api');
 const { bitrixHostProblem, bitrixConfigurationProblems } = require('../../src/modules/bitrix/bitrix-config');
 
-const ENV_ON = { BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true' };
+const ENV_ON = { BITRIX_DEAL_PROFILE: 'test', BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true' };
 const SANDBOX = 'sandbox-portal.bitrix24.in';
 const LIVE = 'live-portal.bitrix24.in';
 const hook = (host) => `https://${host}/rest/1/secrettoken123/`;
@@ -273,12 +273,14 @@ describe('the store only offers and recovers events of the scoped Cases', () => 
 
   test('scoped candidates: a parameterised query with "o.case_id IN (...)" and exactly those ids; the unscoped query is not used', async () => {
     const db = { $queryRawUnsafe: jest.fn(async () => [{ id: 41n }]), $queryRaw: jest.fn() };
-    expect(await store.findCandidateIds(db, 'pending', 5, { caseIds: [7, 9] })).toEqual([41]);
+    expect(await store.findCandidateIds(db, 'pending', 5, { caseIds: [7, 9] }, 'test')).toEqual([41]);
     expect(db.$queryRaw).not.toHaveBeenCalled();
     const [sql, ...params] = db.$queryRawUnsafe.mock.calls[0];
     expect(sql).toContain('o.case_id IN (?, ?)');
     expect(sql).toContain("(o.status <> 'pending' OR sr.review_status = 'approved')");
-    expect(params).toEqual(['bitrix.deal.create', 'case', 'pending', 'privatecharter', 'manual_review_required%', 7, 9, 5]);
+    expect(sql).toContain("COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.payload, '$.profile')), 'test') = ?"); // only the active profile's events
+    expect(sql).toContain('sr.patient_name NOT LIKE ?'); // the synthetic identity is never offered (see deal-dispatch-synthetic-guard.test.js)
+    expect(params).toEqual(['bitrix.deal.create', 'case', 'pending', 'privatecharter', 'manual_review_required%', 'test', 'ZZ-SYNTHETIC%', 7, 9, 5]);
   });
 
   test('an empty scope is refused before any query', async () => {

@@ -26,8 +26,11 @@
 const crypto = require('crypto');
 const { prisma: defaultPrisma } = require('../../db/prisma');
 const { isPrivateCharterDealWorkerActive } = require('./bitrix-config');
+const { gatewayForPass } = require('./queue/dispatcher');
+const { PRIVATE_CHARTER_QUEUE } = require('./queue/service-registry');
 const { assertDealEligible } = require('./deal-outbox');
-const { DEAL, FIELD } = require('./bitrix-deal');
+const { resolveProfile, referenceFieldOf } = require('./bitrix-profiles');
+const { linkProfileWhere, linkProfileProblem, dealProblem } = require('./bitrix-profile-runtime');
 const bitrixDealApi = require('./bitrix-deal.api');
 const { PRIVATE_CHARTER_KEY } = require('../../common/constants/request.constants');
 
@@ -42,14 +45,20 @@ const identityOf = (dealId, stageId, modifiedIso) => crypto.createHash('sha256')
 async function reconcileDeals(overrides = {}) {
   const ctx = { prisma: defaultPrisma, api: bitrixDealApi, env: process.env, log: console, now: () => Date.now(), ...overrides };
   if (!isPrivateCharterDealWorkerActive(ctx.env)) return { active: false, checked: 0, queued: 0 };
+  // Every Bitrix call here passes the shared gateway at the API layer; it is only asked up front so an open circuit pauses the whole pass.
+  ctx.gateway = ctx.gateway || gatewayForPass(overrides);
+  const start = ctx.gateway.canStart(PRIVATE_CHARTER_QUEUE);
+  if (!start.ok) return { active: true, checked: 0, queued: 0, paused: start.reason };
 
+  const profile = resolveProfile(ctx.env); // no default: without one nothing is looked at
+  if (!profile || !referenceFieldOf(profile)) return { active: true, checked: 0, queued: 0 }; // no profile, or no usable reference field: nothing is looked at
   const scope = ctx.scope || null;
   if (scope && !/^[1-9]\d{0,17}$/.test(String(scope.dealId))) return { active: true, checked: 0, queued: 0 }; // a malformed scope matches nothing
   const cutoff = new Date(ctx.now() - MIN_RECHECK_MINUTES * 60 * 1000);
   const links = await ctx.prisma.bitrixDealLink.findMany({
     where: {
       bitrixDealId: scope ? String(scope.dealId) : { not: null },
-      ...(scope && scope.ignoreRecheck ? {} : { OR: [{ lastAttemptAt: null }, { lastAttemptAt: { lt: cutoff } }] }),
+      AND: [linkProfileWhere(profile), ...(scope && scope.ignoreRecheck ? [] : [{ OR: [{ lastAttemptAt: null }, { lastAttemptAt: { lt: cutoff } }] }])],
       case: { is: { status: { notIn: OPEN_ONLY }, serviceRequest: { is: { serviceKey: PRIVATE_CHARTER_KEY, reviewStatus: { not: null }, bitrixLeadId: null } } } },
     },
     include: { case: { include: { serviceRequest: true } } },
@@ -66,6 +75,7 @@ async function reconcileDeals(overrides = {}) {
 
     const caseRecord = link.case;
     try { assertDealEligible(caseRecord, caseRecord && caseRecord.serviceRequest); } catch { continue; }
+    if (linkProfileProblem(link, profile)) continue; // defence in depth: a link of the other profile is never read or queued
 
     const read = await ctx.api.getDeal(link.bitrixDealId, { env: ctx.env });
     if (read.status !== 'ok') {
@@ -77,7 +87,7 @@ async function reconcileDeals(overrides = {}) {
     const deal = read.deal;
     // Only a Deal that is verifiably THIS Case's Deal is considered; anything else is left alone here (the inbound
     // processor quarantines such a mismatch if a webhook ever reports it).
-    const verified = String(deal.ID) === link.bitrixDealId && String(deal.CATEGORY_ID) === String(DEAL.CATEGORY_ID) && deal[FIELD.REFERENCE] === caseRecord.referenceNumber;
+    const verified = dealProblem(profile, deal, link.bitrixDealId, caseRecord.referenceNumber) === null;
     const modified = new Date(deal.DATE_MODIFY);
     if (!verified || typeof deal.DATE_MODIFY !== 'string' || Number.isNaN(modified.getTime())) {
       ctx.log.warn(`[deal-reconcile] deal ${link.bitrixDealId}: not verifiable, skipped`);

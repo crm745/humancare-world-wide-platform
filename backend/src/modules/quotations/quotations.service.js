@@ -22,7 +22,7 @@ const crypto = require('crypto');
 const { prisma: defaultPrisma } = require('../../db/prisma');
 const { appendAuditLog } = require('../../common/audit/business-audit');
 const { assertDealEligible } = require('../bitrix/deal-outbox');
-const { createLocalStorage, sha256Of } = require('../bitrix/quotation-storage');
+const { createQuotationStorage, sha256Of } = require('../bitrix/quotation-storage');
 const { WORKING_STATUSES } = require('../bitrix/quotation-versioning');
 const { sendExpoPush } = require('../../integrations/push/expo-push.service');
 
@@ -47,7 +47,7 @@ const conflict = (code, message, extra) => httpError(409, message, code, extra);
 function buildContext(overrides = {}) {
   return { prisma: defaultPrisma, storage: null, now: () => new Date(), push: sendExpoPush, log: console, ...overrides };
 }
-const storageOf = (ctx) => ctx.storage || (ctx.storage = createLocalStorage());
+const storageOf = (ctx) => ctx.storage || (ctx.storage = createQuotationStorage());
 
 function adminIdOf(adminId) {
   const id = Number(adminId);
@@ -205,14 +205,15 @@ function assertReady(q, caseRecord) {
 
 async function assertFileIntact(ctx, q) {
   let actual;
-  try { actual = await storageOf(ctx).hashOf(q.storageKey); } catch { actual = null; }
+  try { actual = await storageOf(ctx).hashOf(q.storageKey, q.storageProvider); } catch { actual = null; }
   if (actual !== q.sha256) throw conflict('file_unverified', 'The stored PDF is missing or no longer matches its checksum, so it cannot be used.');
 }
 
 function audit(ctx, action, q, caseRecord, actor, { reasonCode, before, after } = {}) {
   return {
     caseId: caseRecord.id, entityType: 'case_quotation', entityId: q.id, action,
-    actorType: 'admin', actorId: String(actor.adminId), actorRole: actor.adminRole ? String(actor.adminRole).slice(0, 32) : null, source: 'admin_portal',
+    // The quotation auto-publish sweep acts as the designated Admin but is recorded as the SYSTEM (actor type "system", source "quotation_auto").
+    actorType: actor.automation ? 'system' : 'admin', actorId: String(actor.adminId), actorRole: actor.adminRole ? String(actor.adminRole).slice(0, 32) : null, source: actor.automation ? 'quotation_auto' : 'admin_portal',
     reasonCode: reasonCode || null,
     ...(before ? { beforeData: before } : {}),
     afterData: { quotationId: q.id, versionNumber: q.versionNumber, caseId: caseRecord.id, caseReference: caseRecord.referenceNumber, ...(after || {}) },
@@ -223,10 +224,10 @@ function audit(ctx, action, q, caseRecord, actor, { reasonCode, before, after } 
 
 // ---- actions ----------------------------------------------------------------------------------------------------------------------------
 
-async function confirmQuotation({ quotationId, adminId, adminRole, revision }, deps) {
+async function confirmQuotation({ quotationId, adminId, adminRole, revision, automation }, deps) {
   const ctx = buildContext(deps);
   const id = quotationIdOf(quotationId);
-  const admin = { adminId: adminIdOf(adminId), adminRole };
+  const admin = { adminId: adminIdOf(adminId), adminRole, automation: automation === true }; // only the auto-publish sweep passes `automation` (never an HTTP body)
   const expected = revisionOf(revision);
   const result = await inTransaction(ctx, id, async ({ tx, q, caseRecord }) => {
     if (q.status === 'confirmed') return { already: true };
@@ -236,17 +237,17 @@ async function confirmQuotation({ quotationId, adminId, adminRole, revision }, d
     await assertFileIntact(ctx, q);
     await casUpdate(tx, q, { status: 'confirmed', confirmedByAdminId: admin.adminId, confirmedAt: ctx.now() });
     await appendAuditLog(tx, audit(ctx, 'quotation.confirmed', q, caseRecord, admin, {
-      reasonCode: 'admin_confirmed', before: { status: 'draft' }, after: { status: 'confirmed', scanStatus: q.scanStatus },
+      reasonCode: admin.automation ? 'auto_confirmed' : 'admin_confirmed', before: { status: 'draft' }, after: { status: 'confirmed', scanStatus: q.scanStatus },
     }));
     return { already: false };
   });
   return { alreadyConfirmed: result.already, quotation: await getQuotation({ quotationId: id }, ctx) };
 }
 
-async function publishQuotation({ quotationId, adminId, adminRole, revision, validUntil }, deps) {
+async function publishQuotation({ quotationId, adminId, adminRole, revision, validUntil, automation }, deps) {
   const ctx = buildContext(deps);
   const id = quotationIdOf(quotationId);
-  const admin = { adminId: adminIdOf(adminId), adminRole };
+  const admin = { adminId: adminIdOf(adminId), adminRole, automation: automation === true };
   const expected = revisionOf(revision);
   let until = null;
   if (validUntil !== undefined && validUntil !== null && validUntil !== '') {
@@ -275,7 +276,7 @@ async function publishQuotation({ quotationId, adminId, adminRole, revision, val
     }
     await casUpdate(tx, q, { status: 'published', workingSlot: null, liveSlot: 1, publishedByAdminId: admin.adminId, publishedAt: ctx.now(), validUntil: until });
     await appendAuditLog(tx, audit(ctx, 'quotation.published', q, caseRecord, admin, {
-      reasonCode: 'admin_published', before: { status: 'confirmed' }, after: { status: 'published' },
+      reasonCode: admin.automation ? 'auto_published' : 'admin_published', before: { status: 'confirmed' }, after: { status: 'published' },
     }));
     // The patient's notification: written in THIS transaction, only on the winning compare-and-set, so a repeated or concurrent publish can never add a second one.
     const userId = caseRecord.serviceRequest.userId;
@@ -330,9 +331,10 @@ async function createNewVersion({ quotationId, adminId, adminRole, revision }, d
 
   const storage = storageOf(ctx);
   let bytes;
-  try { bytes = await storage.readVerified(source.storageKey, source.sha256); } catch { throw conflict('file_unverified', 'The stored PDF is missing or no longer matches its checksum, so it cannot be copied.'); }
+  try { bytes = await storage.readVerified(source.storageKey, source.sha256, source.storageProvider); } catch { throw conflict('file_unverified', 'The stored PDF is missing or no longer matches its checksum, so it cannot be copied.'); }
   const newKey = `quotations/case-${source.caseId}/cp${source.id}-${crypto.randomBytes(4).toString('hex')}-${sha256Of(bytes)}.pdf`;
-  await storage.putIfAbsent(newKey, bytes, source.sha256);
+  const put = await storage.putIfAbsent(newKey, bytes, source.sha256);
+  const newProvider = (put && put.provider) || storage.provider || 'local'; // where the copy really is
 
   try {
     const created = await inTransaction(ctx, id, async ({ tx, q, caseRecord }) => {
@@ -347,7 +349,7 @@ async function createNewVersion({ quotationId, adminId, adminRole, revision }, d
         data: {
           caseId: caseRecord.id, dealLinkId: link.id, versionNumber: q.versionNumber + 1, bitrixDealId: q.bitrixDealId, bitrixFileId: q.bitrixFileId,
           bitrixAmountRaw: q.bitrixAmountRaw, bitrixCurrencyRaw: q.bitrixCurrencyRaw, bitrixDealStageId: q.bitrixDealStageId, contentFingerprint: q.contentFingerprint,
-          storageProvider: 'local', storageKey: newKey, sizeBytes: q.sizeBytes, sha256: q.sha256, amount: q.amount, currency: q.currency, validationError: q.validationError,
+          storageProvider: newProvider, storageKey: newKey, sizeBytes: q.sizeBytes, sha256: q.sha256, amount: q.amount, currency: q.currency, validationError: q.validationError,
           status: 'draft', workingSlot: 1, scanStatus: 'pending', revision: 0, lastSeenAt: ctx.now(),
         },
       });
@@ -358,7 +360,7 @@ async function createNewVersion({ quotationId, adminId, adminRole, revision }, d
     });
     return { quotation: await getQuotation({ quotationId: created.id }, ctx) };
   } catch (err) {
-    await storage.remove(newKey).catch(() => undefined); // nothing refers to the copy
+    await storage.remove(newKey, newProvider).catch(() => undefined); // nothing refers to the copy
     throw err;
   }
 }
@@ -373,7 +375,7 @@ async function resolveQuotationFile({ quotationId, adminId, adminRole }, deps) {
   const caseRecord = await loadCase(ctx.prisma, q.caseId);
   if (q.scanStatus !== 'clean') throw conflict('scan_not_clean', SCAN_MESSAGES[q.scanStatus] || 'The malware scan is not clean, so the file cannot be opened.');
   let buffer;
-  try { buffer = await storageOf(ctx).readVerified(q.storageKey, q.sha256); } catch { throw conflict('file_unverified', 'The stored PDF is missing or no longer matches its checksum, so it cannot be opened.'); }
+  try { buffer = await storageOf(ctx).readVerified(q.storageKey, q.sha256, q.storageProvider); } catch { throw conflict('file_unverified', 'The stored PDF is missing or no longer matches its checksum, so it cannot be opened.'); }
   await appendAuditLog(ctx.prisma, { ...audit(ctx, 'quotation.file_viewed', q, caseRecord, admin, { reasonCode: 'admin_viewed_file' }), idempotencyKey: null });
   return { buffer, name: `${caseRecord.referenceNumber}-quotation-v${q.versionNumber}.pdf` };
 }

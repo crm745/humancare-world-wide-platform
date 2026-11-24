@@ -22,7 +22,26 @@ const MESSAGES = Object.freeze({
   unavailable: [409, 'Payment is not available right now', 'Please return to the app to check your invoice.'],
 });
 
+// The session token is single-use, and redeeming it is what uses it up. So ONLY a real browser document navigation may redeem it: a HEAD request
+// (Express answers it with the GET handler), a prefetch / prerender (Purpose / Sec-Purpose) or any fetch whose Sec-Fetch-Dest is present and is not
+// "document" (an image, a script, a fetch(), an iframe ...) must never reach openCheckout. A browser that sends none of these headers is treated as a
+// plain navigation, exactly as before.
+function isDocumentNavigation(req) {
+  if (req.method !== 'GET') return false;
+  const purpose = `${req.get('Sec-Purpose') || ''};${req.get('Purpose') || ''}`.toLowerCase();
+  if (/prefetch|prerender/.test(purpose)) return false;
+  const dest = req.get('Sec-Fetch-Dest');
+  if (dest !== undefined && String(dest).trim().toLowerCase() !== 'document') return false;
+  return true;
+}
+
 async function getCheckoutPage(req, res) {
+  const accepted = isDocumentNavigation(req);
+  if (!accepted) {
+    // Harmless and never cached: nothing is read, nothing is consumed, and no token or payment detail is echoed.
+    res.set({ 'Cache-Control': 'no-store', Pragma: 'no-cache', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' });
+    return res.status(204).end();
+  }
   const result = await service.openCheckout({ token: req.params.token });
   const scriptNonce = page.nonce();
   if (result.outcome === 'ready') {
@@ -45,4 +64,4 @@ function handleReturn(req, res) {
   }));
 }
 
-module.exports = { postCheckoutSession, getCheckoutPage, handleReturn };
+module.exports = { postCheckoutSession, getCheckoutPage, handleReturn, isDocumentNavigation };

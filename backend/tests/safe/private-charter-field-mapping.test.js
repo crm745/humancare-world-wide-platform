@@ -17,14 +17,30 @@ const CITIES = { origin: city(1275339, 'Mumbai', 'Mumbai, Maharashtra, India', '
 const body = (over = {}) => ({
   serviceKey: 'privatecharter', patientName: 'Maria Fernandez', patientAge: 61, patientGender: 'female', country: 'AE',
   origin: { geonameId: 1275339 }, destination: { geonameId: 292223 }, patientContact: '+971501234567', preferredDate: '2099-01-01',
-  careLevel: ['care_icu'], description: 'Medical text that must never reach Bitrix', mobility: ['bedridden'], urgency: 'urgent_24h', ...over,
+  travelType: 'patient_transfer', description: 'Medical text that must never reach Bitrix', criticalLevel: ['icu'], oxygenRequired: false, ...over,
 });
 
-// validate -> store -> map
+// The Deal mapping (bitrix-deal.js) still reads the fields of a request saved BEFORE the form revision: care level, mobility, equipment
+// and urgency. The revised form no longer sends them (the validator refuses them), so a pre-revision request is built here the way the
+// old validator stored it: lists in the fixed order of the constants, joined with commas. The Bitrix mapping is unchanged by the revision.
+const OLD_KEYS = ['careLevel', 'mobility', 'urgency', 'equipOxygen', 'equipCardiacMonitor', 'equipVentilator'];
+const OLD_DEFAULTS = { careLevel: ['care_icu'], mobility: ['bedridden'], urgency: 'urgent_24h' };
+function storedBeforeRevision(over) {
+  const old = { ...OLD_DEFAULTS, ...Object.fromEntries(OLD_KEYS.filter((k) => k in over).map((k) => [k, over[k]])) };
+  const list = (value) => (Array.isArray(value) ? value : [value]);
+  return {
+    ...old,
+    careLevel: constants.CARE_LEVEL_KEYS.filter((k) => list(old.careLevel).includes(k)).join(','),
+    mobility: constants.MOBILITY.filter((k) => list(old.mobility).includes(k)).join(','),
+  };
+}
+
+// validate (the common fields) -> store (as a pre-revision request) -> map
 function toDeal(over) {
-  const { fields, data } = validatePrivateCharterRequest(body(over), { cities: CITIES });
+  const revised = Object.fromEntries(Object.entries(over).filter(([k]) => !OLD_KEYS.includes(k)));
+  const { fields, data } = validatePrivateCharterRequest(body(revised), { cities: CITIES });
   expect(fields).toEqual({});
-  const row = requestRecordData(7, data);
+  const row = requestRecordData(7, { ...data, ...storedBeforeRevision(over) });
   return { row, payload: deal.buildDealFields({ referenceNumber: 'CASE-1234', patientName: row.patientName }, row) };
 }
 
@@ -52,12 +68,13 @@ describe('from the app request to the Deal payload', () => {
 
   test('Not Applicable alone maps; combined with another it never gets this far (the validator refuses it)', () => {
     expect(toDeal({ careLevel: ['care_na'] }).payload.UF_CRM_1794548015097).toEqual([5886]);
-    expect(validatePrivateCharterRequest(body({ careLevel: ['care_na', 'care_icu'] }), { cities: CITIES }).fields.careLevel).toMatch(/Not Applicable/);
+    // The revised form refuses care level altogether.
+    expect(validatePrivateCharterRequest(body({ careLevel: ['care_na', 'care_icu'] }), { cities: CITIES }).fields.careLevel).toBeDefined();
   });
 
   test('Urgency is exactly one value: the three options are separate', () => {
     expect(['critical_6h', 'urgent_24h', 'planned'].map((urgency) => toDeal({ urgency }).payload.UF_CRM_1794831027)).toEqual([6018, 6020, 6022]);
-    expect(validatePrivateCharterRequest(body({ urgency: ['critical_6h', 'planned'] }), { cities: CITIES }).fields.urgency).toBeDefined();
+    expect(validatePrivateCharterRequest(body({ urgency: ['critical_6h', 'planned'] }), { cities: CITIES }).fields.urgency).toBeDefined(); // refused: no urgency on the revised form
   });
 
   test('the medical description and the Documents field are never in the payload', () => {
@@ -146,10 +163,10 @@ describe('the widened Mobility column (migration prepared, not applied)', () => 
     expect(read('prisma', 'migrations', folder, 'migration.sql')).toMatch(/NOT applied/);
   });
 
-  test('the longest value the validator can produce does not fit the old column and fits the new one', () => {
-    const { data } = validatePrivateCharterRequest(body({ mobility: ['walking', 'wheelchair', 'bedridden'] }), { cities: CITIES });
-    expect(data.mobility).toBe('bedridden,wheelchair,walking');
-    expect(data.mobility.length).toBeGreaterThan(16);
-    expect(data.mobility.length).toBeLessThanOrEqual(191);
+  test('the longest value a pre-revision request could hold does not fit the old column and fits the new one', () => {
+    const mobility = storedBeforeRevision({ mobility: ['walking', 'wheelchair', 'bedridden'] }).mobility;
+    expect(mobility).toBe('bedridden,wheelchair,walking');
+    expect(mobility.length).toBeGreaterThan(16);
+    expect(mobility.length).toBeLessThanOrEqual(191);
   });
 });

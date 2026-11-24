@@ -11,7 +11,7 @@ const realStore = require('../../src/modules/bitrix/deal-inbox.store');
 const { STAGES } = require('../../src/modules/bitrix/bitrix-deal-stages');
 
 const { runInboxWorker, LEASE_SECONDS, MAX_ATTEMPTS, NOT_LINKED_RETRIES } = service;
-const ENV_ON = { BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true' };
+const ENV_ON = { BITRIX_DEAL_PROFILE: 'test', BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true' };
 const REF = 'HC-PC-000123';
 const DEAL = '4711';
 const REF_FIELD = 'UF_CRM_1794548440549';
@@ -544,11 +544,13 @@ describe('the SQL of the real inbox store', () => {
 
   test('due events: only bitrix24 ONCRMDEALUPDATE rows that are "received", due and not leased, on the database clock', async () => {
     const { db, queried } = fakeDb([[{ id: 3n }]]);
-    expect(await realStore.findDueIds(db, 10)).toEqual([3]);
+    expect(await realStore.findDueIds(db, 10, 'test')).toEqual([3]);
     expect(queried[0].sql).toContain("status = 'received'");
     expect(queried[0].sql).toContain('next_attempt_at <= UTC_TIMESTAMP(3)');
-    expect(queried[0].sql).toContain('locked_until IS NULL OR locked_until <= UTC_TIMESTAMP(3)');
-    expect(queried[0].values).toEqual(expect.arrayContaining(['bitrix24', 'ONCRMDEALUPDATE']));
+    expect(queried[0].sql).toContain('locked_until IS NULL OR i.locked_until <= UTC_TIMESTAMP(3)');
+    // only the active profile's events: the Deal link's profile (an unlinked Deal reads as test)
+    expect(queried[0].sql).toContain("COALESCE(l.profile, 'test') = ?");
+    expect(queried[0].values).toEqual(expect.arrayContaining(['bitrix24', 'ONCRMDEALUPDATE', 'test']));
   });
   test('claim: a locking read then one compare-and-swap UPDATE with a database-clock lease', async () => {
     const { db, executed, queried } = fakeDb([[{ id: 3, attempts: 0, entity_id: '4711' }]]);

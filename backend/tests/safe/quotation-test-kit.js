@@ -9,7 +9,7 @@ const path = require('path');
 const { BitrixDealCallError } = require('../../src/modules/bitrix/bitrix-deal.api');
 const { createLocalStorage } = require('../../src/modules/bitrix/quotation-storage');
 
-const ENV_ON = { BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true', BITRIX_QUOTATION_SYNC_ENABLED: 'true' };
+const ENV_ON = { BITRIX_DEAL_PROFILE: 'test', BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true', BITRIX_QUOTATION_SYNC_ENABLED: 'true' };
 const REF = 'CASE-4037';
 const DEAL = '21802';
 const REF_FIELD = 'UF_CRM_1794548440549';
@@ -41,6 +41,7 @@ const matches = (row, where) => Object.entries(where || {}).every(([key, cond]) 
   if (cond instanceof Date) return value != null && +value === +cond;
   if (typeof cond === 'object') {
     if ('in' in cond) return cond.in.includes(value);
+    if ('gte' in cond) return value != null && +value >= +cond.gte;
     if ('lte' in cond) return value != null && +value <= +cond.lte;
     if ('not' in cond) return value !== cond.not;
   }

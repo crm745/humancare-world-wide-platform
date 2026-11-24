@@ -71,9 +71,9 @@ function RouteCard({ model }) {
     <Card className="rounded-[18px] p-[18px]">
       <Text className="font-inter-black" style={{ marginBottom: 12, fontSize: 14, color: COLORS.SECONDARY }}>{t('tcp_route_heading')}</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <End label={t('lbl_from')} city={origin} />
+        <End label={t('field_origin_city')} city={origin} />
         <View style={mirrorStyle(isRTL)}><ArrowRight size={18} color={COLORS.PRIMARY} /></View>
-        <End label={t('lbl_to')} city={destination} />
+        <End label={t('field_destination_city')} city={destination} />
       </View>
     </Card>
   );

@@ -90,6 +90,48 @@ function statusFor({ cancelled, rank, reviewStatus, reason }) {
   return { key: 'received', tone: 'neutral', detail: null }; // legacy, or unknown review status
 }
 
+// The five approved patient-facing stages of the five-stage journey (the actual Air Ambulance pipeline), in order. Request Received is always reached;
+// Quotation Ready, Payment Confirmed, Service In Progress and Completed are reached by the stage events "quotation_ready", "payment_confirmed",
+// "in_progress" and "completed" (and Service In Progress / Completed also by the Case status). Text keys are acs_* (translated in every language).
+const ACTUAL_STAGES = Object.freeze([
+  { key: 'request_received', event: null },
+  { key: 'quotation_ready', event: 'quotation_ready' },
+  { key: 'payment_confirmed', event: 'payment_confirmed' },
+  { key: 'service_in_progress', event: 'in_progress' },
+  { key: 'completed', event: 'completed' },
+]);
+export const ACTUAL_STAGE_KEYS = Object.freeze(ACTUAL_STAGES.map((s) => s.key));
+// The value of request.trackingFlow the backend sends for a request in this journey.
+export const TRACKING_FLOW_FIVE_STAGE = 'five_stage';
+
+// The five stages as a timeline, or null. They are shown ONLY when the backend says so (request.trackingFlow === 'five_stage'): never because a
+// quotation or a payment exists, and never guessed from stage events. All five are always listed, from the first moment.
+//   * The furthest stage reached is the current one (active; the last one is completed). Every stage before it counts as passed (completed), also
+//     one that was skipped (Enquiry straight to Activate): it has no time of its own, because nothing happened at it.
+//   * Before approval, or without a Case, nothing is reached beyond Request Received.
+//   * A cancelled request stops at the furthest stage reached; the stages after it are not shown.
+function buildActualStages({ flow, events, caseStatus, caseDrivesProgress, cancelled, createdAt }) {
+  if (flow !== TRACKING_FLOW_FIVE_STAGE) return null;
+  const reached = ACTUAL_STAGES.map((s) => s.event === null || (caseDrivesProgress && events.some((e) => e.stage === s.event)));
+  if (caseDrivesProgress && !cancelled) {
+    if (caseStatus === 'in_progress') reached[3] = true;
+    if (caseStatus === 'completed') { reached[3] = true; reached[4] = true; }
+  }
+  let furthest = 0;
+  reached.forEach((hit, i) => { if (hit) furthest = i; });
+  return ACTUAL_STAGES.map((s, i) => {
+    let state = MILESTONE_STATE.PENDING;
+    if (cancelled) state = i < furthest ? MILESTONE_STATE.COMPLETED : i === furthest ? MILESTONE_STATE.CANCELLED : MILESTONE_STATE.NOT_APPLICABLE;
+    else if (i < furthest || (i === furthest && i === ACTUAL_STAGES.length - 1)) state = MILESTONE_STATE.COMPLETED;
+    else if (i === furthest) state = MILESTONE_STATE.ACTIVE;
+    const at = s.event === null ? timeOrNull(createdAt) : caseDrivesProgress ? latestEvent(events, s.event).at : null;
+    return {
+      key: s.key, titleKey: `acs_${s.key}`, subKey: `acs_${s.key}_sub`, state,
+      occurredAt: state === MILESTONE_STATE.PENDING || state === MILESTONE_STATE.NOT_APPLICABLE ? null : at,
+    };
+  });
+}
+
 export function buildPrivateCharterTracking(request) {
   const r = isObject(request) ? request : {};
   const c = isObject(r.case) ? r.case : null;
@@ -206,7 +248,16 @@ export function buildPrivateCharterTracking(request) {
 
   const reason = textOrNull(r.documentsRequestReason);
   const changesReason = reviewStatus === 'changes_requested' && !cancelled ? reason : null;
-  const status = statusFor({ cancelled, rank, reviewStatus, reason: changesReason });
+  const actualStages = buildActualStages({
+    flow: r.trackingFlow, events: progressEvents, caseStatus, caseDrivesProgress, cancelled, createdAt: r.createdAt,
+  });
+  let status = statusFor({ cancelled, rank, reviewStatus, reason: changesReason });
+  // In the five-stage journey the chip names the current stage (Request Received ... Completed) once the request may take progress from its Case
+  // (legacy or approved); while documents are in review the review chip stays. A cancelled request keeps "Cancelled".
+  if (actualStages && !cancelled && progressAllowed) {
+    const current = actualStages.find((m) => m.state === MILESTONE_STATE.ACTIVE) || actualStages[actualStages.length - 1];
+    status = { key: current.key, tone: current.state === MILESTONE_STATE.COMPLETED ? 'done' : 'info', detail: null, labelKey: current.titleKey };
+  }
 
   return {
     family: TRACKING_FAMILY.PRIVATE_CHARTER,
@@ -215,7 +266,7 @@ export function buildPrivateCharterTracking(request) {
     serviceName: textOrNull(r.serviceType) || PRIVATE_CHARTER_SERVICE_TYPE,
     origin: place(r.originCityName, r.origin, r.originCountryCode),
     destination: place(r.destinationCityName, r.destination, r.destinationCountryCode),
-    status: { key: status.key, labelKey: `tcp_status_${status.key}`, tone: status.tone, detail: status.detail },
+    status: { key: status.key, labelKey: status.labelKey || `tcp_status_${status.key}`, tone: status.tone, detail: status.detail },
     review: {
       mode,
       state: reviewState,
@@ -226,7 +277,9 @@ export function buildPrivateCharterTracking(request) {
       approvedAt: reviewStatus === 'approved' ? timeOrNull(r.reviewedAt) : null,
     },
     milestones,
-    activeMilestone: milestones.find((m) => m.state === MILESTONE_STATE.ACTIVE) || null,
+    // The five actual-pipeline stages (Request Received ... Completed) for a request that is in that pipeline; null for every other request.
+    actualStages,
+    activeMilestone: (actualStages || milestones).find((m) => m.state === MILESTONE_STATE.ACTIVE) || null,
     cancellation: {
       isCancelled: cancelled,
       stoppedAtKey,

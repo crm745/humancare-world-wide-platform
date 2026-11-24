@@ -54,8 +54,13 @@ function fakeDb({ invoices = [invoiceRow()], payments = [paymentRow()] } = {}) {
         if (data.idempotencyKey && audits.some((a) => a.entityType === data.entityType && a.entityId === data.entityId && a.idempotencyKey === data.idempotencyKey)) {
           throw Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
         }
-        audits.push(JSON.parse(JSON.stringify(data)));
+        audits.push(JSON.parse(JSON.stringify({ ...data, recordedAt: NOW }))); // recordedAt: what the database's own default would stamp
         return {};
+      }),
+      findUnique: jest.fn(async ({ where }) => {
+        const k = where.entityType_entityId_idempotencyKey;
+        const row = audits.find((a) => a.entityType === k.entityType && a.entityId === k.entityId && a.idempotencyKey === k.idempotencyKey);
+        return row ? { recordedAt: new Date(row.recordedAt) } : null;
       }),
     },
   };
@@ -190,19 +195,61 @@ describe('redeeming a session (the hosted page)', () => {
     expect(db.audits[0].idempotencyKey).toMatch(/^checkout:[0-9a-f]{32}$/);
     expect(db.writes.payment).toBe(0);
   });
-  test('REUSED: the second redemption of the same session is refused, and nothing further is written', async () => {
+  test('REPEATED within moments (Safari sends the same navigation three times): the same page again, ONE audit row, nothing else written', async () => {
+    const db = fakeDb();
+    const { token } = tokens.signToken('s', ids(), opts());
+    const first = await open(db, token);
+    expect(first.outcome).toBe('ready');
+    for (const seconds of [0.3, 0.7]) {
+      const again = await open(db, token, { now: () => later(seconds) });
+      expect(again.outcome).toBe('ready');
+      expect(again.config).toMatchObject({ keyId: first.config.keyId, orderId: first.config.orderId, amount: 150000, currency: 'INR', invoiceId: 1 });
+      expect(Object.keys(again.config).sort()).toEqual(['amount', 'currency', 'invoiceId', 'keyId', 'orderId', 'returnToken']);
+    }
+    expect(db.audits).toHaveLength(1);
+    expect(db.auditLog.create).toHaveBeenCalledTimes(3); // two refused duplicates, none written
+    expect(db.writes.payment).toBe(0);
+    for (const fn of ['create', 'update', 'updateMany', 'upsert', 'delete', 'deleteMany']) expect(db.payment[fn]).not.toHaveBeenCalled();
+  });
+  test('REUSED after the replay window: "used", and nothing further is written', async () => {
     const db = fakeDb();
     const { token } = tokens.signToken('s', ids(), opts());
     expect((await open(db, token)).outcome).toBe('ready');
-    expect(await open(db, token)).toEqual({ outcome: 'used', invoiceId: 1 });
-    expect(await open(db, token)).toEqual({ outcome: 'used', invoiceId: 1 });
+    const afterWindow = () => later(service.REPLAY_WINDOW_MS / 1000 + 1);
+    expect(await open(db, token, { now: afterWindow })).toEqual({ outcome: 'used', invoiceId: 1 });
+    expect(await open(db, token, { now: afterWindow })).toEqual({ outcome: 'used', invoiceId: 1 });
     expect(db.audits).toHaveLength(1);
   });
-  test('REUSED at the same instant: of several simultaneous redemptions exactly one wins', async () => {
+  test('a repeat is still fully re-checked: expired, invalid, ineligible or no-longer-pending is refused, not replayed', async () => {
+    const db = fakeDb();
+    const { token } = tokens.signToken('s', ids(), opts());
+    expect((await open(db, token)).outcome).toBe('ready');
+    expect(await open(db, token, { now: () => later(601) })).toMatchObject({ outcome: 'expired' }); // past the token's own ten minutes
+    expect(await open(db, token, { env: { ...ENV, JWT_ACCESS_SECRET: 'another-secret' } })).toMatchObject({ outcome: 'invalid' });
+    expect(await open(db, token + 'x')).toMatchObject({ outcome: 'invalid' });
+    expect(await open(db, 'garbage')).toMatchObject({ outcome: 'invalid' });
+    const jti = tokens.verifyToken('s', token, opts()).claims.jti;
+    for (const over of [
+      { invoices: [invoiceRow({ status: 'void' })] },
+      { invoices: [invoiceRow({ case: { id: 10, status: 'cancelled', closedAt: null, serviceRequest: { id: 50, userId: ME, serviceKey: 'privatecharter' } } })] },
+      { invoices: [invoiceRow({ case: { id: 10, status: 'in_progress', closedAt: null, serviceRequest: { id: 50, userId: OTHER, serviceKey: 'privatecharter' } } })] },
+      { payments: [paymentRow({ status: 'completed' })] },
+      { payments: [paymentRow({ status: 'cancelled' })] },
+      { payments: [paymentRow({ razorpayOrderId: null })] },
+    ]) {
+      const other = fakeDb(over);
+      // the session was already redeemed (the audit row exists), as after a first page load
+      other.audits.push({ entityType: 'payment', entityId: '100', idempotencyKey: `checkout:${jti}`, recordedAt: NOW });
+      expect(await open(other, token)).toMatchObject({ outcome: 'unavailable' });
+      expect(other.audits).toHaveLength(1);
+    }
+    expect(db.audits).toHaveLength(1);
+  });
+  test('REPEATED at the same instant: several simultaneous requests all get the page, but exactly one writes the audit row', async () => {
     const db = fakeDb();
     const { token } = tokens.signToken('s', ids(), opts());
     const results = await Promise.all([1, 2, 3, 4].map(() => open(db, token)));
-    expect(results.map((r) => r.outcome).sort()).toEqual(['ready', 'used', 'used', 'used']);
+    expect(results.map((r) => r.outcome)).toEqual(['ready', 'ready', 'ready', 'ready']);
     expect(db.audits).toHaveLength(1);
   });
   test('two different sessions for the same payment are each valid once', async () => {
@@ -210,7 +257,8 @@ describe('redeeming a session (the hosted page)', () => {
     const a = tokens.signToken('s', ids(), opts()).token; const b = tokens.signToken('s', ids(), opts()).token;
     expect((await open(db, a)).outcome).toBe('ready');
     expect((await open(db, b)).outcome).toBe('ready');
-    expect((await open(db, a)).outcome).toBe('used');
+    expect(db.audits).toHaveLength(2); // one row per session
+    expect((await open(db, a, { now: () => later(service.REPLAY_WINDOW_MS / 1000 + 1) })).outcome).toBe('used');
   });
   test('EXPIRED: refused, naming the invoice for the app link, and not consumed', async () => {
     const db = fakeDb();
@@ -420,6 +468,68 @@ describe('the routes (real Express routing and JWT authentication)', () => {
     expect(second.text).toContain('already used');
     expect(second.text).not.toContain('rzp_test_');
     expect(second.text).toContain('humancare://payment-return?invoice=1&amp;result=unavailable');
+  });
+  test('only a genuine document GET redeems the token: HEAD, prefetch, prerender and non-document fetches never consume it', async () => {
+    const consumed = () => db.audits.filter((a) => a.action === 'payment.checkout_opened').length; // rows actually written (a refused duplicate writes none)
+    const { checkoutPath } = (await newSession(patientJwt())).json();
+    const before = consumed();
+    const excluded = [
+      ['HEAD', {}],
+      ['GET', { Purpose: 'prefetch' }],
+      ['GET', { 'Sec-Purpose': 'prefetch' }],
+      ['GET', { 'Sec-Purpose': 'prefetch;prerender' }],
+      ['GET', { 'Sec-Purpose': 'prerender' }],
+      ['GET', { 'Sec-Fetch-Dest': 'empty' }],
+      ['GET', { 'Sec-Fetch-Dest': 'image' }],
+      ['GET', { 'Sec-Fetch-Dest': 'iframe' }],
+      ['GET', { 'Sec-Fetch-Dest': 'script' }],
+    ];
+    for (const [method, headers] of excluded) {
+      const r = await call(method, checkoutPath, { headers });
+      expect(r.status).toBe(204);
+      expect(r.headers['cache-control']).toBe('no-store');
+      expect(r.text).toBe('');
+      expect(r.text).not.toMatch(/rzp_|order_|already used/);
+    }
+    expect(consumed()).toBe(before); // nothing was redeemed
+    const real = await call('GET', checkoutPath, { headers: { 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate' } });
+    expect(real.status).toBe(200); // the token was still unused
+    expect(real.text).toContain('order_TESTORDER1');
+    expect(consumed()).toBe(before + 1);
+    const again = await call('GET', checkoutPath, { headers: { 'Sec-Fetch-Dest': 'document' } });
+    expect(again.status).toBe(410); // single use is intact for genuine navigations
+    expect(again.text).toContain('already used');
+    expect(consumed()).toBe(before + 1);
+  });
+  test('Safari-style repeats over real HTTP: three document GETs of one token all return the page; one audit row; later it is "already used"', async () => {
+    const rows = () => db.audits.filter((a) => a.action === 'payment.checkout_opened');
+    const before = rows().length;
+    const { checkoutPath } = (await newSession(patientJwt())).json();
+    const doc = { 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate', 'User-Agent': 'Safari' };
+    const first = await call('GET', checkoutPath, { headers: { ...doc, Referer: 'http://localhost:8082/request-details?id=208' } });
+    expect(first.status).toBe(200);
+    expect(rows()).toHaveLength(before + 1);
+    rows()[before].recordedAt = new Date(); // the route reads the real clock; the fake database stamps a fixed time otherwise
+    const second = await call('GET', checkoutPath, { headers: doc });
+    const third = await call('GET', checkoutPath, { headers: doc });
+    for (const r of [second, third]) {
+      expect(r.status).toBe(200);
+      expect(r.text).toContain('order_TESTORDER1');
+      expect(r.headers['cache-control']).toBe('no-store');
+      expect(r.text).not.toContain(API_SECRET);
+    }
+    expect(rows()).toHaveLength(before + 1); // no extra audit row
+    rows()[before].recordedAt = new Date(Date.now() - 60 * 1000); // the first redemption was a minute ago
+    const late = await call('GET', checkoutPath, { headers: doc });
+    expect(late.status).toBe(410);
+    expect(late.text).toContain('already used');
+    expect(rows()).toHaveLength(before + 1);
+    expect(db.writes.payment).toBe(0);
+  });
+  test('a GET with no fetch-metadata headers (an older browser) is still a navigation; a document navigation with Purpose absent redeems once', async () => {
+    const { checkoutPath } = (await newSession(patientJwt())).json();
+    expect((await call('GET', checkoutPath)).status).toBe(200);
+    expect((await call('GET', checkoutPath)).status).toBe(410);
   });
   test('a missing, garbage or tampered token is a 400 page that reveals nothing; "closed" (the address after the page loads) is just invalid', async () => {
     for (const p of ['/checkout/garbage', '/checkout/closed', '/checkout/a.b', `/checkout/${'x'.repeat(600)}`]) {

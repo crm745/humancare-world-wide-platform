@@ -6,7 +6,7 @@ jest.mock('../../src/db/prisma', () => ({ prisma: {} }));
 const { reconcileDeals, BATCH_SIZE, MIN_RECHECK_MINUTES, MAX_CONSECUTIVE_FAILURES, identityOf } = require('../../src/modules/bitrix/deal-reconcile.service');
 const job = require('../../src/jobs/bitrix-deal-reconcile.job');
 
-const ENV_ON = { BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true' };
+const ENV_ON = { BITRIX_DEAL_PROFILE: 'test', BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true' };
 const REF_FIELD = 'UF_CRM_1794548440549';
 const NOW = Date.UTC(2030, 0, 10, 12, 0, 0);
 
@@ -48,7 +48,11 @@ describe('what it considers', () => {
     await run();
     const query = prisma.bitrixDealLink.findMany.mock.calls[0][0];
     expect(query.where.bitrixDealId).toEqual({ not: null });
-    expect(query.where.OR).toEqual([{ lastAttemptAt: null }, { lastAttemptAt: { lt: new Date(NOW - MIN_RECHECK_MINUTES * 60 * 1000) } }]);
+    // Only the active profile's links (a link with no stamp reads as test), and only those not checked recently.
+    expect(query.where.AND).toEqual([
+      { OR: [{ profile: null }, { profile: 'test' }] },
+      { OR: [{ lastAttemptAt: null }, { lastAttemptAt: { lt: new Date(NOW - MIN_RECHECK_MINUTES * 60 * 1000) } }] },
+    ]);
     expect(query.where.case.is.status).toEqual({ notIn: ['completed', 'cancelled'] });
     expect(query.where.case.is.serviceRequest.is).toEqual({ serviceKey: 'privatecharter', reviewStatus: { not: null }, bitrixLeadId: null });
     expect(query.orderBy).toEqual({ lastAttemptAt: 'asc' });

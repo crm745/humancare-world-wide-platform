@@ -1,4 +1,4 @@
-/* global describe, test, expect, jest, beforeEach */
+/* global describe, test, expect, jest, beforeEach, afterEach */
 // Stage B: hosted Razorpay payment. Real lib/payments.js and lib/paymentAttempts.js; only the network (api.js), the system
 // browser, the key store (AsyncStorage) and the random id are faked.
 const mockStore = new Map();
@@ -12,6 +12,8 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 jest.mock('expo-crypto', () => ({ randomUUID: () => `00000000-0000-4000-8000-${String(++mockUuid).padStart(12, '0')}` }));
+const mockPlatform = { OS: 'ios' };
+jest.mock('react-native', () => ({ Platform: mockPlatform }));
 jest.mock('expo-web-browser', () => ({ openAuthSessionAsync: jest.fn() }));
 jest.mock('../api', () => ({ API_BASE_URL: 'https://api.example.test/', apiGet: jest.fn(), apiPost: jest.fn() }));
 
@@ -47,6 +49,7 @@ beforeEach(() => {
   apiGet.mockReset();
   apiPost.mockReset();
   WebBrowser.openAuthSessionAsync.mockReset();
+  mockPlatform.OS = 'ios';
 });
 
 describe('pure helpers', () => {
@@ -221,7 +224,7 @@ describe('checkout session errors and browser launch', () => {
   test('a browser that cannot launch shows a message; the order and key stay for the retry', async () => {
     routePosts();
     WebBrowser.openAuthSessionAsync.mockRejectedValue(new Error('no browser'));
-    expect(await pay.startPayment({ invoice: INVOICE, sleep: noSleep })).toEqual({ outcome: 'error', messageKey: 'payment_browser_failed' });
+    expect(await pay.startPayment({ invoice: INVOICE, sleep: noSleep })).toEqual({ outcome: 'error', messageKey: 'payment_browser_failed', code: 'Error' });
     expect((await attempts.loadAttempt(761)).phase).toBe('order');
   });
 });
@@ -345,6 +348,115 @@ describe('app restart recovery', () => {
   });
 });
 
+describe('stale checkout attempt recovery', () => {
+  const LATER = () => Date.now() + pay.CHECKOUT_ATTEMPT_TTL_MS + 1000;
+  async function staleAttempt() {
+    const a = await attempts.getOrCreateAttempt(761, { requestId: 7, baselineBalance: '1500.00' });
+    await attempts.updateAttempt(761, { phase: 'checkout', paymentId: 55, hint: null, checkoutAt: Date.now() });
+    return a;
+  }
+
+  test('a stale attempt still pending at the backend returns to phase "order", keeping paymentId and key; one GET, no POST', async () => {
+    const before = await staleAttempt();
+    apiGet.mockResolvedValue(invoiceWith('pending', '1500.00'));
+    expect(await pay.resumePayment({ invoiceId: 761, sleep: noSleep, now: LATER })).toEqual({ outcome: 'cancelled' });
+    const after = await attempts.loadAttempt(761);
+    expect(after).toMatchObject({ phase: 'order', paymentId: 55, key: before.key, baselineBalance: '1500.00' });
+    expect(apiGet).toHaveBeenCalledTimes(1);
+    expect(apiPost).not.toHaveBeenCalled();
+    expect(WebBrowser.openAuthSessionAsync).not.toHaveBeenCalled();
+  });
+
+  test('an old record without checkoutAt falls back to startedAt and is treated as stale', async () => {
+    await attempts.getOrCreateAttempt(761, { baselineBalance: '1500.00' });
+    await attempts.updateAttempt(761, { phase: 'checkout', paymentId: 55 });
+    apiGet.mockResolvedValue(invoiceWith('pending', '1500.00'));
+    expect(await pay.resumePayment({ invoiceId: 761, sleep: noSleep, now: LATER })).toEqual({ outcome: 'cancelled' });
+    expect((await attempts.loadAttempt(761)).phase).toBe('order');
+  });
+
+  test('a stale attempt that the backend completed is paid, not recovered; a closed one is failed', async () => {
+    await staleAttempt();
+    apiGet.mockResolvedValue(invoiceWith('completed', '0.00'));
+    expect(await pay.resumePayment({ invoiceId: 761, sleep: noSleep, now: LATER })).toMatchObject({ outcome: 'paid' });
+    expect(await attempts.loadAttempt(761)).toBeNull();
+    await staleAttempt();
+    apiGet.mockResolvedValue(invoiceWith('failed', '1500.00'));
+    expect(await pay.resumePayment({ invoiceId: 761, sleep: noSleep, now: LATER })).toMatchObject({ outcome: 'failed' });
+  });
+
+  test('a stale attempt whose invoice cannot be read is never recovered or read as paid', async () => {
+    await staleAttempt();
+    apiGet.mockRejectedValue(apiError(503));
+    expect(await pay.resumePayment({ invoiceId: 761, sleep: noSleep, now: LATER })).toEqual({ outcome: 'confirming' });
+    expect((await attempts.loadAttempt(761)).phase).toBe('checkout');
+  });
+
+  test('even a fresh attempt with no browser word is settled with ONE look (no polling): pending goes back to "order"', async () => {
+    await staleAttempt();
+    apiGet.mockResolvedValue(invoiceWith('pending', '1500.00'));
+    expect(await pay.resumePayment({ invoiceId: 761, sleep: noSleep })).toEqual({ outcome: 'cancelled' });
+    expect(apiGet).toHaveBeenCalledTimes(1);
+    expect(await attempts.loadAttempt(761)).toMatchObject({ phase: 'order', paymentId: 55 });
+    // settled: resuming again (a re-render, a focus event, a remount) asks nothing
+    expect(await pay.resumePayment({ invoiceId: 761, sleep: noSleep })).toBeNull();
+    expect(await pay.resumePayment({ invoiceId: 761, sleep: noSleep })).toBeNull();
+    expect(apiGet).toHaveBeenCalledTimes(1);
+  });
+
+  test('a fresh attempt whose browser said "submitted" keeps the bounded wait for the webhook; a stale one does not', async () => {
+    await staleAttempt();
+    await attempts.updateAttempt(761, { hint: 'submitted' });
+    apiGet.mockResolvedValue(invoiceWith('pending', '1500.00'));
+    expect(await pay.resumePayment({ invoiceId: 761, sleep: noSleep, maxPolls: 3 })).toEqual({ outcome: 'confirming' });
+    expect(apiGet).toHaveBeenCalledTimes(3);
+    expect((await attempts.loadAttempt(761)).phase).toBe('checkout');
+    apiGet.mockClear();
+    expect(await pay.resumePayment({ invoiceId: 761, sleep: noSleep, now: LATER })).toEqual({ outcome: 'cancelled' });
+    expect(apiGet).toHaveBeenCalledTimes(1);
+  });
+
+  test('after recovery, Pay Now replays the SAME key (no second order), asks for one fresh session and navigates once', async () => {
+    mockPlatform.OS = 'web';
+    const assign = jest.fn();
+    const realWindow = global.window;
+    global.window = { location: { assign }, open: jest.fn() };
+    try {
+      const before = await staleAttempt();
+      apiGet.mockResolvedValue(invoiceWith('pending', '1500.00'));
+      await pay.resumePayment({ invoiceId: 761, sleep: noSleep, now: LATER });
+      expect(sessionCalls()).toHaveLength(0);
+      expect(assign).not.toHaveBeenCalled(); // recovery alone opens nothing
+
+      routePosts({ order: orderOk({ paymentId: 55 }) });
+      const result = await pay.startPayment({ invoice: INVOICE, sleep: noSleep });
+      expect(result).toEqual({ outcome: 'confirming', webRedirect: true });
+      expect(orderCalls()).toHaveLength(1);
+      expect(orderCalls()[0][2].headers['Idempotency-Key']).toBe(before.key);
+      expect(sessionCalls()).toHaveLength(1);
+      expect(assign).toHaveBeenCalledTimes(1);
+      const saved = await attempts.loadAttempt(761);
+      expect(saved).toMatchObject({ phase: 'checkout', paymentId: 55, key: before.key });
+      expect(typeof saved.checkoutAt).toBe('number');
+    } finally { global.window = realWindow; }
+  });
+
+  test('if the key is lost, the open payment is adopted: no second order is created', async () => {
+    mockPlatform.OS = 'web';
+    const assign = jest.fn();
+    const realWindow = global.window;
+    global.window = { location: { assign }, open: jest.fn() };
+    try {
+      routePosts({ order: apiError(409, 'open_order_exists') });
+      apiGet.mockResolvedValue(invoiceWith('pending', '1500.00'));
+      await pay.startPayment({ invoice: INVOICE, sleep: noSleep });
+      expect(orderCalls()).toHaveLength(1); // refused by the backend, nothing created
+      expect((await attempts.loadAttempt(761)).paymentId).toBe(55);
+      expect(assign).toHaveBeenCalledTimes(1);
+    } finally { global.window = realWindow; }
+  });
+});
+
 describe('duplicate tap prevention', () => {
   test('a second Pay Now while one is running does nothing: one order, one session, one browser', async () => {
     routePosts();
@@ -371,5 +483,84 @@ describe('duplicate tap prevention', () => {
     expect(await pay.resumePayment({ invoiceId: 761, sleep: noSleep })).toBeNull();
     expect(await pay.runExclusive(762, async () => ({ outcome: 'confirming' }))).toEqual({ outcome: 'confirming' });
     await hold;
+  });
+});
+
+describe('web: same-tab Checkout (no popup, no humancare:// return)', () => {
+  const realWindow = global.window;
+  let assign;
+  beforeEach(() => {
+    mockPlatform.OS = 'web';
+    assign = jest.fn();
+    global.window = { location: { assign }, open: jest.fn() };
+  });
+  afterEach(() => { global.window = realWindow; });
+
+  test('navigates the current tab to the hosted Checkout URL; never window.open nor the auth session', async () => {
+    routePosts();
+    const result = await pay.startPayment({ invoice: INVOICE, sleep: noSleep });
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(assign).toHaveBeenCalledWith('https://api.example.test/checkout/abcdefghijklmnop');
+    expect(global.window.open).not.toHaveBeenCalled();
+    expect(WebBrowser.openAuthSessionAsync).not.toHaveBeenCalled();
+    expect(result).toEqual({ outcome: 'confirming', webRedirect: true });
+  });
+
+  test('the existing order flow is unchanged: one order request, one session request, nothing extra', async () => {
+    routePosts();
+    await pay.startPayment({ invoice: INVOICE, sleep: noSleep });
+    expect(orderCalls()).toHaveLength(1);
+    expect(sessionCalls()).toHaveLength(1);
+  });
+
+  test('the attempt stays at phase "checkout"; navigation marks nothing paid and asks the backend nothing', async () => {
+    routePosts();
+    apiGet.mockResolvedValue(invoiceWith('pending', '1500.00'));
+    const result = await pay.startPayment({ invoice: INVOICE, sleep: noSleep });
+    expect(result.outcome).not.toBe('paid');
+    expect((await attempts.loadAttempt(761)).phase).toBe('checkout');
+    expect(apiGet).not.toHaveBeenCalled();
+    const resumed = await pay.resumePayment({ invoiceId: 761, sleep: noSleep });
+    expect(resumed.outcome).toBe('cancelled'); // still pending at the backend: not paid, Pay Now is offered again
+    expect(apiGet).toHaveBeenCalledTimes(1);
+    expect(await attempts.loadAttempt(761)).toMatchObject({ phase: 'order', paymentId: 55 });
+  });
+
+  test('on return, only a backend-completed payment reads as paid', async () => {
+    routePosts();
+    await pay.startPayment({ invoice: INVOICE, sleep: noSleep });
+    apiGet.mockResolvedValue(invoiceWith('completed', '0.00'));
+    expect((await pay.resumePayment({ invoiceId: 761, sleep: noSleep })).outcome).toBe('paid');
+  });
+
+  test('a failing navigation gives the browser-failed message with a safe code only, and keeps the order and key', async () => {
+    routePosts();
+    assign.mockImplementation(() => { throw Object.assign(new Error('https://api.example.test/checkout/SECRETTOKEN'), { name: 'SecurityError' }); });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await pay.startPayment({ invoice: INVOICE, sleep: noSleep });
+    expect(result).toEqual({ outcome: 'error', messageKey: 'payment_browser_failed', code: 'SecurityError' });
+    expect(JSON.stringify([result, warn.mock.calls])).not.toContain('SECRETTOKEN');
+    expect((await attempts.loadAttempt(761)).phase).toBe('order');
+    warn.mockRestore();
+  });
+
+  test('a missing window is a clean browser-failed error', async () => {
+    routePosts();
+    global.window = undefined;
+    expect((await pay.startPayment({ invoice: INVOICE, sleep: noSleep })).messageKey).toBe('payment_browser_failed');
+  });
+});
+
+describe('native keeps the auth session', () => {
+  test('ios and android still use openAuthSessionAsync', async () => {
+    for (const os of ['ios', 'android']) {
+      mockPlatform.OS = os;
+      mockStore.clear();
+      routePosts();
+      WebBrowser.openAuthSessionAsync.mockResolvedValue({ type: 'cancel' });
+      apiGet.mockResolvedValue(invoiceWith('pending', '1500.00'));
+      await pay.startPayment({ invoice: INVOICE, sleep: noSleep });
+    }
+    expect(WebBrowser.openAuthSessionAsync).toHaveBeenCalledTimes(2);
   });
 });

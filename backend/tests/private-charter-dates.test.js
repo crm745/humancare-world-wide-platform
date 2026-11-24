@@ -46,9 +46,9 @@ const body = (overrides = {}) => ({
   destination: { geonameId: IDS.DUBAI },
   patientContact: '+971501234567',
   preferredDate: inDays(5),
-  careLevel: ['care_icu'],
-  mobility: 'bedridden',
-  urgency: 'urgent_24h',
+  travelType: 'patient_transfer',
+  criticalLevel: ['icu'],
+  oxygenRequired: false,
   ...overrides,
 });
 const post = (payload) => request(app).post('/requests').set('Authorization', `Bearer ${patient.token}`).send(payload);
@@ -91,7 +91,7 @@ describe('a valid Private Charter request', () => {
 
   it('creates the Case and its first stage event, with the readable city labels', async () => {
     const saved = await prisma.case.findUnique({ where: { serviceRequestId: created.body.request.id }, include: { stageEvents: true } });
-    expect(saved).toMatchObject({ origin: 'Mumbai, Maharashtra, India', destination: 'Dubai, United Arab Emirates', urgency: 'urgent' });
+    expect(saved).toMatchObject({ origin: 'Mumbai, Maharashtra, India', destination: 'Dubai, United Arab Emirates', urgency: 'routine' }); // the revised form has no urgency: the Case keeps its default
     expect(saved.stageEvents.map((e) => e.stage)).toEqual(['submitted']);
   });
 

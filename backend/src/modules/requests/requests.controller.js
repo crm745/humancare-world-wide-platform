@@ -6,8 +6,12 @@ const {
   listDocumentsForUser,
 } = require('./requests.service');
 const { addDocumentToCase } = require('../documents/documents.service');
+const { ingestUpload, discardStored, discardTemp } = require('../../storage/ingest');
+const { AREAS } = require('../../storage/keys');
 const { toSafeDocument } = require('../documents/document-response');
 const { addPatientDocument, scanRequestDocument, toUploadResponse } = require('../request-review/request-review.service');
+const { autoApproveIfSynthetic } = require('../request-review/synthetic-approval');
+const { autoApproveIfEligible } = require('../request-review/auto-approval');
 const { sendMedicalReportToBitrix } = require('../bitrix/bitrix.service');
 const { leadInputFromRequest, commentWithReports } = require('../bitrix/bitrix-lead');
 const { listInvoicesForRequest } = require('../payments/patient-invoices.service');
@@ -93,7 +97,8 @@ async function submitRequest(req, res, next) {
       // Which legacy formats are still arriving, by field name only: never the values.
       if (legacy.length) console.info('[legacy-format] privatecharter:', legacy.join(', '));
       const request = await createRequest(req.user.id, data);
-      return res.status(201).json({ request: toPatientRequest(request) });
+      // A brand-new request has no Case link yet: its tracking comes from the configured intended flow (see request-response.js).
+      return res.status(201).json({ request: toPatientRequest(request, { newRequest: true }) });
     }
     const missing = REQUIRED_FIELDS.filter((field) => !req.body[field]);
     if (missing.length) {
@@ -175,6 +180,11 @@ async function uploadRequestDocument(req, res, next) {
       // Fail closed: if the scanner is down the document is saved but stays "error" (unusable)
       // until the worker's next sweep scans it.
       const scanned = await scanRequestDocument(stored.id).catch(() => null);
+      // Synthetic E2E requests only (a signed operator marker is required; see synthetic-approval.js). For every other request this returns
+      // at once without approving or writing anything, and it can never fail or change this response.
+      await autoApproveIfSynthetic(request.id).catch(() => undefined);
+      // Genuine requests: approved here only when every auto-approval rule passes (auto-approval.js); inert unless its switch and start time are set. Never throws.
+      await autoApproveIfEligible(request.id).catch(() => undefined);
       return res.status(201).json({ document: toUploadResponse(scanned || stored) });
     }
     if (!request.case) {
@@ -185,12 +195,20 @@ async function uploadRequestDocument(req, res, next) {
     // Remains "Upload Death Certificate". The lead has no death-certificate field, so
     // that one stays with us (Bitrix has it on the deal; sent once deals are synced).
     const mortal = MORTAL_KEYS.includes(request.serviceKey);
-    const document = await addDocumentToCase(request.case.id, {
-      type: mortal ? 'Death Certificate' : 'Medical Report',
-      name: req.file.originalname,
-      fileUrl: `/uploads/${req.file.filename}`,
-      fileSizeBytes: req.file.size,
-    });
+    // Checked, virus-scanned (refused unless ClamAV says clean) and stored under a generated key before the row exists.
+    const stored = await ingestUpload({ file: req.file, area: AREAS.CASE_DOCUMENTS, policy: 'patient' });
+    let document;
+    try {
+      document = await addDocumentToCase(request.case.id, {
+        type: mortal ? 'Death Certificate' : 'Medical Report',
+        name: req.file.originalname,
+        fileUrl: stored.key,
+        fileSizeBytes: stored.size,
+      });
+    } catch (err) {
+      await discardStored(stored.key);
+      throw err;
+    }
     if (!mortal && request.bitrixLeadId) {
       // The request form takes several reports, and the lead's Medical Report field may only
       // keep one of them: the lead comment lists the names of all of them.

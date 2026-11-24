@@ -55,7 +55,7 @@ export function Trip({ trip, t }) {
                 <View style={{ marginTop: 1, width: 14, height: 14, borderRadius: 7, borderWidth: 3, borderColor: C.blue, backgroundColor: '#FFFFFF' }} />
                 {trip.to ? <View style={{ flex: 1, paddingTop: 4, paddingBottom: 2 }}><DashedLine /></View> : null}
               </View>
-              <Field label={t('lbl_from')} value={trip.from} style={{ flex: 1, paddingBottom: trip.to ? 14 : 0 }} />
+              <Field label={t(trip.charter ? 'field_origin_city' : 'lbl_from')} value={trip.from} style={{ flex: 1, paddingBottom: trip.to ? 14 : 0 }} />
             </View>
           ) : null}
           {trip.to ? (
@@ -63,7 +63,7 @@ export function Trip({ trip, t }) {
               <View style={{ width: 14, alignItems: 'center' }}>
                 <View style={{ marginTop: 1, width: 14, height: 14, borderRadius: 7, backgroundColor: C.blue }} />
               </View>
-              <Field label={t('lbl_to')} value={trip.to} style={{ flex: 1 }} />
+              <Field label={t(trip.charter ? 'field_destination_city' : 'lbl_to')} value={trip.to} style={{ flex: 1 }} />
             </View>
           ) : null}
         </View>
@@ -118,6 +118,8 @@ function medicalRows(medical, t, pair) {
   if (medical.urgency) {
     rows.push(['urgency', t('rd_urgent'), <Chip key="u" bg={medical.urgency.bg} fg={medical.urgency.fg} Icon={medical.urgency.alert ? CircleAlert : null}>{medical.urgency.label}</Chip>]);
   }
+  if (medical.criticalLevel) rows.push(['critical', t('req_critical_level'), <AlignedText key="cl" style={[{ fontFamily: FONT[700], fontSize: 15, lineHeight: 21, color: C.ink }, WRAP]}>{medical.criticalLevel}</AlignedText>]);
+  if (medical.oxygen) rows.push(['oxygen', t('req_oxygen_required'), <AlignedText key="ox" style={[{ fontFamily: FONT[700], fontSize: 15, lineHeight: 21, color: C.ink }, WRAP]}>{medical.oxygen}</AlignedText>]);
   if (medical.condition) rows.push(['condition', medical.conditionLabel, <Condition key="c" text={medical.condition} t={t} />]);
   if (pair && (medical.care.length || medical.mobility)) {
     rows.push(['pair', null, (

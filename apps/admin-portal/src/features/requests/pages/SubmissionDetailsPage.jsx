@@ -17,7 +17,7 @@ import { DocumentRequestDialog, RevokeShareDialog } from '../components/ShareDia
 import { approvalEligibility, caseDetailsPath } from '../approval.mjs';
 import { canRequestDocuments } from '../documentActions.mjs';
 import { formatCalendarDay, formatDateTime } from '../format';
-import { backLabel, backTarget, capitalise, careLevelLabel, equipmentList, mobilityLabel } from '../requestDetails.mjs';
+import { backLabel, backTarget, capitalise, careLevelLabel, cityLabels, criticalLevelLabel, equipmentList, mobilityLabel, oxygenLabel, travelTypeLabel } from '../requestDetails.mjs';
 import { latestShares, sharesNeedingAttention, sharingApplies } from '../shares.mjs';
 import { REVIEW_STATUS_LABEL, URGENCY_LABEL, documentBadges, statusTone } from '../requestStatus.mjs';
 import { useDocumentActions } from '../useDocumentActions';
@@ -186,18 +186,21 @@ export default function SubmissionDetailsPage() {
           <DetailSection title="Request information">
             <FieldList>
               <Field label="Service type" value={request.serviceType} />
-              <Field label="Urgency" value={URGENCY_LABEL[request.urgency] ?? request.urgency} />
-              <Field label="Origin" value={request.origin} />
-              <Field label="Destination" value={request.destination} />
+              <Field label="Travel type" value={travelTypeLabel(request.travelType)} optional />
+              <Field label="Critical level" value={criticalLevelLabel(request.criticalLevel)} optional />
+              <Field label="Oxygen required" value={oxygenLabel(request)} optional />
+              <Field label="Urgency" value={URGENCY_LABEL[request.urgency] ?? request.urgency} optional />
+              <Field label={cityLabels(request.serviceKey).origin} value={request.origin} />
+              <Field label={cityLabels(request.serviceKey).destination} value={request.destination} />
               <Field label="Country" value={request.country} />
               <Field label="Preferred date" value={request.preferredDate ? formatCalendarDay(request.preferredDate) : null} />
-              <Field label="Care level" value={careLevelLabel(request.careLevel)} />
+              <Field label="Care level" value={careLevelLabel(request.careLevel)} optional />
               <Field label="Mobility" value={mobilityLabel(request.mobility)} optional />
               <Field label="Equipment" value={equipment.join(', ')} optional />
               <Field label="Relationship to deceased" value={request.deceasedRelation} optional />
               <Field label="Place of death" value={request.placeOfDeath} optional />
               <Field label="Date of death" value={request.dateOfDeath ? formatCalendarDay(request.dateOfDeath) : null} optional />
-              <Field label="Description" value={request.description} wide />
+              <Field label={request.serviceKey === 'privatecharter' ? 'Medical history' : 'Description'} value={request.description} wide />
             </FieldList>
           </DetailSection>
 

@@ -646,7 +646,7 @@ describe('nothing sensitive or invented reaches the model', () => {
 
   test('the model has exactly the approved top-level fields and no ETA, distance, position or coordinator', () => {
     const m = buildPrivateCharterTracking(full());
-    expect(Object.keys(m).sort()).toEqual(['activeMilestone', 'cancellation', 'destination', 'family', 'milestones', 'mode', 'origin', 'reference', 'review', 'serviceName', 'status'].sort());
+    expect(Object.keys(m).sort()).toEqual(['activeMilestone', 'actualStages', 'cancellation', 'destination', 'family', 'milestones', 'mode', 'origin', 'reference', 'review', 'serviceName', 'status'].sort());
     expect(Object.keys(m.status).sort()).toEqual(['detail', 'key', 'labelKey', 'tone']);
     expect(Object.keys(m.milestones[0]).sort()).toEqual(['key', 'occurredAt', 'state', 'subKey', 'titleKey']);
     expect(Object.keys(m.review).sort()).toEqual(['actionNeeded', 'approved', 'approvedAt', 'mode', 'reason', 'state', 'submittedAt']);

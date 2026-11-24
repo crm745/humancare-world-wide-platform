@@ -195,7 +195,7 @@ describe('the Private Charter request-first workflow', () => {
   const pcBody = {
     serviceKey: 'privatecharter', patientName: 'Maria Fernandez', patientAge: 61, patientGender: 'female', country: 'AE',
     origin: { geonameId: IDS.MUMBAI }, destination: { geonameId: IDS.DUBAI }, patientContact: '+971501234567', preferredDate: '2099-01-01',
-    careLevel: ['care_icu', 'care_stable'], description: 'Needs ICU transfer', mobility: 'bedridden', urgency: 'urgent_24h',
+    travelType: 'patient_transfer', description: 'Needs ICU transfer', criticalLevel: ['icu'], oxygenRequired: false,
   };
 
   it('POST /requests (the workflow path) returns the request without internal fields', async () => {

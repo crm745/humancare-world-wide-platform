@@ -2,8 +2,10 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Where uploaded files are kept. Everything that stores, reads, scans or quarantines an upload uses this
-// one constant, so changing it moves all of them together.
+// Where uploaded files are kept. Multer only STAGES an upload here as a temporary file; src/storage/ingest.js then checks it,
+// scans it and moves it into the storage service (S3 or local, see src/storage) and removes the temporary file. This folder is
+// also the root of the local storage adapter, and the home of files stored before the storage service existed.
+// Everything that stores, reads, scans or quarantines a LOCAL upload uses this one constant, so changing it moves all of them together.
 //   - Test environment (NODE_ENV=test with UPLOAD_DIR set): only backend/.e2e-uploads, the one value the
 //     safety guard accepts, so tests never write to, or delete from, the shared development folder.
 //   - HC_UPLOAD_DIR (an absolute path is best; a relative one is resolved against the working directory):
@@ -52,4 +54,16 @@ const upload = multer({
   },
 });
 
-module.exports = { upload, UPLOAD_DIR };
+// Patient-facing uploads: PDF, JPEG, PNG and WEBP only (no Word documents). The same policy is enforced again, on the file's real
+// content, in src/storage/ingest.js; this filter only refuses the obvious case early.
+const PATIENT_MIME_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+const uploadPatient = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!PATIENT_MIME_TYPES.includes(file.mimetype)) return cb(new Error('Unsupported file type. Allowed: PDF, JPG, PNG, WEBP.'));
+    return cb(null, true);
+  },
+});
+
+module.exports = { upload, uploadPatient, UPLOAD_DIR };

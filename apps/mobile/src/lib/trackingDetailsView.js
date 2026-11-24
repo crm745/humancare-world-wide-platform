@@ -40,7 +40,8 @@ export function latestUpdate(request) {
 
 // The steps of a Private Charter request: the model's milestones that apply, in its order.
 function charterSteps(model, t) {
-  return model.milestones.filter((m) => m && m.state !== MILESTONE_STATE.NOT_APPLICABLE).map((m) => {
+  // A request in the five-stage journey lists its five stages; every other request lists the milestones.
+  return (Array.isArray(model.actualStages) ? model.actualStages : model.milestones).filter((m) => m && m.state !== MILESTONE_STATE.NOT_APPLICABLE).map((m) => {
     const stop = m.state === MILESTONE_STATE.CANCELLED;
     return {
       key: m.key,

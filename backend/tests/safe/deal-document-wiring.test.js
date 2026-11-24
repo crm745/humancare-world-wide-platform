@@ -147,7 +147,7 @@ describe('the in-memory fake of the Documents field (used by the guarded worker 
 });
 
 describe('storage', () => {
-  test('the document worker and service read files only through the checksum-verified reader (local filesystem; no S3 anywhere)', () => {
+  test('the document worker and service read files only through the checksum-verified reader (the storage layer, local or S3, is behind it)', () => {
     const worker = read('src', 'modules', 'bitrix', 'deal-document-worker.service.js');
     const service = read('src', 'modules', 'bitrix', 'deal-document.service.js');
     expect(worker).toMatch(/readVerifiedFile/);
@@ -155,7 +155,7 @@ describe('storage', () => {
     for (const source of [worker, service]) {
       expect(source).not.toMatch(/require\('fs'\)|require\("fs"\)|aws-sdk|@aws-sdk|S3Client|createReadStream/);
     }
-    const pkg = JSON.parse(read('package.json'));
-    expect(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter((name) => /aws|s3/i.test(name))).toEqual([]);
+    // The AWS SDK is used only by the shared storage layer (src/storage), never by the Bitrix modules.
+    expect(read('src', 'storage', 's3.adapter.js')).toMatch(/@aws-sdk\/client-s3/);
   });
 });

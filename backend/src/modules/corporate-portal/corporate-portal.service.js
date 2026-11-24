@@ -1,7 +1,6 @@
-const path = require('path');
-const fs = require('fs');
 const { prisma } = require('../../db/prisma');
-const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
+const { storageFor } = require('../../storage');
+const { keyFromStoredReference } = require('../../storage/keys');
 const {
   listNotificationsFor,
   setReadStatus,
@@ -433,8 +432,9 @@ async function getCorporateDocumentForDownload(corporateId, documentId) {
 async function deleteCorporateDocument(corporateId, documentId) {
   const doc = await getCorporateDocumentForDownload(corporateId, documentId);
   await prisma.corporateDocument.delete({ where: { id: doc.id } });
-  // Best-effort — a file already missing from disk shouldn't block the DB delete.
-  fs.unlink(path.join(UPLOAD_DIR, path.basename(doc.fileUrl)), () => {});
+  // Best-effort — a file already missing from storage shouldn't block the DB delete.
+  const key = keyFromStoredReference(doc.fileUrl);
+  await storageFor(key).delete(key).catch((err) => console.error(`corporate document ${doc.id}: the stored file could not be deleted (${(err && err.code) || 'error'})`));
 }
 
 module.exports = {

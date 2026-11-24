@@ -19,7 +19,7 @@
 const { prisma: defaultPrisma } = require('../../db/prisma');
 const { appendAuditLog } = require('../../common/audit/business-audit');
 const { assertDealEligible } = require('../bitrix/deal-outbox');
-const { createLocalStorage } = require('../bitrix/quotation-storage');
+const { createQuotationStorage } = require('../bitrix/quotation-storage');
 
 const REASON_MIN = 3;
 const REASON_MAX = 1000;
@@ -40,7 +40,7 @@ const notFound = () => httpError(404, 'Quotation not found', 'quotation_not_foun
 function buildContext(overrides = {}) {
   return { prisma: defaultPrisma, storage: null, now: () => new Date(), log: console, ...overrides };
 }
-const storageOf = (ctx) => ctx.storage || (ctx.storage = createLocalStorage());
+const storageOf = (ctx) => ctx.storage || (ctx.storage = createQuotationStorage());
 
 function userIdOf(userId) {
   const id = Number(userId);
@@ -164,7 +164,7 @@ async function resolvePatientQuotationFile({ userId, quotationId }, deps) {
   if (q.status === 'superseded' || q.status === 'rejected' || q.supersededAt || q.liveSlot !== 1) throw conflict('quotation_not_available', 'This quotation is no longer available.');
   if (q.scanStatus !== 'clean') throw conflict('quotation_not_available', 'This quotation is not available right now.');
   let buffer;
-  try { buffer = await storageOf(ctx).readVerified(q.storageKey, q.sha256); } catch { throw conflict('quotation_not_available', 'This quotation is not available right now.'); }
+  try { buffer = await storageOf(ctx).readVerified(q.storageKey, q.sha256, q.storageProvider); } catch { throw conflict('quotation_not_available', 'This quotation is not available right now.'); }
   await appendAuditLog(ctx.prisma, {
     caseId: caseRecord.id, entityType: 'case_quotation', entityId: q.id, action: 'quotation.file_viewed', actorType: 'patient', actorId: String(user), source: 'mobile_app',
     reasonCode: 'patient_viewed_file', afterData: { quotationId: q.id, versionNumber: q.versionNumber, caseId: caseRecord.id, caseReference: caseRecord.referenceNumber }, idempotencyKey: null,

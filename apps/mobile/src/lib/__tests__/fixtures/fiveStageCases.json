@@ -1,0 +1,18 @@
+{
+  "_comment": "Shared by the backend (tests/safe/tracking-flow.test.js) and the mobile (fiveStageTracking.test.js) tests: the same request, the same stage, so the server, the list card and the details can never disagree.",
+  "cases": [
+    { "name": "initial Enquiry", "reviewStatus": "approved", "caseStatus": "submitted", "status": "submitted", "events": [], "expected": "request_received" },
+    { "name": "no Case yet", "reviewStatus": "awaiting_documents", "noCase": true, "status": "submitted", "events": [], "expected": "request_received" },
+    { "name": "in review, with a stray quotation event", "reviewStatus": "in_review", "caseStatus": "submitted", "status": "submitted", "events": ["quotation_ready"], "expected": "request_received" },
+    { "name": "Quoted", "reviewStatus": "approved", "caseStatus": "submitted", "status": "submitted", "events": ["quotation_ready"], "expected": "quotation_ready" },
+    { "name": "Confirmed", "reviewStatus": "approved", "caseStatus": "submitted", "status": "submitted", "events": ["quotation_ready", "payment_confirmed"], "expected": "payment_confirmed" },
+    { "name": "Activate", "reviewStatus": "approved", "caseStatus": "in_progress", "status": "in_progress", "events": ["quotation_ready", "payment_confirmed", "in_progress"], "expected": "service_in_progress" },
+    { "name": "Enquiry straight to Activate", "reviewStatus": "approved", "caseStatus": "in_progress", "status": "in_progress", "events": ["in_progress"], "expected": "service_in_progress" },
+    { "name": "Enquiry straight to Activate, no stage event", "reviewStatus": "approved", "caseStatus": "in_progress", "status": "in_progress", "events": [], "expected": "service_in_progress" },
+    { "name": "Quoted straight to Activate", "reviewStatus": "approved", "caseStatus": "in_progress", "status": "in_progress", "events": ["quotation_ready", "in_progress"], "expected": "service_in_progress" },
+    { "name": "Case Completed", "reviewStatus": "approved", "caseStatus": "completed", "status": "completed", "events": ["quotation_ready", "payment_confirmed", "in_progress", "completed"], "expected": "completed" },
+    { "name": "Enquiry straight to Case Completed", "reviewStatus": "approved", "caseStatus": "completed", "status": "completed", "events": ["completed"], "expected": "completed" },
+    { "name": "Enquiry straight to Case Completed, no stage event", "reviewStatus": "approved", "caseStatus": "completed", "status": "completed", "events": [], "expected": "completed" },
+    { "name": "events out of order", "reviewStatus": "approved", "caseStatus": "in_progress", "status": "in_progress", "events": ["in_progress", "quotation_ready", "payment_confirmed"], "expected": "service_in_progress" }
+  ]
+}

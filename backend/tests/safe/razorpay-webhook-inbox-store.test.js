@@ -329,7 +329,7 @@ describe('the Bitrix24 inbox store is untouched and independent', () => {
   });
   test('its SQL is still hard-wired to Bitrix and was not parameterized for Razorpay', () => {
     const bitrix = fs.readFileSync(BITRIX_FILE, 'utf8');
-    expect(bitrix).toContain('WHERE source = ${SOURCE} AND event_type = ${DEAL_EVENT}');
+    expect(bitrix).toContain("WHERE i.source = ${SOURCE} AND i.event_type = ${DEAL_EVENT}"); // still bound to the Bitrix SOURCE and event (the table is now aliased for the profile join)
     expect(bitrix).not.toMatch(/razorpay/i);
   });
   test('the Razorpay functions are not the Bitrix functions', () => {

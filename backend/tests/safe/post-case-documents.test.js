@@ -5,6 +5,11 @@
 jest.mock('../../src/db/prisma', () => ({ prisma: { $transaction: jest.fn() } }));
 jest.mock('../../src/middleware/upload.middleware', () => ({ UPLOAD_DIR: require('os').tmpdir() }));
 jest.mock('../../src/integrations/clamav/clamav', () => ({}));
+// The upload checks and the move into storage are covered by storage-ingest.test.js; here the stored object is a given.
+jest.mock('../../src/storage/ingest', () => ({
+  ingestUpload: jest.fn(async () => ({ key: `request-documents/2026/11/${'a'.repeat(32)}.pdf`, sha256: 'd'.repeat(64), size: 123, contentType: 'application/pdf' })),
+  discardStored: jest.fn(async () => undefined),
+}));
 jest.mock('../../src/modules/request-review/request-review.files', () => ({
   ...jest.requireActual('../../src/modules/request-review/request-review.files'),
   hashFile: jest.fn().mockResolvedValue('d'.repeat(64)),

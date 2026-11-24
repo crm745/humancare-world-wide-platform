@@ -67,6 +67,8 @@ async function retryModel(model, label, findCandidates, buildLeadInput, reportsO
       const comments = commentWithReports(input.comments, reports.map((report) => report.name));
       for (const report of reports) await sendMedicalReportToBitrix(leadId, report, { comments });
     } catch (err) {
+      // The shared Bitrix24 gateway (circuit open / rate limit) refused the call: nothing was sent, so this is not a failed attempt. Try again next run.
+      if (err && err.deferred) { console.warn(`Bitrix24 retry for ${label} ${record.referenceNumber} deferred by the shared gateway.`); continue; }
       const attempts = record.bitrixSyncAttempts + 1;
       await model.update({
         where: { id: record.id },

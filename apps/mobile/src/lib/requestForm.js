@@ -12,6 +12,8 @@ export const needsCareLevel = (serviceKey) => CARE_LEVEL_SERVICES.includes(servi
 // What belonged only to the previous service when the service is swapped from inside the form.
 const SERVICE_ONLY_FIELDS = { airlineMode: '', mortalTransfer: '', relation: '', deathPlace: '', deathDate: '', sentRequest: null, uploaded: [], uploadErrors: {} };
 const TRANSPORT_ONLY_FIELDS = { care: [], mobility: [], equipOxygen: false, equipCardiac: false, equipVentilator: false };
+// What belongs to the Private Charter form alone.
+const CHARTER_ONLY_FIELDS = { travelType: '', criticalLevel: [], oxygenRequired: null, oxygenFlowLpm: '' };
 
 // The draft for a newly chosen service. Starting a request fresh gives an empty form. Swapping
 // the service from inside the form (`changingService`) keeps the patient, trip and medical
@@ -22,6 +24,7 @@ export function draftForService(previous, service, initial) {
     ...previous,
     ...SERVICE_ONLY_FIELDS,
     ...(needsCareLevel(service) ? {} : TRANSPORT_ONLY_FIELDS),
+    ...(service === 'privatecharter' || service === 'air' ? {} : CHARTER_ONLY_FIELDS),
     service,
     changingService: false,
   };

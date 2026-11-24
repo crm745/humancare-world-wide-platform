@@ -15,6 +15,10 @@
 // ServiceRequest that is in the review workflow (reviewStatus not NULL, so the historical NULL requests are
 // never enqueued) and that has no Bitrix Lead. Corporate Cases (serviceRequestId NULL) are always refused.
 const { PRIVATE_CHARTER_KEY } = require('../../common/constants/request.constants');
+const { stampProfile, activeProfileName } = require('./bitrix-profiles');
+
+// The link's profile stamp: the profile configured now, or nothing (a link with no stamp reads as the test pipeline, never the actual one).
+const profileStamp = () => { const name = activeProfileName(); return name ? { profile: name } : {}; };
 
 const DEAL_CREATE_EVENT = 'bitrix.deal.create';
 const DEAL_ENTITY_TYPE = 'case';
@@ -49,7 +53,7 @@ function assertDealCreationAllowed(caseRecord, request) {
 // `tx` is the caller's transaction. Returns the two rows it wrote.
 async function enqueueDealCreation(tx, caseRecord, request) {
   assertDealEligible(caseRecord, request);
-  const link = await tx.bitrixDealLink.create({ data: { caseId: caseRecord.id, syncStatus: 'pending' } });
+  const link = await tx.bitrixDealLink.create({ data: { caseId: caseRecord.id, syncStatus: 'pending', ...profileStamp() } });
   const event = await tx.integrationOutbox.create({
     data: {
       eventType: DEAL_CREATE_EVENT,
@@ -57,7 +61,8 @@ async function enqueueDealCreation(tx, caseRecord, request) {
       entityId: String(caseRecord.id),
       caseId: caseRecord.id,
       idempotencyKey: dealCreateIdempotencyKey(caseRecord.id),
-      payload: { caseId: caseRecord.id, serviceRequestId: request.id },
+      // The event is stamped with the Bitrix profile configured NOW (BITRIX_DEAL_PROFILE), so it can only ever be sent through that one.
+      payload: stampProfile({ caseId: caseRecord.id, serviceRequestId: request.id }),
       status: 'pending',
       nextAttemptAt: new Date(),
     },
@@ -75,7 +80,7 @@ async function ensureDealCreation(tx, caseRecord, request) {
   let link = await tx.bitrixDealLink.findUnique({ where: { caseId: caseRecord.id } });
   let linkCreated = false;
   if (!link) {
-    link = await tx.bitrixDealLink.create({ data: { caseId: caseRecord.id, syncStatus: 'pending' } });
+    link = await tx.bitrixDealLink.create({ data: { caseId: caseRecord.id, syncStatus: 'pending', ...profileStamp() } });
     linkCreated = true;
   }
   let event = await tx.integrationOutbox.findUnique({ where: { idempotencyKey: dealCreateIdempotencyKey(caseRecord.id) } });
@@ -88,7 +93,7 @@ async function ensureDealCreation(tx, caseRecord, request) {
         entityId: String(caseRecord.id),
         caseId: caseRecord.id,
         idempotencyKey: dealCreateIdempotencyKey(caseRecord.id),
-        payload: { caseId: caseRecord.id, serviceRequestId: request.id },
+        payload: stampProfile({ caseId: caseRecord.id, serviceRequestId: request.id }),
         status: 'pending',
         nextAttemptAt: new Date(),
       },

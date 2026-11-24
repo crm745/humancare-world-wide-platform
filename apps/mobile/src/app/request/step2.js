@@ -5,10 +5,10 @@ import { router } from 'expo-router';
 import { Accessibility, Activity, BedDouble, PersonStanding } from 'lucide-react-native';
 import { needsCareLevel, useApp } from '../../state/AppContext';
 import { EQUIPMENT_OPTIONS, MOBILITY_OPTIONS, URGENCY_OPTIONS, isMortal } from '../../data/mock';
-import { firstAnchorOnStep, isPrivateCharter, mobilityList, needsDocument, singleChoice } from '../../lib/privateCharter';
+import { CRITICAL_LEVELS, orderedCriticalLevels, firstAnchorOnStep, isOxygenFlow, isPrivateCharter, mobilityList, needsDocument, singleChoice } from '../../lib/privateCharter';
 import { Anchor, RequestFrame } from '../../components/request/RequestFrame';
 import { ChoiceChips, FieldError, FieldHeader, ReportTiles, SwitchRow } from '../../components/request/fields';
-import { CARE_LEVELS } from '../../components/ui';
+import { CARE_LEVELS, Field } from '../../components/ui';
 
 // The description is multiline: Return adds a line, and the cursor line stays above the keyboard while it grows. It is its own component
 // because it has to sit below the form (the hook reads the form it is in).
@@ -35,9 +35,14 @@ export default function RequestStep2() {
   const mortal = isMortal(draft.service);
   const [attempted, setAttempted] = useState(false);
 
-  const problems = [
-    ['care', charter && !draft.care.length],
-    ['mobility', transport && !(charter ? mobility.length : singleChoice(mobility))],
+  // Private Charter (revised form): Medical History, Critical Level, Oxygen Required (+ flow rate with Yes) and the report.
+  // The other services keep care level, mobility, on-board equipment and urgency.
+  const problems = charter ? [
+    ['critical', !orderedCriticalLevels(draft.criticalLevel).length],
+    ['oxygen', typeof draft.oxygenRequired !== 'boolean' || (draft.oxygenRequired && !isOxygenFlow(draft.oxygenFlowLpm))],
+    ['files', needsDocument(draft)],
+  ] : [
+    ['mobility', transport && !singleChoice(mobility)],
     ['files', needsDocument(draft)],
     ['urgency', !draft.urgency],
   ];
@@ -49,20 +54,53 @@ export default function RequestStep2() {
       nextKey="req_next_review" serverAnchor={firstAnchorOnStep(serverErrors, 2)}
     >
       <Anchor id="desc">
-        <FieldHeader title={t(mortal ? 'req_details' : 'req_condition')} />
+        <FieldHeader title={t(mortal ? 'req_details' : charter ? 'req_medical_history' : 'req_condition')} />
         <View className="min-h-[88px] flex-row gap-2.5 rounded-2xl border-[1.5px] border-field bg-white p-3.5">
           <View className="pt-0.5"><Activity size={18} color="#97A4B8" strokeWidth={2} /></View>
           <DescriptionInput
             multiline textAlignVertical="top" value={draft.desc} onChangeText={(desc) => updateDraft({ desc })}
-            accessibilityLabel={t(mortal ? 'req_details' : 'req_condition')}
-            placeholder={t(mortal ? 'req_details_placeholder' : 'req_condition_placeholder')} placeholderTextColor="#97A4B8"
+            accessibilityLabel={t(mortal ? 'req_details' : charter ? 'req_medical_history' : 'req_condition')}
+            placeholder={t(mortal ? 'req_details_placeholder' : charter ? 'req_medical_history_placeholder' : 'req_condition_placeholder')} placeholderTextColor="#97A4B8"
             className="min-h-[64px] flex-1 p-0 font-inter text-[14px] leading-[21px] text-ink"
           />
         </View>
         <FieldError>{serverError('description')}</FieldError>
       </Anchor>
 
-      {transport && (
+      {charter && (
+        <Anchor id="critical">
+          <FieldHeader title={t('req_critical_level')} required />
+          {/* Several may be chosen; tapping a chosen one again deselects it. At least one is required. */}
+          <ChoiceChips
+            multiple columns={2} label={t('req_critical_level')} value={orderedCriticalLevels(draft.criticalLevel)}
+            onChange={(criticalLevel) => updateDraft({ criticalLevel: orderedCriticalLevels(criticalLevel) })}
+            options={CRITICAL_LEVELS.map((key) => ({ value: key, label: t(`critical_${key}`) }))}
+          />
+          <FieldError>{attempted && !orderedCriticalLevels(draft.criticalLevel).length ? t('req_critical_level_required') : serverError('criticalLevel')}</FieldError>
+        </Anchor>
+      )}
+
+      {charter && (
+        <Anchor id="oxygen">
+          <FieldHeader title={t('req_oxygen_required')} required />
+          <ChoiceChips
+            columns={2} label={t('req_oxygen_required')} value={draft.oxygenRequired === true ? 'yes' : draft.oxygenRequired === false ? 'no' : ''}
+            // Choosing No hides the flow rate and forgets what was typed, so it can never be sent with "No".
+            onChange={(v) => updateDraft(v === 'yes' ? { oxygenRequired: true } : { oxygenRequired: v === 'no' ? false : null, oxygenFlowLpm: '' })}
+            options={[{ value: 'yes', label: t('req_yes') }, { value: 'no', label: t('req_no') }]}
+          />
+          <FieldError>{attempted && typeof draft.oxygenRequired !== 'boolean' ? t('req_required') : serverError('oxygenRequired')}</FieldError>
+          {draft.oxygenRequired === true && (
+            <Field
+              required className="mt-3" label={t('req_oxygen_flow')} placeholder={t('req_oxygen_flow_placeholder')} keyboardType="number-pad"
+              value={draft.oxygenFlowLpm} onChangeText={(oxygenFlowLpm) => updateDraft({ oxygenFlowLpm: oxygenFlowLpm.replace(/\D/g, '').slice(0, 3) })}
+              error={(attempted || draft.oxygenFlowLpm) && !isOxygenFlow(draft.oxygenFlowLpm) ? (draft.oxygenFlowLpm ? t('req_oxygen_flow_invalid') : t('req_required')) : serverError('oxygenFlowLpm')}
+            />
+          )}
+        </Anchor>
+      )}
+
+      {transport && !charter && (
         <Anchor id="care">
           <FieldHeader title={t('field_care_level')} required={charter} />
           {charter ? (
@@ -82,7 +120,7 @@ export default function RequestStep2() {
         </Anchor>
       )}
 
-      {transport && (
+      {transport && !charter && (
         <Anchor id="mobility">
           <FieldHeader title={t('req_mobility')} required />
           <ChoiceChips
@@ -94,7 +132,7 @@ export default function RequestStep2() {
         </Anchor>
       )}
 
-      {transport && (
+      {transport && !charter && (
         <Anchor id="equipment">
           <FieldHeader title={t('req_on_board')} />
           <View className="rounded-2xl border border-line bg-white px-4">
@@ -111,6 +149,7 @@ export default function RequestStep2() {
         <FieldError>{attempted && needsDocument(draft) ? 'Upload at least one document to submit this request.' : null}</FieldError>
       </Anchor>
 
+      {!charter && (
       <Anchor id="urgency">
         <FieldHeader title={t('req_urgency')} required />
         <ChoiceChips
@@ -119,6 +158,7 @@ export default function RequestStep2() {
         />
         <FieldError>{attempted && !draft.urgency ? t('req_required') : serverError('urgency')}</FieldError>
       </Anchor>
+      )}
     </RequestFrame>
   );
 }

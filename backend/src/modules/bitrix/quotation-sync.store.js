@@ -16,7 +16,7 @@ const cleanError = (text) => (text == null ? null : String(text).replace(/https?
 
 // Due, unlocked events of Private Charter Cases in the review workflow, without a Lead, whose request is approved. `caseIds` limits a pass to
 // those Cases (the scoped test runner); an empty or malformed list is refused, never read as "everything".
-async function findCandidateIds(db, limit, scope) {
+async function findCandidateIds(db, limit, scope, profile = null) {
   const caseIds = normalizeCaseIds(scope && scope.caseIds);
   const rows = await db.$queryRawUnsafe(
     `SELECT o.id AS id
@@ -27,10 +27,11 @@ async function findCandidateIds(db, limit, scope) {
        AND o.next_attempt_at <= UTC_TIMESTAMP(3)
        AND (o.locked_until IS NULL OR o.locked_until <= UTC_TIMESTAMP(3))
        AND sr.service_key = ? AND sr.review_status = 'approved' AND sr.bitrix_lead_id IS NULL
+       AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.payload, '$.profile')), 'test') = ?
        ${caseIds ? `AND o.case_id IN (${marks(caseIds)})` : ''}
      ORDER BY o.id
      LIMIT ?`,
-    QUOTATION_SYNC_EVENT, QUOTATION_ENTITY_TYPE, PRIVATE_CHARTER_KEY, ...(caseIds || []), limit,
+    QUOTATION_SYNC_EVENT, QUOTATION_ENTITY_TYPE, PRIVATE_CHARTER_KEY, profile, ...(caseIds || []), limit,
   );
   return rows.map((r) => Number(r.id));
 }

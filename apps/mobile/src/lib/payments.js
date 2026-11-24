@@ -9,11 +9,12 @@
 // Every public result is { outcome, ... } and never throws. Outcomes:
 //   paid        { fullyPaid }                 the backend confirms it
 //   confirming                                paid at the gateway as far as we know, the backend has not confirmed yet
-//   cancelled                                 the patient closed Checkout (the open order is kept: Pay Now resumes it)
+//   cancelled                                 the patient closed Checkout, or the attempt went stale (the open order is kept: Pay Now resumes it)
 //   failed      { messageKey }                the payment did not go through
 //   uncertain   { messageKey }                we cannot tell whether the order was created: Pay Now retries with the SAME key
 //   error       { messageKey, refresh }       a definite refusal; refresh means "reload the invoice, it changed"
 //   busy                                      another attempt on this invoice is already running (duplicate tap)
+import { Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { API_BASE_URL, apiGet, apiPost } from './api';
 import { clearAttempt, getOrCreateAttempt, loadAttempt, updateAttempt } from './paymentAttempts';
@@ -25,6 +26,9 @@ export const POLL_INTERVAL_MS = 3000;
 export const POLLS_AFTER_RETURN = 20; // ~1 minute of waiting for a webhook
 export const POLLS_AFTER_CANCEL = 3;
 export const POLLS_ON_RESUME = 10;
+// A hosted-checkout session is single-use and short-lived (10 minutes at the backend). An attempt left at phase "checkout" for longer
+// than this is no longer waiting for anything: the next Pay Now needs a fresh session for the SAME open payment.
+export const CHECKOUT_ATTEMPT_TTL_MS = 10 * 60 * 1000;
 
 // ---- small pure helpers ------------------------------------------------------------------------------------------------------
 
@@ -196,8 +200,19 @@ async function adoptOpenOrder(invoice) {
   return { ok: false, result: { outcome: 'error', messageKey: 'payment_error_generic', refresh: true } };
 }
 
-// Step 3: the system browser. Resolves the browser's word ('submitted', 'cancelled' ...) or throws if it could not open.
+// Step 3: Checkout. Resolves the browser's word ('submitted', 'cancelled' ...) or throws if it could not open.
+// Native (iOS / Android): the system auth browser, which brings the patient back through humancare://payment-return.
+// Web: a browser cannot receive humancare://, and a popup opened after the awaited order / session requests is exactly what popup blockers
+// refuse. So the CURRENT tab is navigated to the hosted Checkout page (a navigation is never blocked). The tab unloads; when the patient comes
+// back to the app (manually: Back, or by opening the app again) the saved attempt (phase "checkout") is verified against the backend by
+// resumePayment. Nothing about the navigation or the return is ever treated as proof of payment.
+export const WEB_CHECKOUT_PENDING = 'web_navigated';
 async function runCheckout(url) {
+  if (Platform.OS === 'web') {
+    if (typeof window === 'undefined' || !window.location || typeof window.location.assign !== 'function') throw new Error('no browser window');
+    window.location.assign(url);
+    return WEB_CHECKOUT_PENDING;
+  }
   const result = await WebBrowser.openAuthSessionAsync(url, RETURN_URL);
   if (result.type === 'success') return parsePaymentReturn(result.url).result;
   if (result.type === 'cancel' || result.type === 'dismiss') return 'cancelled';
@@ -205,8 +220,11 @@ async function runCheckout(url) {
   return 'returned';
 }
 
+// A short, safe label for a checkout-launch failure: an error code or class name only, never a message (it could carry the URL / token).
+const errorLabel = (err) => String((err && (err.code || err.name)) || 'Error').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 64) || 'Error';
+
 /** Pay Now for `invoice` (a backend invoice: id, balance). `requestId` is remembered so a return link can find the screen. */
-export function startPayment({ invoice, requestId = null, sleep, shouldStop }) {
+export function startPayment({ invoice, requestId = null, sleep, shouldStop, now = Date.now }) {
   return runExclusive(invoice.id, async () => {
     let attempt;
     try {
@@ -233,26 +251,66 @@ export function startPayment({ invoice, requestId = null, sleep, shouldStop }) {
       return { outcome: 'error', messageKey: definite ? messageKeyFor(err) : 'payment_checkout_failed', refresh: !!definite };
     }
 
-    await updateAttempt(invoice.id, { phase: 'checkout', hint: null });
+    await updateAttempt(invoice.id, { phase: 'checkout', hint: null, checkoutAt: now() });
     let hint;
     try {
       hint = await runCheckout(url);
-    } catch {
+    } catch (err) {
+      const code = errorLabel(err);
+      if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn(`[payments] checkout could not be opened: ${code}`);
       await updateAttempt(invoice.id, { phase: 'order' });
-      return { outcome: 'error', messageKey: 'payment_browser_failed' };
+      return { outcome: 'error', messageKey: 'payment_browser_failed', code };
     }
+    // Web: the tab is leaving for Checkout. The attempt stays at "checkout" with no hint; the backend is asked when the patient returns.
+    if (hint === WEB_CHECKOUT_PENDING) return { outcome: 'confirming', webRedirect: true };
     await updateAttempt(invoice.id, { hint });
     return verifyPayment({ invoiceId: invoice.id, attempt, hint, sleep, shouldStop });
   });
 }
 
-/** The app was closed or came back: if Checkout was opened for this invoice and never confirmed, verify it from the invoice.
- * Resolves null when there is nothing to resume (so the screen shows nothing new). */
-export async function resumePayment({ invoiceId, sleep, shouldStop }) {
+// When Checkout was opened for this attempt (older records have no checkoutAt: they fall back to when the attempt began).
+const checkoutAge = (attempt, now) => {
+  const since = Number(attempt.checkoutAt) || Number(attempt.startedAt);
+  return Number.isFinite(since) && since > 0 ? now() - since : Infinity;
+};
+
+// An attempt left at "checkout" is SETTLED with ONE look at the invoice (never a polling loop):
+//   completed at the backend -> paid; closed -> failed (both clear the attempt, as always);
+//   still pending (or our payment not listed) -> back to phase "order" with the SAME paymentId, key and baseline, outcome "cancelled": Pay Now is
+//   offered again, and only an explicit tap replays the order request (same key: no second order) and asks for a fresh checkout session.
+//   not readable -> "confirming" and the attempt is left as it was, so nothing is ever read as paid and "Check again" can ask again.
+// A pending payment is NEVER read as paid. Nothing here opens Checkout or creates an order or a session.
+async function settleCheckout({ invoiceId, attempt }) {
+  let invoice = null;
+  try {
+    ({ invoice } = await apiGet(`/invoices/${invoiceId}`));
+  } catch { /* unknown: stay as we are */ }
+  if (!invoice) return { outcome: 'confirming' };
+  const seen = evaluateInvoice(invoice, attempt);
+  if (seen.state === 'paid') {
+    await clearAttempt(invoiceId);
+    return { outcome: 'paid', fullyPaid: seen.fullyPaid, invoice };
+  }
+  if (seen.state === 'failed') {
+    await clearAttempt(invoiceId);
+    return { outcome: 'failed', messageKey: 'payment_failed', invoice };
+  }
+  await updateAttempt(invoiceId, { phase: 'order', hint: null });
+  return { outcome: 'cancelled' };
+}
+
+/** The app was closed or came back: if Checkout was opened for this invoice and never confirmed, check it from the invoice.
+ * Resolves null when there is nothing to resume (so the screen shows nothing new). Only a browser that SAID it submitted a payment
+ * ("submitted"), and only while the attempt is fresh, earns the bounded wait for the webhook; everything else (no word at all: the web tab
+ * simply came back; "returned", "cancelled", "failed", "expired" ...) is settled with one look. */
+export async function resumePayment({ invoiceId, sleep, shouldStop, maxPolls = POLLS_ON_RESUME, now = Date.now }) {
   if (!invoiceId || isRunning(invoiceId)) return null;
   const attempt = await loadAttempt(invoiceId);
   if (!attempt || attempt.phase !== 'checkout' || attempt.paymentId == null) return null;
-  const result = await runExclusive(invoiceId, () => verifyPayment({ invoiceId, attempt, hint: attempt.hint || 'returned', maxPolls: POLLS_ON_RESUME, sleep, shouldStop }));
+  const waits = attempt.hint === 'submitted' && checkoutAge(attempt, now) <= CHECKOUT_ATTEMPT_TTL_MS;
+  const result = await runExclusive(invoiceId, () => (waits
+    ? verifyPayment({ invoiceId, attempt, hint: 'submitted', maxPolls, sleep, shouldStop })
+    : settleCheckout({ invoiceId, attempt })));
   return result.outcome === 'busy' ? null : result;
 }
 

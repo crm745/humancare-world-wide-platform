@@ -26,7 +26,9 @@
 // so a patient detail cannot end up in the audit trail.
 const { appendAuditLog } = require('../../common/audit/business-audit');
 const { assertDealEligible, DEAL_CREATE_EVENT, DEAL_ENTITY_TYPE, dealRecoveryIdempotencyKey } = require('./deal-outbox');
-const { buildDealFields, DealMappingError, DEAL } = require('./bitrix-deal');
+const { DealMappingError } = require('./bitrix-deal');
+const { resolveProfile, eventProfileProblem, referenceFieldOf, PROFILE_TEST } = require('./bitrix-profiles');
+const { buildProfileDealFields, linkProfileProblem } = require('./bitrix-profile-runtime');
 const { MANUAL_REVIEW_PREFIX } = require('./deal-outbox.store');
 
 const MODES = ['requeue', 'confirm_no_deal', 'adopt_deal'];
@@ -80,11 +82,17 @@ async function recoverDealEvent({ prisma, api, env = process.env, actor, caseId,
   if (!first || first.eventType !== DEAL_CREATE_EVENT || first.caseId !== caseId) throw refuse(404, 'event_not_found', 'No such Deal event for this Case.');
   const caseForReference = await prisma.case.findUnique({ where: { id: caseId }, select: { referenceNumber: true } });
   if (!caseForReference) throw refuse(404, 'case_not_found', 'No such Case.');
+  // Recovery works only in the profile the event was queued under (BITRIX_DEAL_PROFILE, no default): the lookup uses that profile's
+  // category and reference field, so a Deal of the other pipeline can never be adopted or matched.
+  const active = resolveProfile(env);
+  if (!active) throw refuse(409, 'profile_not_configured', 'No Bitrix profile is configured (BITRIX_DEAL_PROFILE).');
+  if (!referenceFieldOf(active)) throw refuse(409, 'reference_field_not_configured', 'The configured Bitrix profile has no usable Case reference field.');
+  if (eventProfileProblem(first.payload, active)) throw refuse(409, 'profile_mismatch', 'This event belongs to a different Bitrix profile than the one configured.');
 
   // Bitrix is read BEFORE the transaction (never inside one).
   let found = null;
   if (mode !== 'requeue') {
-    found = await api.findDealsByReference(caseForReference.referenceNumber, { env });
+    found = await api.findDealsByReference(caseForReference.referenceNumber, active.name === PROFILE_TEST ? { env } : { env, profile: active });
     const exists = found.status === 'single' || found.status === 'multiple';
     if (mode === 'confirm_no_deal' && exists) {
       throw refuse(409, 'deal_exists_in_bitrix', 'Bitrix already has a Deal with this reference. Adopt it instead of creating another.');
@@ -117,6 +125,7 @@ async function recoverDealEvent({ prisma, api, env = process.env, actor, caseId,
     }
     const link = caseRecord.bitrixDealLink;
     if (!link) throw refuse(409, 'deal_link_missing', 'The Case has no Deal link.');
+    if (linkProfileProblem(link, active)) throw refuse(409, 'profile_mismatch', 'The Case\'s Deal link belongs to a different Bitrix profile.');
     if (link.bitrixDealId) throw refuse(409, 'deal_already_linked', 'The Case already has a Bitrix Deal.');
 
     const evidence = row.external_call_started_at != null;
@@ -138,7 +147,7 @@ async function recoverDealEvent({ prisma, api, env = process.env, actor, caseId,
         await tx.bitrixDealLink.update({
           where: { caseId },
           data: {
-            bitrixDealId: dealId, categoryId: String(DEAL.CATEGORY_ID), stageId: found.stageId ?? null, syncStatus: 'synced',
+            bitrixDealId: dealId, categoryId: String(active.categoryId), profile: active.name, stageId: found.stageId ?? null, syncStatus: 'synced',
             lastSyncedAt: new Date(), lastAttemptAt: new Date(), lastError: null,
           },
         });
@@ -164,7 +173,7 @@ async function recoverDealEvent({ prisma, api, env = process.env, actor, caseId,
 
     // The original problem must be gone: the CURRENT Case data must now map to a valid Deal.
     try {
-      buildDealFields(caseRecord, caseRecord.serviceRequest);
+      buildProfileDealFields(active, caseRecord, caseRecord.serviceRequest);
     } catch (err) {
       if (err instanceof DealMappingError) throw refuse(422, 'not_corrected', `The Case data still cannot be sent (${err.code}). Correct it first.`);
       throw err;
@@ -175,7 +184,7 @@ async function recoverDealEvent({ prisma, api, env = process.env, actor, caseId,
       created = await tx.integrationOutbox.create({
         data: {
           eventType: DEAL_CREATE_EVENT, entityType: DEAL_ENTITY_TYPE, entityId: String(caseId), caseId, idempotencyKey: replacementKey,
-          payload: { caseId, serviceRequestId: caseRecord.serviceRequestId, recoveryOf: eventId },
+          payload: { caseId, serviceRequestId: caseRecord.serviceRequestId, recoveryOf: eventId, profile: active.name },
           status: 'pending', nextAttemptAt: new Date(0), // the epoch: due at once, with no application clock involved
           correlationId: `recovery:${eventId}`,
         },

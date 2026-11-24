@@ -13,7 +13,7 @@ const code = (rel) => read(rel).replace(/\/\/.*$/gm, '');
 const refusalOf = async (fn) => { try { await fn(); } catch (e) { return e.code; } return null; };
 const argsRefusal = (...a) => { try { lib.parseArgs(a); } catch (e) { return e.code; } return null; };
 
-const ENV_ON = { BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true' };
+const ENV_ON = { BITRIX_DEAL_PROFILE: 'test', BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true' };
 const REF_FIELD = 'UF_CRM_1794548440549';
 
 describe('arguments', () => {
@@ -166,11 +166,11 @@ describe('reconcileDeals with a scope', () => {
     await reconcileDeals({ prisma: p, api: { getDeal: jest.fn() }, env: ENV_ON, log: console, now: () => NOW, scope: { dealId: '21802', ignoreRecheck: true } });
     const q = p.bitrixDealLink.findMany.mock.calls[0][0];
     expect(q.where.bitrixDealId).toBe('21802');
-    expect(q.where.OR).toBeUndefined();
+    expect(q.where.AND).toEqual([{ OR: [{ profile: null }, { profile: 'test' }] }]); // the profile filter only: no recheck window
     expect(q.where.case.is.status).toEqual({ notIn: ['completed', 'cancelled'] });
     expect(q.take).toBe(1);
     await reconcileDeals({ prisma: p, api: { getDeal: jest.fn() }, env: ENV_ON, log: console, now: () => NOW, scope: { dealId: '21802' } });
-    expect(p.bitrixDealLink.findMany.mock.calls[1][0].where.OR).toBeDefined(); // without ignoreRecheck the window applies
+    expect(p.bitrixDealLink.findMany.mock.calls[1][0].where.AND).toHaveLength(2); // without ignoreRecheck the window applies
   });
   test('a malformed scope matches nothing: no query, no read', async () => {
     const p = { bitrixDealLink: { findMany: jest.fn(), update: jest.fn() }, integrationInbox: { create: jest.fn() } };

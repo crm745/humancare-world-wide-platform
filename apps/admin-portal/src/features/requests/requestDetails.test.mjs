@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { backLabel, backTarget, careLevelLabel, documentView, equipmentList, eventView, formatBytes, mobilityLabel, sortEvents } from './requestDetails.mjs';
+import { backLabel, backTarget, careLevelLabel, cityLabels, criticalLevelLabel, oxygenLabel, travelTypeLabel, documentView, equipmentList, eventView, formatBytes, mobilityLabel, sortEvents } from './requestDetails.mjs';
 
 const doc = (over = {}) => ({
   id: 1, originalName: 'report.pdf', sizeBytes: 2048, mimeType: 'application/pdf', uploadedAt: '2026-11-01T10:00:00Z', replacesId: null, supersededAt: null,
@@ -134,4 +134,32 @@ test('the timeline names the permanent scan failure and keeps its reason', () =>
   assert.equal(event.title, 'Virus scan failed for good');
   assert.equal(event.tone, 'danger');
   assert.deepEqual(event.lines, ['report.pdf', 'the stored file is missing']);
+});
+
+test('Private Charter travel type, critical level and oxygen read as labels; anything else is shown as stored; empty is null', () => {
+  assert.equal(travelTypeLabel('patient_transfer'), 'Patient Transfer');
+  assert.equal(travelTypeLabel('organ_transfer'), 'Organ Transfer');
+  assert.equal(travelTypeLabel('cargo'), 'cargo');
+  assert.equal(travelTypeLabel(null), null);
+  assert.equal(travelTypeLabel(''), null);
+  assert.deepEqual(['icu', 'ventilated', 'tracheostomy', 'ecmo'].map(criticalLevelLabel), ['ICU', 'Ventilated', 'Tracheostomy', 'ECMO']);
+  assert.equal(criticalLevelLabel('other'), 'other');
+  // Multi-select: stored as keys joined by commas (or sent as a list); shown in the order of the form.
+  assert.equal(criticalLevelLabel('icu,ecmo'), 'ICU, ECMO');
+  assert.equal(criticalLevelLabel('ecmo,icu,ventilated'), 'ICU, Ventilated, ECMO');
+  assert.equal(criticalLevelLabel(['ecmo', 'icu']), 'ICU, ECMO');
+  assert.equal(criticalLevelLabel('icu, mystery'), 'ICU, mystery');
+  assert.equal(criticalLevelLabel(''), null);
+  assert.equal(criticalLevelLabel([]), null);
+  // Origin City / Destination City are the Private Charter labels only.
+  assert.deepEqual(cityLabels('privatecharter'), { origin: 'Origin City', destination: 'Destination City' });
+  assert.deepEqual(cityLabels('ground'), { origin: 'Origin', destination: 'Destination' });
+  assert.deepEqual(cityLabels(undefined), { origin: 'Origin', destination: 'Destination' });
+  assert.equal(criticalLevelLabel(undefined), null);
+  assert.equal(oxygenLabel({ oxygenRequired: true, oxygenFlowLpm: 4 }), 'Yes, 4 LPM');
+  assert.equal(oxygenLabel({ oxygenRequired: true, oxygenFlowLpm: null }), 'Yes');
+  assert.equal(oxygenLabel({ oxygenRequired: false, oxygenFlowLpm: null }), 'No');
+  // An older request has no answer: nothing is invented.
+  assert.equal(oxygenLabel({ oxygenRequired: null }), null);
+  assert.equal(oxygenLabel({}), null);
 });
