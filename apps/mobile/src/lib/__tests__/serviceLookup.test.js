@@ -26,3 +26,15 @@ describe('service detail: the live-text lookup', () => {
     expect(Object.keys(SERVICES).filter((key) => slugs.includes(key))).toEqual([]);
   });
 });
+
+describe('the service page: "Request this service" is fixed at the bottom', () => {
+  const screen = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'app', 'service', '[key].js'), 'utf8').replace(/\r\n/g, '\n');
+  it('the button is in a bar outside the scrolling content, above the safe area, and the content keeps clear of it', () => {
+    const body = screen.slice(screen.indexOf('<Body'), screen.indexOf('</Body>'));
+    expect(body).not.toContain("t('request_this_service_btn')");
+    expect(screen).toContain("<Button large title={t('request_this_service_btn')} onPress={start} />");
+    expect(screen).toContain('paddingBottom: 16 + insets.bottom');
+    expect(screen).toContain('bottomEdge={barHeight}');
+    expect(screen.indexOf('</Body>')).toBeLessThan(screen.indexOf("t('request_this_service_btn')"));
+  });
+});

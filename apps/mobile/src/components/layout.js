@@ -11,6 +11,7 @@ import { fabClearance, scrollPadFor } from '../lib/sos';
 import { KeyboardScroll, useKeyboardOpen } from './keyboard';
 import { COLORS } from '../theme/colors';
 import { ConnectionBanner } from './network/ConnectionBanner';
+import { useFitScroll } from '../lib/useFitScroll';
 
 // Full-height screen with safe-area padding. `bg` is a Tailwind background class.
 export function Screen({ children, bg = 'bg-canvas', padded, className = '', style }) {
@@ -33,9 +34,10 @@ const BOTTOM_GAP = 32;
 // `footerHeight`: the height of a bar that rides on top of the keyboard under this scroll area (see components/keyboard).
 // `clearSos`: where the floating SOS button shows, the end of the scroll is at least `sosMinPad` (96) and at least the button's clearance (lib/sos.js), so the last item scrolls fully above it.
 export const SOS_MIN_PAD = 96;
-export const Body = forwardRef(function Body({ children, className = '', contentClassName = '', withNav, grow = true, bottomEdge = 0, refreshControl, footerHeight = 0, clearSos = false }, ref) {
+export const Body = forwardRef(function Body({ children, className = '', contentClassName = '', withNav, grow = true, bottomEdge = 0, refreshControl, footerHeight = 0, clearSos = false, noScrollWhenFits = false }, ref) {
   const insets = useSafeAreaInsets();
   const inner = useRef(null);
+  const fit = useFitScroll(noScrollWhenFits); // true while a "Couldn't load" view is shown: no scrolling when it fits
   // The bottom padding: the screen's own, or the room the floating SOS button needs where it shows, whichever is more (lib/sos.js).
   const own = (withNav ? 64 : 0) + BOTTOM_GAP + insets.bottom;
   const { paddingBottom: ownPadding, scrollProps } = useFabScrollPad({ ownPad: own, edge: bottomEdge });
@@ -55,6 +57,7 @@ export const Body = forwardRef(function Body({ children, className = '', content
       {...scrollProps}
       showsVerticalScrollIndicator={false}
       refreshControl={refreshControl}
+      scrollEnabled={fit.scrollEnabled} onLayout={fit.onLayout} onContentSizeChange={fit.onContentSizeChange}
     >
       {children}
     </KeyboardScroll>

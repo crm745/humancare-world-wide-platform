@@ -355,3 +355,17 @@ describe('P2: localization of what this change added', () => {
     expect(read('app/request/step1.js')).not.toContain('Pick a city from the suggestions');
   });
 });
+
+describe('the city field while offline: the person just types', () => {
+  const field = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'components', 'request', 'CityField.js'), 'utf8').replace(/\r\n/g, '\n');
+  test('offline: no search is made, and nothing about the server is shown under the field', () => {
+    expect(field).toContain("if (offline.current) { shown.current = ''; setCities([]); setProblem(QUIET_OFFLINE); setState('error'); return; }");
+    expect(field).toContain("const QUIET_OFFLINE = Object.freeze({ kind: 'network', retry: true, message: '' });");
+    expect(field).toContain("const quiet = state === 'error' && !!problem && problem.kind === 'network';");
+    expect(field).toContain("const visible = open && state !== 'idle' && !quiet;");
+  });
+  test('the search is made again by itself when the connection returns; other failures still show their message', () => {
+    expect(field).toContain("useRetryOnRestore({ failed: state === 'error' && !!(problem && problem.retry)");
+    expect(field).toContain('{problem.message}'); // busy / unavailable / refused searches are still worded
+  });
+});

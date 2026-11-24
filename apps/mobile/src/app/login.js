@@ -5,7 +5,8 @@ import { ArrowRight, Building2 } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { Body, Screen } from '../components/layout';
 import { Button, FieldLabel, Heading, Input, Text } from '../components/ui';
-import { PasswordField, Select } from '../components/widgets';
+import { PasswordField } from '../components/widgets';
+import { CountryCodeBackdrop, CountryCodeField } from '../components/CountryCodeDropdown';
 import { errorText } from '../lib/errorText';
 import { navReplace } from '../lib/nav';
 import { apiPost } from '../lib/api';
@@ -18,17 +19,12 @@ import { OfflineLine } from '../components/network/OfflineLine';
 import { Collapse } from '../components/network/Collapse';
 import { AnimatedPressBox } from '../components/AnimatedPressBox';
 import { isValidEmail, isValidMobileNumber } from '../lib/validators';
-import { COUNTRY_CODES, CALLING_CODE_COUNTRY } from '../data/mock';
 import { LOGO } from '../data/images';
 import { AppleMark } from '../components/SocialMarks';
 import { NeedsInternet } from '../components/network/NeedsInternet';
 
 const LOGO_W = 150;
 const LOGO_RATIO = 2440 / 1405;
-
-// "+91" -> "🇮🇳 +91": the country's flag (built from its two-letter code) beside the calling code.
-const flagOf = (iso) => String.fromCodePoint(...[...iso].map((ch) => 0x1f1a5 + ch.charCodeAt(0)));
-const CODE_LABELS = Object.fromEntries(COUNTRY_CODES.map((code) => [code, `${CALLING_CODE_COUNTRY[code] ? flagOf(CALLING_CODE_COUNTRY[code]) : ''} ${code}`.trim()]));
 
 // The Mobile Login / Email Login switch.
 function ModeToggle({ mode, onChange, t }) {
@@ -59,6 +55,7 @@ export default function Login() {
   const [mode, setMode] = useState('phone');
   const [phone, setPhone] = useState('');
   const [cc, setCc] = useState('+91');
+  const [codesOpen, setCodesOpen] = useState(false); // the country-code list under the number field
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [formError, setFormError] = useState(null);
@@ -88,6 +85,7 @@ export default function Login() {
 
   const switchTo = (next) => {
     setMode(next);
+    setCodesOpen(false); // switching to e-mail login (and back) starts with the list closed
     setFormError(null);
   };
 
@@ -107,6 +105,7 @@ export default function Login() {
   return (
     <Screen bg="bg-white">
       <Body contentClassName="justify-center p-[26px]">
+        {codesOpen && mode === 'phone' ? <CountryCodeBackdrop onPress={() => setCodesOpen(false)} /> : null}
         {/* The official HumanCare logo (its picture already carries the HUMANCARE wordmark), in its own proportions. */}
         <Image
           source={LOGO} accessible accessibilityLabel={t('gs_logo_label')} resizeMode="contain"
@@ -119,10 +118,9 @@ export default function Login() {
         {mode === 'phone' ? (
           <>
             <FieldLabel large required>{t('field_mobile_number')}</FieldLabel>
-            <View className="flex-row gap-2">
-              <Select large value={cc} options={COUNTRY_CODES} labels={CODE_LABELS} onChange={setCc} title={t('field_mobile_number')} className="w-32" />
-              <Input large className="flex-1" placeholder={t('field_mobile_number')} value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-            </View>
+            <CountryCodeField value={cc} onChange={setCc} open={codesOpen} onOpenChange={setCodesOpen} title={t('field_mobile_number')}>
+              <Input large className="flex-1" placeholder={t('field_mobile_number')} value={phone} onChangeText={setPhone} keyboardType="phone-pad" onFocus={() => setCodesOpen(false)} onPressIn={() => setCodesOpen(false)} />
+            </CountryCodeField>
             {phone && !valid ? <Text className="mt-1 text-[12px] text-danger">{t('err_number_for_country')}</Text> : null}
           </>
         ) : (

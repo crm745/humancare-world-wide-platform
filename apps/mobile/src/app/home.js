@@ -8,13 +8,13 @@ import { useApp } from '../state/AppContext';
 import { HOME_SERVICES } from '../data/mock';
 import { apiGet } from '../lib/api';
 import { registerForPushNotifications } from '../lib/pushNotifications';
-import { serviceKeyFromTitle, toUiStatus } from '../lib/requestShape';
-import { baseServiceName } from '../lib/requestDetailsView';
+import { toListItem } from '../lib/requestShape';
+import { homeActiveSection } from '../lib/activeRequests';
 import { navReplace } from '../lib/nav';
 import { BottomNav, Screen, useScrollToTopOnTabTap } from '../components/layout';
 import { Text } from '../components/ui';
 import { openService } from '../components/ServiceGrid';
-import { ActiveRequestCard } from '../components/home/ActiveRequestCard';
+import { ActiveRequestsSection } from '../components/home/ActiveRequestCard';
 import { AppRefreshControl } from '../components/AppRefreshControl';
 import { LoadFailure } from '../components/LoadFailure';
 import { DraftNotice } from '../components/home/DraftNotice';
@@ -33,9 +33,6 @@ import { useRetryOnRestore } from '../lib/useRetryOnRestore';
 const TAB_BAR = 64;
 const MAX_WIDTH = 720;
 const HOME_TILES = HOME_SERVICES;
-// What the app tracks for a request: submitted -> in progress -> completed.
-const STEP_BY_STATUS = { submitted: 1, in_progress: 2 };
-const TOTAL_STEPS = 3;
 
 export default function Home() {
   const { t, toast, isCorporate, profile } = useApp();
@@ -73,22 +70,8 @@ export default function Home() {
   useEffect(() => { if (!isCorporate) registerPush(); }, [isCorporate, registerPush]);
   useRetryOnRestore({ failed: pushFailed, retry: registerPush, enabled: !isCorporate });
 
-  // The newest request that is still being worked on (the list comes newest first).
-  const current = requests.find((r) => r.status === 'submitted' || r.status === 'in_progress');
-  let activeRequest = null;
-  if (current) {
-    const key = serviceKeyFromTitle(current.serviceType);
-    activeRequest = {
-      serviceKey: key,
-      serviceName: baseServiceName(current, t),
-      reference: current.referenceNumber,
-      statusLabel: t(`status_${toUiStatus(current.status)}`),
-      origin: current.origin,
-      destination: current.destination,
-      step: STEP_BY_STATUS[current.status],
-      totalSteps: TOTAL_STEPS,
-    };
-  }
+  // The active requests (the SAME rule as the Active filter of My Requests, lib/myRequestsView.js isActiveRequest): up to two cards, and "All Active Requests" for three or more.
+  const activeSection = homeActiveSection(requests.map(toListItem));
 
   const openTile = (s) => (s.route ? router.push(s.route) : openService(s.key));
 
@@ -124,9 +107,14 @@ export default function Home() {
               <BannerCarousel width={contentW - 36} tablet={tablet} onRequest={() => navReplace('/all-services')} />
               {loading && gate.visible && <ActiveRequestSkeleton label={t('sk_loading_active')} />}
               {error && !home && <LoadFailure titleKey="lf_title_home" error={error} onRetry={reload} />}
-              {activeRequest && (
+              {activeSection.count > 0 && (
                 <Reveal animate={gate.wasShown}>
-                  <ActiveRequestCard request={activeRequest} onTrack={() => router.push({ pathname: '/request-tracking', params: { id: current.id } })} />
+                  <ActiveRequestsSection
+                    section={activeSection}
+                    onOpen={(item) => router.push({ pathname: '/request-details', params: { id: item.rawId } })}
+                    onTrack={(item) => router.push({ pathname: '/request-tracking', params: { id: item.rawId } })}
+                    onViewAll={() => navReplace({ pathname: '/my-requests', params: { status: 'active' } })}
+                  />
                 </Reveal>
               )}
             </>

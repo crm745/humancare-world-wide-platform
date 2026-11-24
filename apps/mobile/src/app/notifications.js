@@ -95,7 +95,7 @@ export default function Notifications() {
   return (
     <Screen>
       <TopBar title={t('notifications_title')} />
-      <Body contentClassName="gap-2.5 px-[18px] py-4" refreshControl={ALERTS_PREVIEW ? undefined : <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      <Body contentClassName="gap-2.5 px-[18px] py-4" noScrollWhenFits={!ALERTS_PREVIEW && !!error && !data} refreshControl={ALERTS_PREVIEW ? undefined : <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {ALERTS_PREVIEW ? (
           <AlertGroups items={preview} onRead={(id) => setPreview((rows) => markAlertRead(rows, id))} t={t} />
         ) : (

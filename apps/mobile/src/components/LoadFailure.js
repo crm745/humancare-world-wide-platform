@@ -22,7 +22,7 @@ export function LoadFailure({ message, error, onRetry, titleKey }) {
     <StateView
       icon={view.icon} title={t(view.titleKey)} body={body}
       retryLabel={onRetry ? t('sk_try_again') : undefined} onRetry={onRetry}
-      style={{ paddingVertical: 56 }}
+      style={{ paddingVertical: 28 }}
     />
     </Reveal>
   );

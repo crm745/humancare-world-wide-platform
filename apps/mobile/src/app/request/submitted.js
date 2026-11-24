@@ -3,7 +3,7 @@ import { AccessibilityInfo, View } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
 import { ArrowRight, BellRing, Check, ClipboardCheck, Headset, Phone, PhoneCall, RefreshCw, TriangleAlert } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
-import { EMERGENCY_DISPLAY, EMERGENCY_TEL } from '../../data/mock';
+import { EMERGENCY_TEL } from '../../data/mock';
 import { errorText } from '../../lib/errorText';
 import { navReplace } from '../../lib/nav';
 import { apiGet, apiUpload } from '../../lib/api';
@@ -183,13 +183,12 @@ export default function RequestSubmitted() {
           )}
 
           <PressBox
-            accessibilityRole="button" accessibilityLabel={`${t('sub_urgent_help')} ${EMERGENCY_DISPLAY}`} onPress={() => open(`tel:${EMERGENCY_TEL}`)}
+            accessibilityRole="button" accessibilityLabel={`${t('sub_urgent_help')}, ${t('sub_call_btn')}`} onPress={() => open(`tel:${EMERGENCY_TEL}`)}
             style={({ pressed }) => ({ width: '100%', flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#E4E9F2', paddingVertical: 12, paddingHorizontal: 14, opacity: pressed ? 0.85 : 1 })}
           >
             <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: '#FDECEC', alignItems: 'center', justifyContent: 'center' }}><Headset size={20} color="#C53030" strokeWidth={2.2} /></View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={{ fontFamily: FONT[400], fontSize: 12.5, lineHeight: 17, color: '#5B6B84' }}>{t('sub_urgent_help')}</Text>
-              <Text style={{ fontFamily: FONT[800], fontSize: 15, lineHeight: 20, color: '#0D2340' }}>{EMERGENCY_DISPLAY}</Text>
             </View>
             <View style={{ height: 34, paddingHorizontal: 12, borderRadius: 17, backgroundColor: COLORS.primarySoft, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Phone size={15} color={COLORS.primary} strokeWidth={2.4} />

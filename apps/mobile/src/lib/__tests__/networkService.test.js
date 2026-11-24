@@ -223,7 +223,8 @@ describe('where the app listens (static guards)', () => {
     const users = ['app', 'components'].flatMap(sourceFiles).filter((f) => /useNetwork|NetworkContext/.test(read(f)));
     // The pull-to-refresh pass adds the two screens that use the shared useNetworkRefresh hook (it reads the network service only to re-check the connection): personal-details and service/[key].
     // Phase 5 adds the three screens that start a document preview or download: offline they stop at the shared offline message instead of starting a fetch that cannot finish.
-    expect(users.sort()).toEqual(['app/_layout.js', 'app/cant-connect.js', 'app/document-preview.js', 'app/my-documents.js', 'app/personal-details.js', 'app/request-details.js', 'app/request/step1.js', 'app/service/[key].js', 'app/tracking.js', 'components/AuthGate.js', 'components/LoadFailure.js', 'components/OtpScreen.js', 'components/network/BannerDriver.js', 'components/network/CachedNote.js', 'components/network/NeedsInternet.js', 'components/request/RequestFrame.js', 'components/ui.js']);
+    // The city search field reads it only to stay quiet offline: no search and no "could not reach the server" message while the person types.
+    expect(users.sort()).toEqual(['app/_layout.js', 'app/cant-connect.js', 'app/document-preview.js', 'app/my-documents.js', 'app/personal-details.js', 'app/request-details.js', 'app/request/step1.js', 'app/service/[key].js', 'app/tracking.js', 'components/AuthGate.js', 'components/LoadFailure.js', 'components/OtpScreen.js', 'components/network/BannerDriver.js', 'components/network/CachedNote.js', 'components/network/NeedsInternet.js', 'components/request/CityField.js', 'components/request/RequestFrame.js', 'components/ui.js']);
   });
   test('the API client does not import the network service (no import cycle: it only reports through networkReporter)', () => {
     const api = read('lib/api.js');

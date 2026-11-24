@@ -11,14 +11,13 @@ import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import SERVICES from '../data/services.json';
 import { getDateLocale, formatDate, formatDayMonth, formatTime } from './dateFormat';
 import { displayNameOf } from './countryNames';
-import { careLevelText, storedServiceName } from './requestShape';
+import { careLevelText, storedServiceName, toUiStatus } from './requestShape';
 import { TRACKING_STEPS, trackingPosition } from './requestTracking';
 import { documentHistory, reviewBanner, reviewState } from './requestDocuments';
 import { formatSize } from './documentHistoryView';
-import { serviceKeyOf, serviceTitleKey } from './myRequestsView';
+import { badgeFor, serviceKeyOf, serviceTitleKey } from './myRequestsView';
 import { isNewTeleRequest, TELE_SCOPE_LABEL_KEYS, TELE_TYPE_LABEL_KEYS } from './teleConsultation';
 import { corporateFromRequest, corporateText, isNewCorporateRequest } from './corporateMedical';
-import { COLORS } from '../theme/colors';
 import { isEmptyValue } from './emptyValue';
 import { MORTAL_MODE_LABEL_KEYS, MORTAL_SCOPE_LABEL_KEYS, hasScopeAndMode, userDetailsOf } from './mortalRemains';
 import { homeCareFromRequest, parseHomeDescription } from './homeHealthcare';
@@ -37,19 +36,13 @@ export function textOf(value) {
 const baseKeyOf = (request) => String((request && request.serviceKey) || '').split('_')[0];
 const suffixOf = (request) => String((request && request.serviceKey) || '').split('_').slice(1).join('_');
 
-// ---- the status badge (same colours as My Requests) -----------------------------------------------------------------
+// ---- the status badge (the colours are the shared mapping of lib/myRequestsView.js STATUS_BADGE: the same on Home, My Requests, Request Details and the Tracking banner) --------------
 
-const BADGE = {
-  submitted: ['#FDF0DA', '#8F4C08'],
-  in_progress: [COLORS.primarySoft, COLORS.primary],
-  completed: ['#E0F5F4', '#0B6564'],
-  cancelled: ['#EEF1F6', '#5B6B84'],
-};
 const STATUS_I18N = { submitted: 'status_submitted', in_progress: 'status_progress', completed: 'status_completed', cancelled: 'status_cancelled' };
 
 export function statusBadge(request, t) {
   const status = request && request.status;
-  const [bg, fg] = BADGE[status] || BADGE.cancelled;
+  const { bg, fg } = badgeFor(toUiStatus(status)); // an unknown status is neutral grey
   const key = STATUS_I18N[status];
   return { bg, fg, label: key ? t(key) : textOf(status) };
 }

@@ -20,7 +20,8 @@ export function SubmittedMark() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the screen opens
   }, []);
 
-  const arc = useAnimatedProps(() => { const f = frameAt(clock.value); return { strokeDashoffset: f.arcOffset, stroke: f.arcColor }; });
+  const arc = useAnimatedProps(() => ({ strokeDashoffset: frameAt(clock.value).arcOffset }));
+  const tealArc = useAnimatedProps(() => { const f = frameAt(clock.value); return { strokeDashoffset: f.arcOffset, strokeOpacity: f.arcTeal }; });
   const dots = useAnimatedProps(() => ({ opacity: frameAt(clock.value).dotsOpacity }));
   const fill = useAnimatedProps(() => ({ r: frameAt(clock.value).fillRadius }));
   const check = useAnimatedProps(() => { const f = frameAt(clock.value); return { strokeDashoffset: f.checkOffset, strokeOpacity: f.checkVisible }; });
@@ -32,7 +33,11 @@ export function SubmittedMark() {
         <AnimatedCircle cx={RING.cx} cy={RING.cy} fill={COLORS.fill} r={reduceMotion ? FILL_R : 0} animatedProps={fill} />
         <AnimatedCircle
           cx={RING.cx} cy={RING.cy} r={RING.r} fill="none" strokeWidth={RING.stroke} strokeLinecap="round" strokeDasharray={RING.dash}
-          transform={`rotate(-90 ${RING.cx} ${RING.cy})`} animatedProps={arc}
+          stroke={COLORS.blue} transform={`rotate(-90 ${RING.cx} ${RING.cy})`} animatedProps={arc}
+        />
+        <AnimatedCircle
+          cx={RING.cx} cy={RING.cy} r={RING.r} fill="none" strokeWidth={RING.stroke} strokeLinecap="round" strokeDasharray={RING.dash}
+          stroke={COLORS.teal} strokeOpacity={reduceMotion ? 1 : 0} transform={`rotate(-90 ${RING.cx} ${RING.cy})`} animatedProps={tealArc}
         />
         <AnimatedG animatedProps={dots}>
           {DOTS.map((d) => <Circle key={d.cx} cx={d.cx} cy={RING.cy} r={3.5} fill={COLORS.blue} fillOpacity={d.opacity} />)}

@@ -14,6 +14,10 @@ import { COLORS } from '../theme/colors';
 
 export const STEP_COUNT = TRACKING_STEPS.length; // 5
 
+// "Active" = submitted + in progress (the list item's status). The ONE definition: the Active filter of My Requests and the Active Requests section of Home both use it, so their counts always agree.
+export const ACTIVE_STATUSES = Object.freeze(['submitted', 'progress']);
+export const isActiveRequest = (item) => !!item && ACTIVE_STATUSES.includes(item.status);
+
 // The service whose icon and name the request shows: its own service key first (the base before any "_stretcher" /
 // "_domestic" suffix), then the title it was saved with (as before), then the generic Air Ambulance.
 export function serviceKeyOf(request) {
@@ -29,13 +33,16 @@ export function serviceTitleKey(key) {
   return tile ? tile.title : null;
 }
 
-// Badge colours: [background, text].
-const BADGE = {
-  submitted: ['#FDF0DA', '#8F4C08'],
-  progress: [COLORS.primarySoft, COLORS.primary],
-  completed: ['#E0F5F4', '#0B6564'],
-};
-const BADGE_OTHER = ['#EEF1F6', '#5B6B84'];
+// The status pill colours, ONE mapping for Home's Active Requests card and every card of My Requests (keyed by the list item's status): submitted soft blue, in progress amber, completed green,
+// cancelled neutral grey. Any other status is grey too.
+export const STATUS_BADGE = Object.freeze({
+  submitted: Object.freeze({ bg: COLORS.primarySoft, fg: COLORS.primary }),
+  progress: Object.freeze({ bg: '#FDF0DA', fg: '#8F4C08' }),
+  completed: Object.freeze({ bg: '#E0F5F4', fg: '#0B6564' }),
+  cancelled: Object.freeze({ bg: '#EEF1F6', fg: '#5B6B84' }),
+});
+export const BADGE_OTHER = Object.freeze({ bg: '#EEF1F6', fg: '#5B6B84' });
+export const badgeFor = (status) => STATUS_BADGE[status] || BADGE_OTHER;
 export const SEGMENT_DONE = COLORS.primary;
 export const SEGMENT_COMPLETED = '#0B6564';
 export const SEGMENT_TODO = '#E4E9F2';
@@ -61,7 +68,7 @@ export function cardView(item, t) {
   const name = titleKey ? t(titleKey) : storedServiceName(item.serviceType);
   const statusKey = `status_${item.status}`;
   const statusLabel = t(statusKey) === statusKey ? String(item.status || '') : t(statusKey);
-  const [badgeBg, badgeFg] = BADGE[item.status] || BADGE_OTHER;
+  const { bg: badgeBg, fg: badgeFg } = badgeFor(item.status);
   const progress = progressOf(item.rawStatus || item.status);
   // A new-format Teleconsultation has an address and no destination: no route is drawn on its card.
   // A new-format Home Healthcare request has a home address, not a trip: no route either (item.homeFormat is set by toListItem).
@@ -94,7 +101,10 @@ export function cardView(item, t) {
 
 // The counts on the chips, from the whole loaded list (not from the search or the filter).
 export function statusCounts(items) {
-  const counts = { all: items.length, submitted: 0, progress: 0, completed: 0, cancelled: 0 };
-  for (const item of items) if (Object.prototype.hasOwnProperty.call(counts, item.status) && item.status !== 'all') counts[item.status] += 1;
+  const counts = { all: items.length, active: 0, submitted: 0, progress: 0, completed: 0, cancelled: 0 };
+  for (const item of items) {
+    if (Object.prototype.hasOwnProperty.call(counts, item.status) && item.status !== 'all' && item.status !== 'active') counts[item.status] += 1;
+    if (isActiveRequest(item)) counts.active += 1;
+  }
   return counts;
 }

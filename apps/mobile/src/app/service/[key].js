@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Image, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Check } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
@@ -17,6 +18,8 @@ import { useNetworkRefresh } from '../../lib/useNetworkRefresh';
 import { AppRefreshControl } from '../../components/AppRefreshControl';
 
 export default function ServiceDetail() {
+  const insets = useSafeAreaInsets();
+  const [barHeight, setBarHeight] = useState(0); // the fixed bottom bar: the content and the SOS button keep clear of it
   const { t, lang, toast, resetDraft, isCorporate, draft, savedDraft, resumeDraft, discardDraft } = useApp();
   const { key } = useLocalSearchParams();
   const local = SERVICES[key] || SERVICES.air;
@@ -65,7 +68,7 @@ export default function ServiceDetail() {
   return (
     <Screen>
       <TopBar title={t('service_detail_title')} />
-      <Body contentClassName="p-[22px]" refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      <Body contentClassName="p-[22px]" bottomEdge={barHeight} refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         <View className="mb-5 min-h-[180px] flex-1 overflow-hidden rounded-2xl bg-primary">
           <Image source={IMAGES[local.img]} style={{ position: 'absolute', width: '100%', height: '100%' }} resizeMode="cover" />
         </View>
@@ -90,8 +93,11 @@ export default function ServiceDetail() {
             ))}
           </View>
         </Card>
-        <Button title={t('request_this_service_btn')} onPress={start} className="mt-5" />
       </Body>
+      {/* "Request this service" stays fixed at the bottom of the screen while the page scrolls. */}
+      <View onLayout={(e) => setBarHeight(e.nativeEvent.layout.height)} style={{ backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E4E9F2', paddingTop: 12, paddingHorizontal: 16, paddingBottom: 16 + insets.bottom }}>
+        <Button large title={t('request_this_service_btn')} onPress={start} />
+      </View>
       <DraftSheet
         visible={asking}
         onResume={() => { setAsking(false); openSaved(); }}

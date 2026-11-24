@@ -19,10 +19,10 @@ describe('nothing of the old celebration is left', () => {
     for (const lang of LANGS) expect(Object.prototype.hasOwnProperty.call(I18N[lang], 'thank_you_title')).toBe(false);
     expect(read('data', 'i18n.json')).not.toMatch(/thank_you_title/);
   });
-  test('the title is "Request submitted" (a header), in every language', () => {
+  test('the title is "Request Submitted" (a header), in every language', () => {
     expect(screen).toContain("t('sub_title_submitted')");
     expect(screen).toMatch(/accessibilityRole="header"/);
-    expect(I18N.EN.sub_title_submitted).toBe('Request submitted');
+    expect(I18N.EN.sub_title_submitted).toBe('Request Submitted');
     for (const lang of LANGS) expect({ lang, text: typeof I18N[lang].sub_title_submitted === 'string' && I18N[lang].sub_title_submitted.trim() !== '' }).toEqual({ lang, text: true });
   });
   test('the subtitle keeps the sentence the screen already had (same key)', () => {
@@ -65,6 +65,11 @@ describe('the success animation timeline', () => {
     expect(A.frameAt(900).arcColor).toBe('rgb(48, 58, 143)');
     expect(A.frameAt(1100).arcColor).toBe('rgb(11, 101, 100)');
     expect(A.frameAt(1000).arcColor).toBe('rgb(30, 80, 122)'); // halfway
+    // the same turn, drawn as a teal ring fading in over the blue one
+    expect(A.frameAt(900).arcTeal).toBe(0);
+    expect(A.frameAt(1000).arcTeal).toBeCloseTo(0.5, 5);
+    expect(A.frameAt(1100).arcTeal).toBe(1);
+    expect(A.FINAL_FRAME.arcTeal).toBe(1);
   });
   test('1000-1300 ms the fill grows 0 -> 1.06 -> 1 (it overshoots by 6 %, then settles at r 38)', () => {
     expect(A.frameAt(1000).fillRadius).toBe(0);
@@ -145,7 +150,7 @@ describe('the request card, Next Steps, the helpline card and the bottom bar', (
   });
   test('the helpline card opens tel: with the number the screen already had; no new number', () => {
     expect(screen).toContain('onPress={() => open(`tel:${EMERGENCY_TEL}`)}');
-    expect(screen).toContain('{EMERGENCY_DISPLAY}');
+    expect(screen).not.toContain('EMERGENCY_DISPLAY'); // the number itself is no longer written on the card (the Call pill dials it)
     const mock = read('data', 'mock.js');
     expect(mock).toContain("export const EMERGENCY_TEL = '+919699999065';");
     expect(mock).toContain("export const EMERGENCY_DISPLAY = '+91 96999 99065';");

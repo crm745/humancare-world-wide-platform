@@ -3,6 +3,7 @@ import { Linking, Pressable, ScrollView, View } from 'react-native';
 import { useApp } from '../../state/AppContext';
 import { apiGet } from '../../lib/api';
 import { useRetryOnRestore } from '../../lib/useRetryOnRestore';
+import { useNetwork } from '../../state/NetworkContext';
 import {
   GEONAMES_ATTRIBUTION_FALLBACK, SEARCH_DEBOUNCE_MS, describeCityError, normaliseCityText, searchCitiesCached, searchableQuery,
 } from '../../lib/citySearch';
@@ -24,8 +25,16 @@ import { COLORS } from '../../theme/colors';
 //     (a city of another country cannot be picked), and the empty message says which country was searched. Typed text is never filtered.
 //   - `structured` (Private Charter): the backend accepts a city only as a verified { geonameId }, so `city` holds the picked city; typing again
 //     clears it (the form clears it in onChangeText) until another is picked. Without `structured` (every other service) the text is the answer.
+// The "problem" kept while offline: it makes the field try again when the connection returns, and is never shown.
+const QUIET_OFFLINE = Object.freeze({ kind: 'network', retry: true, message: '' });
+
 export default function CityField({ label, required, value = '', city = null, onChangeText, onSelect, error, testID, structured = false, countryIso = '', countryName = '', restrictToCountry = false }) {
   const { t } = useApp();
+  const { isOffline } = useNetwork();
+  // Offline (or when the search cannot reach the server) the person just types: no search is made and nothing is shown about it. The field is a normal text field; the form says what it needs
+  // (a verified city) when the person continues. The search is made again by itself when the connection is back (useRetryOnRestore below).
+  const offline = useRef(isOffline);
+  useEffect(() => { offline.current = isOffline; }, [isOffline]);
   const reveal = useReveal();
   // The list gets what is left above the keyboard, at most 220 px (the top bars, the label, the field and the Continue bar take the rest).
   const listMax = useListMaxHeight({ reserved: 300, min: 110, max: 220 });
@@ -50,6 +59,7 @@ export default function CityField({ label, required, value = '', city = null, on
     if (!query) { shown.current = ''; setState('idle'); setCities([]); setProblem(null); return; }
     const key = normaliseCityText(query);
     if (shown.current === key) return; // this list is already on screen
+    if (offline.current) { shown.current = ''; setCities([]); setProblem(QUIET_OFFLINE); setState('error'); return; } // offline: no search, no message
     setState('loading');
     setProblem(null);
     searchCitiesCached(apiGet, query)
@@ -75,7 +85,8 @@ export default function CityField({ label, required, value = '', city = null, on
     clearTimeout(timer.current);
     latest.current += 1; // anything still on its way is for older text
     if (!searchableQuery(text)) { shown.current = ''; setState('idle'); setCities([]); setProblem(null); return; }
-    if (normaliseCityText(text) !== shown.current) setState('loading');
+    if (normaliseCityText(text) !== shown.current) setState(offline.current ? 'error' : 'loading');
+    if (offline.current) setProblem(QUIET_OFFLINE);
     timer.current = setTimeout(() => run(text), SEARCH_DEBOUNCE_MS);
   };
 
@@ -113,7 +124,9 @@ export default function CityField({ label, required, value = '', city = null, on
   // What is listed: the verified results, of the selected country when this field is held to it.
   const listed = suggestionsFor(cities, { countryIso, restrict: restrictToCountry, max: 10 });
   const inCountry = restrictToCountry && countryIso ? ` in ${countryName || 'the selected country'}` : '';
-  const visible = open && state !== 'idle';
+  // A failure to reach the server is never drawn as a message under the field (see above); other failures (busy, unavailable, a refused search) still are.
+  const quiet = state === 'error' && !!problem && problem.kind === 'network';
+  const visible = open && state !== 'idle' && !quiet;
   // The open list is brought into view above the keyboard (the form scrolls just enough).
   useEffect(() => {
     if (!visible) return undefined;

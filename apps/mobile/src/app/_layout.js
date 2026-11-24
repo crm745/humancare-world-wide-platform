@@ -5,7 +5,10 @@ import { View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useEffect } from 'react';
 import { useFonts } from 'expo-font';
+import { BOOT_MAX_MS, hideBootSplash } from '../lib/bootSplash';
+import { BootSplashHider } from '../components/BootSplashHider';
 // Per-weight imports so only these five font files are bundled.
 import { Inter_400Regular } from '@expo-google-fonts/inter/400Regular';
 import { Inter_500Medium } from '@expo-google-fonts/inter/500Medium';
@@ -23,6 +26,7 @@ import { KeyboardRoot } from '../components/keyboard';
 import { SystemBack } from '../components/SystemBack';
 import { useIdleSession } from '../components/IdleSessionGuard';
 import { GoogleCallbackScreen } from '../components/GoogleCallbackScreen';
+import { BootScreen } from '../components/BootScreen';
 
 function Shell() {
   const { isRTL } = useApp();
@@ -30,6 +34,7 @@ function Shell() {
   // Arabic flips the layout in place, like the prototype's .phone.rtl, without an app reload.
   return (
     <View className="flex-1 bg-canvas" style={{ direction: isRTL ? 'rtl' : 'ltr' }} {...idle.viewProps}>
+      <BootSplashHider />
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#F2F6FC' } }} />
       <SosFab />
@@ -43,10 +48,12 @@ function Shell() {
 }
 
 export default function RootLayout() {
+  // Whatever happens (a picture that never loads, an error, the Google sign-in window that has no splash), the browser's boot picture is never left up.
+  useEffect(() => { const timer = setTimeout(hideBootSplash, BOOT_MAX_MS); return () => clearTimeout(timer); }, []);
   const [fontsLoaded] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, Inter_800ExtraBold });
   // The Google popup, back from Google: it has handed its answer over (lib/googleCallback.web.js) and must NOT start the app (no splash, no Getting Started).
   if (googleCallback) return <GoogleCallbackScreen />;
-  if (!fontsLoaded) return null;
+  if (!fontsLoaded) return <BootScreen />; // the splash's picture, never an empty page, while the fonts load
   return (
     <SafeAreaProvider>
       <KeyboardRoot>

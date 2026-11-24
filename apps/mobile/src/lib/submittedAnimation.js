@@ -65,6 +65,7 @@ export function frameAt(ms) {
   return {
     arcOffset: RING.dash * (1 - arcT),
     arcColor: mix(COLORS.blue, COLORS.teal, clamp01((ms - 900) / 200)),
+    arcTeal: clamp01((ms - 900) / 200), // the same turn to teal, as the opacity of a teal ring laid over the blue one (a colour string is not reliably applied to an SVG stroke on the web)
     dotsOpacity: 1 - clamp01((ms - 800) / 200),
     fillRadius: FILL_R * fillScale,
     checkOffset: CHECK.dash * (1 - checkT),

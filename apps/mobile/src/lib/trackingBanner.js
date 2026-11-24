@@ -1,5 +1,7 @@
 // What the Tracking Details banner says, as plain functions (no React, no native modules), so every rule can be unit-tested.
 import { COLORS } from '../theme/colors';
+import { badgeFor } from './myRequestsView';
+import { toUiStatus } from './requestShape';
 import { formatDate, formatDayMonth } from './dateFormat';
 
 // ---- the title and the subtitle ----------------------------------------------------------------------------------------------
@@ -94,10 +96,9 @@ export function startMinuteTicker(onTick, { setIntervalFn = setInterval, clearIn
 
 // ---- the status colour ---------------------------------------------------------------------------------------------------------
 
-// The colour of the status value: In progress (and Scheduled) the brand blue, Submitted amber, Completed teal, Cancelled (and anything else) grey.
-// The badge on My Requests and Request Details uses the same set, so one status is one colour everywhere.
-export const STATUS_COLOR = Object.freeze({ in_progress: COLORS.primary, scheduled: COLORS.primary, submitted: '#8F4C08', completed: '#0B6564', cancelled: '#5B6B84' });
-export const statusColorOf = (status) => STATUS_COLOR[status] || STATUS_COLOR.cancelled;
+// The colour of the status value: the text colour of the shared status mapping (lib/myRequestsView.js STATUS_BADGE: submitted soft blue, in progress amber, completed green, cancelled grey), so one status
+// is one colour on Home, My Requests, Request Details and here. Anything else (an unknown status) is neutral grey.
+export const statusColorOf = (status) => badgeFor(toUiStatus(status)).fg;
 
 // ---- the spoken label ------------------------------------------------------------------------------------------------------------
 

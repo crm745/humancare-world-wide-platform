@@ -197,23 +197,24 @@ export function RowsSkeleton({ label, count = 5, lines = 2, trailing = false, ti
   );
 }
 
-// ---- Home: the active-request card ------------------------------------------------------------------------------------------------
+// ---- Home: the Active Requests section (its header and one card, in the new card's shape) ---------------------------------------------------------
 export function ActiveRequestSkeleton({ label }) {
   return (
-    <SkeletonArea label={label} style={{ marginBottom: 18 }}>
-      <View style={{ ...CARD, borderRadius: 18, padding: 14, gap: 12 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Skeleton width={120} height={16} />
-          <Skeleton width={78} height={24} radius={999} />
+    <SkeletonArea label={label} style={{ marginBottom: 18, gap: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <Skeleton width={150} height={22} />
+        <Skeleton width={26} height={22} radius={11} />
+      </View>
+      <View style={{ ...CARD, borderRadius: 18, padding: 16, gap: 14 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+          <SkeletonCircle size={44} radius={12} />
+          <View style={{ flex: 1, gap: 6 }}><Skeleton width="62%" height={18} /><Skeleton width="44%" height={15} /></View>
+          <Skeleton width={78} height={26} radius={12} />
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <SkeletonCircle size={44} radius={13} />
-          <View style={{ flex: 1, gap: 6 }}><Skeleton width="70%" height={18} /><Skeleton width="38%" height={15} /></View>
-        </View>
-        <Skeleton height={18} />
-        <View style={{ flexDirection: 'row', gap: 4 }}>{Array.from({ length: 3 }, (_, i) => <Skeleton key={i} height={5} radius={3} style={{ flex: 1 }} />)}</View>
-        <Skeleton width="30%" height={16} />
-        <Skeleton height={44} radius={12} />
+        <Skeleton height={19} />
+        <View style={{ flexDirection: 'row', gap: 5 }}>{Array.from({ length: 5 }, (_, i) => <Skeleton key={i} height={6} radius={3} style={{ flex: 1 }} />)}</View>
+        <Skeleton width="42%" height={16} />
+        <Skeleton height={46} radius={12} />
       </View>
     </SkeletonArea>
   );

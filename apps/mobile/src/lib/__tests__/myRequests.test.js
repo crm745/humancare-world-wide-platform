@@ -55,7 +55,7 @@ describe('toListItem only adds fields', () => {
   test('the only screen that uses toListItem is My Requests; the others use other helpers of requestShape, which are unchanged', () => {
     const appDir = path.join(__dirname, '../../app');
     const users = fs.readdirSync(appDir).filter((f) => f.endsWith('.js') && /import \{[^}]*\btoListItem\b[^}]*\} from '..\/lib\/requestShape'/.test(fs.readFileSync(path.join(appDir, f), 'utf8')));
-    expect(users).toEqual(['my-requests.js']);
+    expect(users).toEqual(['home.js', 'my-requests.js']); // Home builds its Active Requests section from the same list items (lib/activeRequests.js)
     expect(read('../../app/corporate-dashboard.js')).toContain("import { toUiStatus, serviceKeyFromTitle } from '../lib/requestShape';");
     expect(toUiStatusOf('in_progress')).toBe('progress');
   });
@@ -104,7 +104,7 @@ describe('the step agrees with the Tracking screen, for every status', () => {
 
 describe('the badge', () => {
   test.each([
-    ['submitted', '#FDF0DA', '#8F4C08', 'Submitted'], ['in_progress', COLORS.primarySoft, COLORS.primary, 'In Progress'], ['completed', '#E0F5F4', '#0B6564', 'Completed'],
+    ['submitted', COLORS.primarySoft, COLORS.primary, 'Submitted'], ['in_progress', '#FDF0DA', '#8F4C08', 'In Progress'], ['completed', '#E0F5F4', '#0B6564', 'Completed'],
     ['cancelled', '#EEF1F6', '#5B6B84', 'Cancelled'],
   ])('%s', (status, bg, fg, label) => {
     const v = cardView(item({ status }), t);
@@ -289,12 +289,12 @@ describe('the accessibility label of a card', () => {
 describe('the status chips', () => {
   const LIST = [item(), item({ status: 'in_progress' }), item({ status: 'in_progress' }), item({ status: 'completed' }), item({ status: 'cancelled' }), item({ status: 'on_hold' })];
   test('counts come from the whole loaded list', () => {
-    expect(statusCounts(LIST)).toEqual({ all: 6, submitted: 1, progress: 2, completed: 1, cancelled: 1 });
-    expect(statusCounts([])).toEqual({ all: 0, submitted: 0, progress: 0, completed: 0, cancelled: 0 });
+    expect(statusCounts(LIST)).toEqual({ all: 6, active: 3, submitted: 1, progress: 2, completed: 1, cancelled: 1 });
+    expect(statusCounts([])).toEqual({ all: 0, active: 0, submitted: 0, progress: 0, completed: 0, cancelled: 0 });
   });
   test('All, Submitted, In progress, Completed and, last, Cancelled', () => {
-    expect(screen).toContain("const STATUSES = ['all', 'submitted', 'progress', 'completed', 'cancelled'];");
-    expect(screen).toContain("t(s === 'all' ? 'chip_all' : s === 'progress' ? 'mr_chip_progress' : 'status_' + s)");
+    expect(screen).toContain("const STATUSES = ['all', 'active', 'submitted', 'progress', 'completed', 'cancelled'];");
+    expect(screen).toContain("t(s === 'all' ? 'chip_all' : s === 'active' ? 'lbl_active' : s === 'progress' ? 'mr_chip_progress' : 'status_' + s)");
     expect([t('chip_all'), t('status_submitted'), t('mr_chip_progress'), t('status_completed'), t('status_cancelled')]).toEqual(['All', 'Submitted', 'In progress', 'Completed', 'Cancelled']);
   });
   test('the counts follow the service and date filters (a chip shows what tapping it lists), but not the search', () => {
@@ -308,7 +308,7 @@ describe('the status chips', () => {
       { id: 'REQ-3', service: 'tele', status: 'completed', date: '2026-11-13' },
     ];
     expect(statusCounts(applyFilters(items, DEFAULT_FILTERS, '2026-11-14'))).toMatchObject({ all: 3, submitted: 2, completed: 1 });
-    expect(statusCounts(applyFilters(items, { ...DEFAULT_FILTERS, service: 'ground' }, '2026-11-14'))).toEqual({ all: 0, submitted: 0, progress: 0, completed: 0, cancelled: 0 });
+    expect(statusCounts(applyFilters(items, { ...DEFAULT_FILTERS, service: 'ground' }, '2026-11-14'))).toEqual({ all: 0, active: 0, submitted: 0, progress: 0, completed: 0, cancelled: 0 });
     expect(statusCounts(applyFilters(items, { ...DEFAULT_FILTERS, service: 'homecare' }, '2026-11-14'))).toMatchObject({ all: 2, submitted: 2, completed: 0 });
   });
   test('the filter sheet does not scroll: it is given all the room the screen leaves, the other sheets keep their 70% limit', () => {
@@ -418,7 +418,7 @@ describe('the list and its states', () => {
   });
   test('the status param from the Profile overview still works', () => {
     expect(screen).toContain("useState(params.status || 'all')");
-    expect(screen).toContain("(status === 'active' ? ['submitted', 'progress'].includes(r.status) : r.status === status)");
+    expect(screen).toContain("(status === 'active' ? isActiveRequest(r) : r.status === status)"); // the ONE definition of "active" (lib/myRequestsView.js)
   });
   test('the bottom navigation and the filter sheet are as they were', () => {
     expect(screen).toContain('<BottomNav />');

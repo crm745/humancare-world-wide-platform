@@ -310,15 +310,18 @@ describe('the blue part', () => {
 });
 
 describe('the status colours', () => {
-  test('In progress and Scheduled the brand blue, Submitted amber, Completed teal, Cancelled grey', () => {
-    expect(B.statusColorOf('in_progress')).toBe('#303A8F');
-    expect(B.statusColorOf('scheduled')).toBe('#303A8F');
-    expect(B.statusColorOf('submitted')).toBe('#8F4C08');
+  test('Submitted soft blue, In progress amber, Completed green, Cancelled grey (the shared mapping)', () => {
+    expect(B.statusColorOf('submitted')).toBe('#303A8F');
+    expect(B.statusColorOf('in_progress')).toBe('#8F4C08');
     expect(B.statusColorOf('completed')).toBe('#0B6564');
     expect(B.statusColorOf('cancelled')).toBe('#5B6B84');
   });
-  test('anything else reads as the quiet grey', () => {
-    for (const status of ['', undefined, null, 'nonsense']) expect(B.statusColorOf(status)).toBe('#5B6B84');
+  test('anything else, an unknown status included (a Case-only status such as "scheduled"), reads as the quiet grey', () => {
+    for (const status of ['', undefined, null, 'nonsense', 'scheduled']) expect(B.statusColorOf(status)).toBe('#5B6B84');
+  });
+  test('there is no second colour table in the banner', () => {
+    expect(B.STATUS_COLOR).toBeUndefined();
+    expect(fs.readFileSync(path.join(__dirname, '..', 'trackingBanner.js'), 'utf8')).not.toMatch(/#8F4C08|#0B6564/);
   });
   test('it is the colour of the app-wide status badge, so one status is one colour everywhere', () => {
     for (const status of ['in_progress', 'submitted', 'completed', 'cancelled']) {

@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state/AppContext';
 import { LOGO, SPLASH_BG } from '../data/images';
 import { navReplace } from '../lib/nav';
+import { hideBootSplash } from '../lib/bootSplash';
 import { MIN_SPLASH_MS, SESSION_TIMEOUT_MS, splashDecision } from '../lib/splash';
 import { COLORS } from '../theme/colors';
 
@@ -40,6 +41,8 @@ export default function Splash() {
   const [intro] = useState(() => new Animated.Value(0));
   const [sweep] = useState(() => new Animated.Value(0));
   const [trackWidth, setTrackWidth] = useState(0);
+  const [loaded, setLoaded] = useState({ bg: false, logo: false }); // the browser's boot picture stays until both pictures of this splash are drawn
+  useEffect(() => { if (loaded.bg && loaded.logo) hideBootSplash(); }, [loaded]);
   const [minElapsed, setMinElapsed] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
   const navigated = useRef(false);
@@ -90,7 +93,7 @@ export default function Splash() {
   return (
     <View className="flex-1" style={{ backgroundColor: BG_COLOR }}>
       {/* Sized to the screen: in the browser an image given only top/left/right/bottom shows at its own size. */}
-      <Image source={SPLASH_BG} accessible={false} resizeMode="cover" style={{ position: 'absolute', top: 0, left: 0, width: screenW, height: screenH }} />
+      <Image source={SPLASH_BG} accessible={false} resizeMode="cover" onLoad={() => setLoaded((s) => ({ ...s, bg: true }))} onError={() => setLoaded((s) => ({ ...s, bg: true }))} style={{ position: 'absolute', top: 0, left: 0, width: screenW, height: screenH }} />
       <View className="flex-1 items-center justify-center" style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}>
         <Animated.View
           style={{
@@ -100,7 +103,7 @@ export default function Splash() {
             transform: [{ scale: intro.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }],
           }}
         >
-          <Image source={LOGO} style={logoSize(screenW)} resizeMode="contain" />
+          <Image source={LOGO} style={logoSize(screenW)} resizeMode="contain" onLoad={() => setLoaded((s) => ({ ...s, logo: true }))} onError={() => setLoaded((s) => ({ ...s, logo: true }))} />
           <Text style={TAGLINE_STYLE} maxFontSizeMultiplier={1.3}>{t('splash_tagline')}</Text>
           <View style={{ width: '50%', maxWidth: 200, marginTop: 28 }}>
             <View

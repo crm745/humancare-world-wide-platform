@@ -48,7 +48,7 @@ export default function MyDocuments() {
   return (
     <Screen>
       <TopBar title={t('my_documents')} />
-      <Body contentClassName="px-[18px] py-4" refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      <Body contentClassName="px-[18px] py-4" noScrollWhenFits={!loading && !!failed} refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {loading && gate.visible ? <RowsSkeleton label={t('sk_loading_documents')} count={5} lines={2} trailing /> : null}
 
         {!loading && failed ? <LoadFailure titleKey="lf_title_documents" error={error} message={t('docs_load_failed')} onRetry={retry} /> : null}

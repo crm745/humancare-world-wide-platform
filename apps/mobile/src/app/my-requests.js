@@ -8,7 +8,7 @@ import { DEFAULT_FILTERS, applyFilters } from '../lib/filters';
 import { apiGet } from '../lib/api';
 import { goBack } from '../lib/nav';
 import { toListItem } from '../lib/requestShape';
-import { cardView, statusCounts } from '../lib/myRequestsView';
+import { cardView, isActiveRequest, statusCounts } from '../lib/myRequestsView';
 import { cardSpec, scaleFor } from '../lib/myRequestsLayout';
 import { BottomNav, Screen, useScrollToTopOnTabTap } from '../components/layout';
 import { useFabScrollPad } from '../components/sos/hooks';
@@ -20,15 +20,17 @@ import { Reveal } from '../components/skeleton/Reveal';
 import { useSkeletonGate } from '../components/skeleton/hooks';
 import { RequestsSkeleton } from '../components/skeleton/screens';
 import { useResource } from '../lib/useResource';
+import { useFitScroll } from '../lib/useFitScroll';
 import { RequestCard } from '../components/requests/RequestCard';
+import { ActiveRequestCard } from '../components/home/ActiveRequestCard';
 import { RequestsHeader } from '../components/requests/RequestsHeader';
 
 const TAB_BAR = 64;
-const STATUSES = ['all', 'submitted', 'progress', 'completed', 'cancelled'];
+const STATUSES = ['all', 'active', 'submitted', 'progress', 'completed', 'cancelled'];
 const FILTER_SERVICES = Object.entries(SERVICE_LABELS).map(([value, labelKey]) => ({ value, labelKey }));
 
 // `status` param comes from the Profile overview: all | active | completed.
-// "active" (submitted + in progress) has no chip of its own, so no chip is highlighted for it.
+// "active" (submitted + in progress: isActiveRequest) has its own chip, which Home's "All Active Requests" opens selected.
 export default function MyRequests() {
   const { t, toast, isRTL } = useApp();
   const insets = useSafeAreaInsets();
@@ -54,6 +56,7 @@ export default function MyRequests() {
     onRefreshError: () => toast(t('sk_refresh_failed')),
   });
   const requests = rows || [];
+  const fit = useFitScroll(!!error && !rows); // the "Couldn't load" view does not scroll when it fits
   const gate = useSkeletonGate(loading);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -62,13 +65,13 @@ export default function MyRequests() {
   // "All" reads 0, not the total. (Typing in the search box does not change the numbers; it only narrows the list.)
   const filtered = applyFilters(requests, filters, today);
   const items = filtered.filter((r) => {
-    const statusOk = status === 'all' || (status === 'active' ? ['submitted', 'progress'].includes(r.status) : r.status === status);
+    const statusOk = status === 'all' || (status === 'active' ? isActiveRequest(r) : r.status === status);
     const searchOk = !q || r.id.toLowerCase().includes(q) || cardView(r, t).name.toLowerCase().includes(q) || r.serviceType.toLowerCase().includes(q);
     return statusOk && searchOk;
   });
 
   const counts = statusCounts(filtered);
-  const chips = STATUSES.map((s) => ({ value: s, count: counts[s], label: t(s === 'all' ? 'chip_all' : s === 'progress' ? 'mr_chip_progress' : 'status_' + s) }));
+  const chips = STATUSES.map((s) => ({ value: s, count: counts[s], label: t(s === 'all' ? 'chip_all' : s === 'active' ? 'lbl_active' : s === 'progress' ? 'mr_chip_progress' : 'status_' + s) }));
 
   return (
     <Screen>
@@ -97,13 +100,17 @@ export default function MyRequests() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        scrollEnabled={fit.scrollEnabled} onLayout={fit.onLayout} onContentSizeChange={fit.onContentSizeChange}
       >
         {loading && gate.visible && <RequestsSkeleton label={t('sk_loading_requests')} />}
         {error && !rows && <LoadFailure titleKey="lf_title_requests" error={error} onRetry={reload} />}
         {!loading && rows && (
         <Reveal animate={gate.wasShown} style={{ gap: L.listGap }}>
         {items.map((r) => (
-          <RequestCard key={r.id} item={r} t={t} isRTL={isRTL} isNew={highlight.includes(r.rawId)} onPress={() => router.push({ pathname: '/request-details', params: { id: r.rawId } })} />
+          // An active request (submitted / in progress) is drawn with the Active Requests card, in All and in Active; completed and cancelled ones keep their own card.
+          isActiveRequest(r)
+            ? <ActiveRequestCard key={r.id} item={r} isNew={highlight.includes(r.rawId)} onOpen={() => router.push({ pathname: '/request-details', params: { id: r.rawId } })} onTrack={() => router.push({ pathname: '/request-tracking', params: { id: r.rawId } })} />
+            : <RequestCard key={r.id} item={r} t={t} isRTL={isRTL} isNew={highlight.includes(r.rawId)} onPress={() => router.push({ pathname: '/request-details', params: { id: r.rawId } })} />
         ))}
         {requests.length === 0 && (
           <View style={{ alignItems: 'center', paddingHorizontal: 20, paddingVertical: 50 }}>

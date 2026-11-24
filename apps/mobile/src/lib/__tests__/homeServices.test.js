@@ -262,10 +262,10 @@ describe('the Home grid: ALWAYS three columns, at every width', () => {
 
 describe('what was left alone', () => {
   test('Home keeps its header, banner, active request card, SOS bar and bottom navigation', () => {
-    for (const piece of ['<HomeHeader hasUnread={hasUnread}', '<BannerCarousel', '<ActiveRequestCard', '<ActiveRequestSkeleton', '<SosBar bottom={TAB_BAR + insets.bottom}', '<BottomNav />', '<Greeting']) {
+    for (const piece of ['<HomeHeader hasUnread={hasUnread}', '<BannerCarousel', '<ActiveRequestsSection', '<ActiveRequestSkeleton', '<SosBar bottom={TAB_BAR + insets.bottom}', '<BottomNav />', '<Greeting']) {
       expect(home).toContain(piece);
     }
-    expect(home).toContain("router.push({ pathname: '/request-tracking', params: { id: current.id } })");
+    expect(home).toContain("router.push({ pathname: '/request-tracking', params: { id: item.rawId } })");
   });
   test('All Services keeps its header and bottom navigation, and its card design (its SOS is the floating button now)', () => {
     expect(all).toContain("<TopBar title={t('filter_svc_all')} />");

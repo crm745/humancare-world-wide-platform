@@ -184,6 +184,7 @@ describe('the service, its base name, and the travel and transfer type', () => {
   });
 });
 
+// Request Details uses the shared status mapping (myRequestsView.STATUS_BADGE: submitted soft blue, in progress amber, completed green, cancelled grey), so its badge is My Requests' badge.
 describe('the status badge matches My Requests', () => {
   test.each(['submitted', 'in_progress', 'completed', 'cancelled'])('%s has My Requests\' colours and words', (status) => {
     const mine = cardView({ id: 'REQ-1', display: '', status: status === 'in_progress' ? 'progress' : status, rawStatus: status, serviceKey: 'homecare', serviceType: 'Home Healthcare', origin: '', destination: '' }, t);

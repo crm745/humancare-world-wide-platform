@@ -168,7 +168,7 @@ export default function PersonalDetails() {
   return (
     <Screen>
       <TopBar title={t('prof_personal')} />
-      <Body contentClassName="px-[18px] py-4" refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      <Body contentClassName="px-[18px] py-4" noScrollWhenFits={!loading && !!failed} refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {loading && gate.visible ? <FormSkeleton label={t('sk_loading_profile')} fields={6} /> : null}
 
         {!loading && failed ? <LoadFailure titleKey="lf_title_profile" message={t('pd_load_failed')} onRetry={retry} /> : null}

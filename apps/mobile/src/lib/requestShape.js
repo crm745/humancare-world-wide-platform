@@ -43,6 +43,7 @@ export function toListItem(request) {
     date: (request.createdAt || '').slice(0, 10),
     display: formatDisplayDate(request.createdAt),
     rawStatus: request.status,
+    raw: request, // the request as the API sent it: the Active Requests card builds its workflow steps from it (lib/activeRequests.js)
     serviceKey: request.serviceKey || null,
     serviceType: request.serviceType || '',
     origin: request.origin || '',
