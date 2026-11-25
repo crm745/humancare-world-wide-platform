@@ -2,14 +2,17 @@
 // Private Charter and the legacy Bitrix Lead integration. No database and no network: Prisma and the Bitrix client
 // are mocked. The retry tests give the sweep fixture rows and evaluate the `where` it sends with SQL semantics
 // (NULL never matches `<>`), so they check WHICH records would be retried, not just the shape of the filter.
-jest.mock('../../src/db/prisma', () => ({
-  prisma: {
+jest.mock('../../src/db/prisma', () => {
+  const prisma = {
     serviceRequest: { create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     case: { create: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     caseStageEvent: { create: jest.fn() },
     user: { findUnique: jest.fn() },
-  },
-}));
+  };
+  // createRequest saves the request, its Case and its first stage event in one transaction: the mock runs the callback on itself (the recorder keeps what each call would have written).
+  prisma.$transaction = async (callback) => callback(prisma);
+  return { prisma };
+});
 jest.mock('../../src/modules/bitrix/bitrix.service', () => ({
   createLead: jest.fn(),
   sendMedicalReportToBitrix: jest.fn(),

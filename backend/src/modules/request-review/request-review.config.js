@@ -85,6 +85,7 @@ const REASON_MAX = 1000;
 const PATIENT_DOCUMENT_SELECT = {
   id: true, originalName: true, sizeBytes: true, uploadedAt: true, replacesId: true, supersededAt: true,
   scanStatus: true, reviewStatus: true, rejectionReason: true,
+  clientUploadId: true, // the app's own random id for the upload (Phase 5): lets the app recognise a document it sent when the answer was lost
 };
 
 module.exports = {

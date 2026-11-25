@@ -60,6 +60,8 @@ function makeDb({ invoices = [makeInvoice()], payments = [] } = {}) {
       state.locks.push({ table: /FROM (\w+)/.exec(strings.join('?'))[1], id: values[0], inTx: db.inTx, tx: db.txCount });
       return [];
     },
+    // requireAuth looks the patient up once (a retired account is refused at once); these tests have no such account row.
+    user: { findUnique: jest.fn(async () => null) },
     invoice: { findUnique: jest.fn(async ({ where }) => clone(state.invoices.get(where.id)) || null) },
     payment: {
       findUnique: jest.fn(async ({ where }) => clone(state.payments.find((p) => p.id === where.id)) || null),

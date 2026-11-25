@@ -68,14 +68,14 @@ describe('1-2. a tap opens the preview (Request Details and My Documents use the
     expect(push).not.toHaveBeenCalled();
   });
   test('both screens call it', () => {
-    expect(read('app/request-details.js')).toContain('onOpen={() => openDocumentPreview(router.push, doc)}');
+    expect(read('app/request-details.js')).toContain("onOpen={() => { if (isOffline) return; openDocumentPreview(router.push, doc); }}"); // offline: nothing starts (the bottom message says why)
     expect(read('app/my-documents.js')).toContain('openDocumentPreview(router.push, doc)');
   });
   test('9. and neither screen can reach the share sheet: no Sharing, no Share.share for a document, no download-and-share', () => {
     const documents = code('app/my-documents.js');
     expect(documents).not.toMatch(/Sharing|shareAsync|Share\.share|downloadDocument|downloadAndShare|openDocument\(/);
-    const details = code('app/request-details.js').replace(/const shareRequest[\s\S]*?\n {2}};\n/, ''); // the request's own "Share" action is a different feature
-    expect(details).not.toMatch(/Sharing\.|shareAsync|downloadDocument/);
+    const details = code('app/request-details.js'); // (the request's own "Share" action no longer exists)
+    expect(details).not.toMatch(/Sharing\.|shareAsync/);
     expect(details).not.toMatch(/openDocument\(`/);
     expect(code('lib/documentPreview.js')).not.toMatch(/Sharing|shareAsync|Share\.share/);
   });
@@ -150,7 +150,7 @@ describe('5-6. loading, and a document that cannot be loaded', () => {
   });
   test('when it fails: our message for the reason (never the server\'s sentence), and Try again', () => {
     expect(screen).toContain("body = (\n      <Message title={t(downloadErrorInfo(file.error).key)}>");
-    expect(screen).toContain("<ActionButton label={t('docs_try_again')} onPress={() => { setBroken(false); file.retry(); }} />");
+    expect(screen).toContain("<ActionButton label={t('docs_try_again')} onPress={() => { if (isOffline) return; setBroken(false); file.retry(); }} />"); // Try again is a tap, and offline it does nothing (the bottom message says why)
   });
   test('a file that downloaded but cannot be drawn is an error too, not a blank screen', () => {
     expect(screen).toContain('onFailed={() => setBroken(true)}');
@@ -170,7 +170,7 @@ describe('7. a format that cannot be previewed', () => {
   const screen = read('app/document-preview.js');
   test('it says so, and offers Share: nothing is downloaded and the share sheet does not open by itself', () => {
     expect(screen).toContain("enabled: kind !== 'unsupported' && Boolean(id)");
-    expect(screen).toContain("body = <Message title={t('dp_unsupported_title')} text={t('dp_unsupported_text')}><ActionButton label={t('dp_share')} onPress={share} busy={sharing} /></Message>;");
+    expect(screen).toContain("body = <Message title={t('dp_unsupported_title')} text={t('dp_unsupported_text')}><ActionButton label={t('dp_share')} onPress={share} busy={sharing} disabled={isOffline} hint={t('net_offline_text')} /><NeedsInternet /></Message>;");
   });
   test('without a PDF viewer in the build (a phone build made before it was added) the PDF says so, and Share is the intentional way out', () => {
     expect(screen).toContain("body = <Message title={t('dp_unsupported_title')} text={t('dp_pdf_unavailable')} />;");
@@ -233,9 +233,9 @@ describe('10. Android back and the app\'s back button', () => {
 
 describe('the rest of the app is as it was', () => {
   test('the request summary download, document upload and the download of other things are untouched', () => {
-    expect(read('lib/download.js')).toContain('export async function downloadAndShare(path, filename) {');
+    expect(read('lib/download.js')).not.toContain('downloadAndShare'); // every download is the authenticated one now
     expect(read('lib/download.js')).toContain('export async function downloadDocument(path, filename');
-    expect(read('app/request-details.js')).toContain("downloadAndShare(`/requests/me/${request.id}/summary`");
+    expect(read('app/request-details.js')).toContain("downloadDocument(`/requests/me/${request.id}/summary`");
   });
   test('the preview is a protected route (signed-in only) and the floating SOS button stays off it', () => {
     expect(read('lib/authGuard.js')).not.toContain("'/document-preview'");

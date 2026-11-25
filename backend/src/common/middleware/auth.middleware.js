@@ -1,5 +1,9 @@
 const jwt = require('jsonwebtoken');
 const { PASSWORD_CHANGE_REQUIRED } = require('../constants/auth.constants');
+const { prisma } = require('../../db/prisma');
+const sessions = require('../../modules/auth/session.service');
+
+const SESSION_ENDED = 'Your session has ended. Please log in again.';
 
 // No cookie-parser dependency for the sake of one cookie — this reads it straight
 // off the raw Cookie header. Only the admin portal sets this cookie (see
@@ -17,42 +21,65 @@ function getCookieToken(req, name) {
 // such a token, so a restricted session can do nothing but change its password — new
 // routes included, with no per-route work. Patient and admin tokens never carry `pwc`.
 function requireAuth(allowedRoles, options = {}) {
-  return function (req, res, next) {
-    const header = req.headers.authorization;
-    const token = header && header.startsWith('Bearer ') ? header.slice('Bearer '.length) : getCookieToken(req, 'hc_admin_token');
-    if (!token) {
-      return res.status(401).json({ error: 'Missing or malformed Authorization header' });
-    }
-
-    const secret = process.env.JWT_ACCESS_SECRET;
-    if (!secret) throw new Error('JWT_ACCESS_SECRET is not set');
-
-    let payload;
+  return async function (req, res, next) {
     try {
-      payload = jwt.verify(token, secret);
+      const header = req.headers.authorization;
+      const token = header && header.startsWith('Bearer ') ? header.slice('Bearer '.length) : getCookieToken(req, 'hc_admin_token');
+      if (!token) {
+        return res.status(401).json({ error: 'Missing or malformed Authorization header' });
+      }
+
+      const secret = process.env.JWT_ACCESS_SECRET;
+      if (!secret) throw new Error('JWT_ACCESS_SECRET is not set');
+
+      let payload;
+      try {
+        payload = jwt.verify(token, secret);
+      } catch (err) {
+        const message = err.name === 'TokenExpiredError' ? 'Token expired' : 'Invalid token';
+        return res.status(401).json({ error: message });
+      }
+
+      // Admin sessions are authenticated by requireAdminSession / requireAdminAuth, never here. A
+      // legacy password-only Admin token (role 'admin', signed with the shared secret) is refused
+      // even when no role list is given, so routes open to any role (/auth/me, /notifications)
+      // cannot be reached with one.
+      if (payload.role === 'admin') {
+        return res.status(401).json({ error: 'Invalid token' });
+      }
+
+      if (allowedRoles && !allowedRoles.includes(payload.role)) {
+        return res.status(403).json({ error: 'Not authorized for this action' });
+      }
+
+      if (payload.pwc === true && !options.allowPasswordChangePending) {
+        return res.status(403).json(PASSWORD_CHANGE_REQUIRED);
+      }
+
+      // A patient who retired their account (POST /auth/me/delete/confirm) is refused at once, not when their 15-minute access token runs out. One primary-key
+      // lookup, patients only; an account that does not exist (a token signed for an id with no row) is not refused here, exactly as before.
+      if (payload.role === 'patient') {
+        const account = await prisma.user.findUnique({ where: { id: payload.sub }, select: { deletedAt: true } });
+        if (account && account.deletedAt) return res.status(401).json({ error: 'Your session has ended. Please log in again.' });
+      }
+
+      // Patient and corporate sessions are per device (session.service.js): the token's session must be live (not signed out, not idle for 30 minutes, not past 7 days). A token from before sessions
+      // existed has no `sid`: accepted outside production and for at most its own 15 minutes; refused in production unless AUTH_ALLOW_LEGACY_TOKENS=true.
+      if (payload.role === 'patient' || payload.role === 'corporate') {
+        if (payload.sid !== undefined) {
+          if (!sessions.sessionsAvailable()) return res.status(401).json({ error: SESSION_ENDED });
+          const verdict = await sessions.checkAccessSession(payload);
+          if (!verdict.ok) return res.status(401).json({ error: SESSION_ENDED, code: verdict.reason });
+        } else if (!sessions.legacyAccessTokensAllowed()) {
+          return res.status(401).json({ error: SESSION_ENDED, code: 'session_upgrade_required' });
+        }
+      }
+
+      req.user = { id: payload.sub, role: payload.role, corporateId: payload.corporateId ?? null, adminRole: payload.adminRole ?? null, sessionId: payload.sid ?? null };
+      next();
     } catch (err) {
-      const message = err.name === 'TokenExpiredError' ? 'Token expired' : 'Invalid token';
-      return res.status(401).json({ error: message });
+      next(err);
     }
-
-    // Admin sessions are authenticated by requireAdminSession / requireAdminAuth, never here. A
-    // legacy password-only Admin token (role 'admin', signed with the shared secret) is refused
-    // even when no role list is given, so routes open to any role (/auth/me, /notifications)
-    // cannot be reached with one.
-    if (payload.role === 'admin') {
-      return res.status(401).json({ error: 'Invalid token' });
-    }
-
-    if (allowedRoles && !allowedRoles.includes(payload.role)) {
-      return res.status(403).json({ error: 'Not authorized for this action' });
-    }
-
-    if (payload.pwc === true && !options.allowPasswordChangePending) {
-      return res.status(403).json(PASSWORD_CHANGE_REQUIRED);
-    }
-
-    req.user = { id: payload.sub, role: payload.role, corporateId: payload.corporateId ?? null, adminRole: payload.adminRole ?? null };
-    next();
   };
 }
 

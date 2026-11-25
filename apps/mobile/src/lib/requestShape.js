@@ -1,5 +1,7 @@
 import SERVICES from '../data/services.json';
 import { formatDate } from './dateFormat';
+import { isNewHomeRequest } from './homeHealthcare';
+import { isNewCorporateRequest } from './corporateMedical';
 
 // Backend uses 'in_progress'; the UI (Pill, filters, i18n keys) uses 'progress'.
 const STATUS_TO_UI = { submitted: 'submitted', in_progress: 'progress', completed: 'completed', cancelled: 'cancelled' };
@@ -11,6 +13,13 @@ export const isMortalRequest = (request) => /^mortal(_|$)/.test(request?.service
 
 export function toUiStatus(backendStatus) {
   return STATUS_TO_UI[backendStatus] || backendStatus;
+}
+
+// A stored service name ("Medical Escort (Commercial Airlines) — Stretcher (CAS)") as the one name people see ("Commercial Airlines"): no " — variant" and no "Medical Escort (...)" wrapper.
+export function storedServiceName(type) {
+  const base = String(type || '').split(' — ')[0].trim();
+  const escort = /^Medical Escort \((.+)\)$/.exec(base);
+  return (escort ? escort[1] : base).trim();
 }
 
 export function serviceKeyFromTitle(title) {
@@ -34,6 +43,7 @@ export function toListItem(request) {
     date: (request.createdAt || '').slice(0, 10),
     display: formatDisplayDate(request.createdAt),
     rawStatus: request.status,
+    raw: request, // the request as the API sent it: the Active Requests card builds its workflow steps from it (lib/activeRequests.js)
     serviceKey: request.serviceKey || null,
     serviceType: request.serviceType || '',
     origin: request.origin || '',
@@ -42,6 +52,13 @@ export function toListItem(request) {
     // Private Charter only: how the backend says the request is tracked ("five_stage" | null) and, for five_stage, the stage it is at.
     trackingFlow: request.trackingFlow === 'five_stage' ? 'five_stage' : null,
     trackingStage: typeof request.trackingStage === 'string' ? request.trackingStage : null,
+    // Mortal Remains only: the card names the deceased person (the request's patient name). Every other service's item is exactly as before.
+    ...(isMortalRequest(request) ? { patientName: request.patientName || '' } : {}),
+    // Home Healthcare only: whether this is a NEW-format request (key homecare and a complete v1 description), so its card draws no route. Every other
+    // service's item is exactly as before.
+    ...(request.serviceKey === 'homecare' ? { homeFormat: isNewHomeRequest(request) } : {}),
+    // Corporate Medical Solutions only: the company of a NEW-format request, so its card can name it (an older one has none). Every other service's item is exactly as before.
+    ...(request.serviceKey === 'corporate' && isNewCorporateRequest(request) ? { corporateCompany: request.companyName } : {}),
   };
 }
 
@@ -51,7 +68,8 @@ export function toListItem(request) {
 // language the app is showing now); everything else is left as stored, byte for byte, so an old
 // label, a typed note or an odd comma is never reworded. Same rule as the backend's
 // care-level.js (PDF and Bitrix). `t` is the app's translate function.
-const CARE_LEVEL_KEYS = ['care_icu', 'care_stable', 'care_ambulatory', 'care_na'];
+// Plus Commercial Air's own four (ICU, Ventilated, Tracheostomy, ECMO).
+const CARE_LEVEL_KEYS = ['care_icu', 'care_stable', 'care_ambulatory', 'care_na', 'crit_icu', 'crit_ventilated', 'crit_tracheostomy', 'crit_ecmo'];
 
 export function careLevelText(value, t) {
   if (typeof value !== 'string' || value === '') return value;

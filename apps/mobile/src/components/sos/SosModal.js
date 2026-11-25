@@ -1,15 +1,17 @@
-import { Linking, Modal, Pressable, View } from 'react-native';
+import { Modal, Pressable, View } from 'react-native';
 import { Bell } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
 import { EMERGENCY_DISPLAY, EMERGENCY_TEL } from '../../data/mock';
 import { emergencyUrl } from '../../lib/sos';
 import { Button, Text } from '../ui';
+import { useOpenLink } from '../../lib/useOpenLink';
 
 // The app's one SOS confirmation, unchanged: ask first, then dial the 24/7 line. The red banner on Home and the floating
 // SOS button both open it, so both start exactly the same emergency flow.
 export function SosModal({ visible, onClose }) {
   const { t } = useApp();
-  const call = () => { onClose(); Linking.openURL(emergencyUrl(EMERGENCY_TEL)); };
+  const open = useOpenLink();
+  const call = () => { onClose(); open(emergencyUrl(EMERGENCY_TEL)); };
   // The number is set in bold inside the sentence, wherever the language puts it.
   const [before, after] = t('sos_modal_body', { number: EMERGENCY_DISPLAY }).split(EMERGENCY_DISPLAY);
   return (

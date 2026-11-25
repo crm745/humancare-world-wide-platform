@@ -193,7 +193,8 @@ describe('User existence on PATCH', () => {
   test('validation runs first: a bad body is 400 even for such a patient, with no lookup', async () => {
     const res = await patch(GHOST, { nope: true });
     expect(res.status).toBe(400);
-    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    // The only lookup is requireAuth's own (a retired account is refused at once); the preferences code makes none before it has validated the body.
+    expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
   });
 });
 

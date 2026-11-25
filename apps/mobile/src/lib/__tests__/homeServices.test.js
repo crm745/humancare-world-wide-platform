@@ -29,7 +29,7 @@ describe('the eight top-level services, in the approved order', () => {
     expect(HOME_SERVICES.map((s) => s.key)).toEqual(['air', 'tele', 'homecare', 'ground', 'mortal', 'corporate', 'marine', 'medvalue']);
   });
   test('Home draws this list, and a "More" tile as the ninth cell', () => {
-    expect(home).toContain("import { HOME_SERVICES, SERVICE_LABELS } from '../data/mock';");
+    expect(home).toContain("import { HOME_SERVICES } from '../data/mock';");
     expect(home).toContain('const HOME_TILES = HOME_SERVICES;');
     expect(home).toContain('services={HOME_TILES}');
     expect(grid).toContain("const items = [...services, { key: '__more', more: true }];");
@@ -122,11 +122,13 @@ describe('Marine Medical Safety and Medical Value Travel are full services, with
   test('no tile on Home or All Services is a placeholder any more', () => {
     expect(HOME_SERVICES.filter((s) => s.placeholder)).toEqual([]);
   });
-  test.each(NEW)('%s has its service page: a title, a description, three figures and four things it includes', (key, title) => {
+  // Marine Medical Safety's page shows no figures: its "100+ Ports Covered", "21+ Years Experience" and "24/7 Tele-Medical Advice" were all removed because the official
+  // website does not support them (the list stays, empty, because the page draws whatever list the service has). Medical Value Travel keeps its three.
+  test.each(NEW)('%s has its service page: a title, a description, its figures and four things it includes', (key, title) => {
     const svc = services[key];
     expect(svc.title).toBe(title);
     expect(svc.desc.length).toBeGreaterThan(60);
-    expect(svc.stats).toHaveLength(3);
+    expect(svc.stats).toHaveLength(key === 'marine' ? 0 : 3);
     for (const st of svc.stats) { expect(st.value).toBeTruthy(); expect(st.label).toBeTruthy(); }
     expect(svc.features).toHaveLength(4);
   });
@@ -260,10 +262,10 @@ describe('the Home grid: ALWAYS three columns, at every width', () => {
 
 describe('what was left alone', () => {
   test('Home keeps its header, banner, active request card, SOS bar and bottom navigation', () => {
-    for (const piece of ['<HomeHeader hasUnread={hasUnread}', '<BannerCarousel', '<ActiveRequestCard', '<ActiveRequestSkeleton', '<SosBar bottom={TAB_BAR + insets.bottom}', '<BottomNav />', '<Greeting']) {
+    for (const piece of ['<HomeHeader hasUnread={hasUnread}', '<BannerCarousel', '<ActiveRequestsSection', '<ActiveRequestSkeleton', '<SosBar bottom={TAB_BAR + insets.bottom}', '<BottomNav />', '<Greeting']) {
       expect(home).toContain(piece);
     }
-    expect(home).toContain("router.push({ pathname: '/request-tracking', params: { id: current.id } })");
+    expect(home).toContain("router.push({ pathname: '/request-tracking', params: { id: item.rawId } })");
   });
   test('All Services keeps its header and bottom navigation, and its card design (its SOS is the floating button now)', () => {
     expect(all).toContain("<TopBar title={t('filter_svc_all')} />");

@@ -77,7 +77,8 @@ const REQUEST_FIELDS = [
   'id', 'referenceNumber', 'status', 'serviceType', 'serviceKey',
   'patientName', 'patientAge', 'patientGender', 'patientLocation', 'patientContact',
   'origin', 'destination', 'country', 'preferredDate', 'careLevel', 'description',
-  'deceasedRelation', 'placeOfDeath', 'dateOfDeath',
+  'deceasedRelation', 'placeOfDeath', 'dateOfDeath', 'transferScope', 'transportMode', 'careRequirement', 'caretakerTypes', 'specialty', 'otherSpecialty', 'consultationType',
+  'companyName', 'employeeCount', 'selectedProgrammes',
   'mobility', 'equipOxygen', 'equipCardiacMonitor', 'equipVentilator', 'urgency',
   'travelType', 'criticalLevel', 'oxygenRequired', 'oxygenFlowLpm',
   'originCityName', 'originCountryCode', 'destinationCityName', 'destinationCountryCode',
@@ -88,9 +89,9 @@ const DOCUMENT_REQUEST_FIELDS = ['id', 'description', 'reason', 'createdAt'];
 const CASE_FIELDS = ['id', 'referenceNumber', 'status', 'urgency', 'createdAt', 'updatedAt'];
 // The note is written by staff and shown to the patient on Tracking and in the PDF timeline.
 const STAGE_EVENT_FIELDS = ['id', 'stage', 'note', 'occurredAt'];
-const CASE_DOCUMENT_FIELDS = ['id', 'type', 'name', 'fileSizeBytes', 'uploadedAt'];
+const CASE_DOCUMENT_FIELDS = ['id', 'type', 'name', 'fileSizeBytes', 'uploadedAt', 'clientUploadId'];
 const REQUEST_DOCUMENT_FIELDS = [
-  'id', 'originalName', 'sizeBytes', 'uploadedAt', 'replacesId', 'supersededAt', 'scanStatus', 'reviewStatus', 'rejectionReason',
+  'id', 'originalName', 'sizeBytes', 'uploadedAt', 'replacesId', 'supersededAt', 'scanStatus', 'reviewStatus', 'rejectionReason', 'clientUploadId',
 ];
 
 const isObject = (value) => value !== null && typeof value === 'object';
@@ -121,9 +122,17 @@ function toPatientRequest(request, options = {}) {
   const out = pick(request, REQUEST_FIELDS);
   // Critical Level goes out as a list (a value stored before the multi-select is a list of one).
   if ('criticalLevel' in out) out.criticalLevel = out.criticalLevel == null ? null : criticalLevelList(out.criticalLevel);
+  // Commercial Air oxygen flow rate: present only when one was saved, so every other service (Private Charter
+  // included) returns exactly the fields it always did.
+  if (request.equipOxygenLpm != null) out.equipOxygenLpm = request.equipOxygenLpm;
   if ('case' in request) out.case = toPatientCase(request.case);
   addTracking(out, request, 'case' in request ? request.case : undefined, options);
-  if ('requestDocuments' in request) out.requestDocuments = pickEach(request.requestDocuments, REQUEST_DOCUMENT_FIELDS);
+  if ('requestDocuments' in request) {
+    out.requestDocuments = pickEach(request.requestDocuments, REQUEST_DOCUMENT_FIELDS);
+    // Phase 5: this server remembers the app's upload ids, so a document list WITHOUT an id for a file the app sent really means the server does not have it. An older server
+    // never sends this, and the app then treats the answer as incomplete (it never assumes an upload is missing).
+    out.clientUploadIdSupported = true;
+  }
   return out;
 }
 

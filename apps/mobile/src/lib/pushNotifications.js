@@ -6,6 +6,7 @@ import { apiPost } from './api';
 import { onSessionChange } from './session';
 import { registerDevice, unregisterDevice } from './notificationsApi';
 import { createDeviceRegistry } from './deviceRegistry';
+import { isRetryablePushFailure } from './pushRetry';
 
 // Since Expo SDK 53, expo-notifications throws immediately when its module is even
 // imported inside Expo Go on Android (remote push there needs a development build
@@ -64,11 +65,17 @@ onSessionChange(() => registry.reset());
 
 // Best-effort and de-duplicated: callable from any number of places (the sign-in handler, Home); concurrent calls share one run and an
 // already registered session does nothing. Never throws. `recheck: true` (Expo token changed) registers again only if the token differs.
+// Resolves 'registered' (this phone is registered, now or already), 'skipped' (nothing to register: web, Expo Go, permission not granted, no projectId) or 'retry' (it failed for a reason a better
+// connection can fix: Home tries once more when the connection returns, app/home.js). The registration is an upsert on the server, so asking again can never create a second entry.
 export async function registerForPushNotifications(options) {
   try {
-    return await registry.ensureRegistered(options);
-  } catch {
-    return { status: 'unavailable' }; // Device/simulator without push capability, or user not logged in yet — ignore.
+    const outcome = await registry.ensureRegistered(options);
+    if (outcome.status === 'failed') throw outcome.error;
+    if (outcome.status === 'registered' || outcome.status === 'already') return 'registered';
+    return 'skipped';
+  } catch (err) {
+    // Device/simulator without push capability, or user not logged in yet — ignore. A network failure (no answer, a timeout, a server error) is worth one more try later.
+    return isRetryablePushFailure(err) ? 'retry' : 'skipped';
   }
 }
 

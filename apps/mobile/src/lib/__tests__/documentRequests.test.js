@@ -29,14 +29,16 @@ describe('sending documents for a document request', () => {
       requestId: 7, target: null, documentRequest: { id: 4 }, files: [{ uri: 'a', name: 'a.pdf' }, { uri: 'b', name: 'b.pdf' }],
       uploaded: [], uploadErrors: {}, send: async (path, file, _p, fields) => { calls.push([path, file.uri, fields]); },
     });
-    expect(calls).toEqual([['/requests/me/7/documents', 'a', { documentRequestId: 4 }], ['/requests/me/7/documents', 'b', { documentRequestId: 4 }]]);
+    // each file also carries its own upload id (Phase 5: the server recognises a retry of the same file by it)
+    expect(calls).toEqual([['/requests/me/7/documents', 'a', { documentRequestId: 4, clientUploadId: expect.stringMatching(/^[0-9a-f-]{36}$/) }], ['/requests/me/7/documents', 'b', { documentRequestId: 4, clientUploadId: expect.stringMatching(/^[0-9a-f-]{36}$/) }]]);
     expect(result.uploaded).toEqual(['a', 'b']);
   });
 
   it('sends no extra fields for an ordinary additional upload', async () => {
     const seen = [];
     await sendAdditionalDocuments({ requestId: 7, target: null, files: [{ uri: 'a' }], uploaded: [], uploadErrors: {}, send: async (_p, _f, _r, fields) => { seen.push(fields); } });
-    expect(seen).toEqual([undefined]);
+    // an ordinary upload carries only its own upload id: no document request id, nothing replaced
+    expect(seen).toEqual([{ clientUploadId: expect.stringMatching(/^[0-9a-f-]{36}$/) }]);
     expect(documentRequestFields(null)).toBeUndefined();
   });
 });

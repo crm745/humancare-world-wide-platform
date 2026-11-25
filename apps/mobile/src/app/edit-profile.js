@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
 import { initialsOf, useApp } from '../state/AppContext';
+import { errorText } from '../lib/errorText';
 import { goBack } from '../lib/nav';
 import { apiPatch } from '../lib/api';
 import { isValidName } from '../lib/validators';
@@ -21,15 +22,15 @@ export default function EditProfile() {
   const ready = isValidName(name) && name.trim() !== profile.name;
 
   const save = async () => {
-    if (!isValidName(name)) { toast('Enter a valid name.'); return; }
+    if (!isValidName(name)) { toast(t('pd_err_full')); return; }
     setBusy(true);
     try {
       await apiPatch('/auth/me', { name: name.trim() });
       setProfile({ ...profile, name: name.trim() });
-      toast('Profile updated');
+      toast(t('profile_updated'));
       goBack();
     } catch (err) {
-      toast(err.message);
+      toast(errorText(err, t));
     } finally {
       setBusy(false);
     }
@@ -59,13 +60,13 @@ export default function EditProfile() {
         <View className="gap-[18px]">
           <Field
             large required label={t('field_full_name')} value={name} onChangeText={setTypedName}
-            error={name && !isValidName(name) ? 'Enter a valid name.' : undefined}
+            error={name && !isValidName(name) ? t('pd_err_full') : undefined}
           />
           {contactRow(t('field_mobile_number'), profile.phone ? `${profile.cc} ${profile.phone}` : '', 'mobile')}
           {contactRow(t('field_email_address'), profile.email, 'email')}
         </View>
         <Spacer />
-        <Button large title={t('btn_save_changes')} disabled={!ready} loading={busy} onPress={save} />
+        <Button large title={t('btn_save_changes')} disabled={!ready} loading={busy} needsNetwork onPress={save} />
       </Body>
     </Screen>
   );

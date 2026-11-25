@@ -28,7 +28,7 @@ describe('Profile screen', () => {
     expect(screen).not.toMatch(/emergency|Siren/i);
   });
   test('log out clears the session as before', () => {
-    expect(screen).toContain('clearTokens()');
+    expect(screen).toContain('signOutSession({ isCorporate, beforeClear: clearDraftEverywhere })'); // the saved draft goes, the server is told, the tokens are cleared (lib/sessionEnd.js)
   });
   test('the version comes from the app config', () => {
     expect(screen).toContain('Constants.expoConfig?.version');

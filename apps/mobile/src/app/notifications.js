@@ -15,6 +15,7 @@ import { Button, Card, Spacer, Text } from '../components/ui';
 import { SwitchRow } from '../components/request/fields';
 import { AppRefreshControl } from '../components/AppRefreshControl';
 import { LoadFailure } from '../components/LoadFailure';
+import { CachedNote } from '../components/network/CachedNote';
 import { HighlightFill } from '../components/skeleton/HighlightFill';
 import { Reveal } from '../components/skeleton/Reveal';
 import { useSkeletonGate } from '../components/skeleton/hooks';
@@ -141,9 +142,9 @@ export default function Notifications() {
   return (
     <Screen>
       <TopBar title={t('notifications_title')} />
-      <Body contentClassName="gap-2.5 px-[18px] py-4" refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      <Body contentClassName="gap-2.5 px-[18px] py-4" noScrollWhenFits={!!error && !data} refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         {loading && gate.visible && <RowsSkeleton label={t('sk_loading_notifications')} count={5} lines={2} />}
-        {error && !data && <LoadFailure onRetry={reload} />}
+        {error && !data && <LoadFailure titleKey="lf_title_notifications" error={error} onRetry={reload} />}
         {data ? <Reveal animate={gate.wasShown} style={{ gap: 10 }}>
         {prefs ? (
           <Card className={`py-1 ${savingPref ? 'opacity-60' : ''}`}>
@@ -171,7 +172,7 @@ export default function Notifications() {
                 {n.body ? <Text className="mt-1 text-[13px] text-muted">{n.body}</Text> : null}
               </View>
               <View className="items-center">
-                {!read ? <View className="h-2 w-2 rounded-full" style={{ backgroundColor: P.brand }} /> : null}
+                {!read ? <View accessible accessibilityLabel={t('notif_unread')} className="h-2 w-2 rounded-full" style={{ backgroundColor: P.brand }} /> : null}
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={t('notif_delete')}
@@ -186,8 +187,9 @@ export default function Notifications() {
           );
         })}
         {items.length === 0 && (
-          <View className="items-center px-5 py-[50px]"><Text className="text-[12.5px] text-faint">No notifications yet.</Text></View>
+          <View className="items-center px-5 py-[50px]"><Text className="text-[12.5px] text-faint">{t('notif_empty')}</Text></View>
         )}
+        {items.length > 0 ? <CachedNote /> : null}
         </Reveal> : null}
         <Spacer min={16} />
         <Button title={t('btn_return_home')} onPress={goBack} />

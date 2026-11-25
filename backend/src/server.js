@@ -26,6 +26,14 @@ try {
   process.exit(1);
 }
 
+// Per-device sessions need the regenerated Prisma client: production refuses to start without it; development warns and keeps issuing legacy tokens.
+try {
+  require('./modules/auth/session.service').assertSessionsReady(process.env);
+} catch (err) {
+  console.error(err.message);
+  process.exit(1);
+}
+
 // This process only serves HTTP. Scheduled jobs (Bitrix retry, security-log cleanup) run in
 // the separate worker — see worker.js and src/jobs.
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;

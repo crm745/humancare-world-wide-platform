@@ -201,4 +201,28 @@ async function revokePatientDevices(tx, patientId, { reason = 'session_revoked',
   return { devices: deactivated.count, deliveries: cancelled.count };
 }
 
-module.exports = { registerPatientDevice, unregisterPatientDevice, revokePatientDevices, validateRegistration, EXPO_TOKEN_RE, UUID_RE, PLATFORMS };
+/**
+ * A patient's account was retired (account deletion). Inside the caller's transaction, patient-only (a corporate user is never touched):
+ *   * the patient's push devices end exactly as at a password reset (revokePatientDevices: every device row inactive, its open deliveries cancelled with `reason`);
+ *   * every OTHER open delivery of the patient (pending or sending, whatever its destination) is cancelled too, with the same reason and the same fenced clearing of the lease, so no worker sends
+ *     anything to a retired account;
+ *   * the in-app history is HIDDEN, not destroyed: each notification not yet deleted gets `deletedAt`, exactly what the patient's own delete does. The rows, their deliveries and their
+ *     idempotency keys are kept, so a late event for the same stage or quotation can never create the notification a second time (the key is still taken), and the history of what was
+ *     sent stays available for audit. Rows the patient had already deleted keep their original `deletedAt`.
+ * Resolves { devices, deliveries, notifications }: how many rows changed.
+ */
+async function retirePatientNotifications(tx, patientId, { reason = 'account_deleted', now = new Date() } = {}) {
+  if (!Number.isSafeInteger(patientId) || patientId <= 0) throw new Error('retirePatientNotifications needs a patient id.');
+  const revoked = await revokePatientDevices(tx, patientId, { reason, now });
+  const stray = await tx.notificationDelivery.updateMany({
+    where: { recipientType: OWNER_TYPE, recipientId: patientId, status: { in: [...OPEN_DELIVERY_STATUSES] } },
+    data: { status: 'cancelled', closedAt: now, lockedBy: null, lockedUntil: null, lastErrorCode: reason },
+  });
+  const hidden = await tx.notification.updateMany({
+    where: { recipientType: OWNER_TYPE, recipientId: patientId, deletedAt: null },
+    data: { deletedAt: now },
+  });
+  return { devices: revoked.devices, deliveries: revoked.deliveries + stray.count, notifications: hidden.count };
+}
+
+module.exports = { registerPatientDevice, unregisterPatientDevice, revokePatientDevices, retirePatientNotifications, validateRegistration, EXPO_TOKEN_RE, UUID_RE, PLATFORMS };

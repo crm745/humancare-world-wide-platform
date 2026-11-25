@@ -70,6 +70,15 @@ export function isValidMobileNumber(value, countryCode) {
 
 export const PASSWORD_HINT = 'At least 8 characters, with a letter and a number.';
 
+// The same check, as the dictionary key of the message (the screens show t(key); passwordProblem below keeps the English text).
+export function passwordProblemKey(value) {
+  const v = value || '';
+  if (v.length < 8) return 'pwd_err_min';
+  if (v.length > 72) return 'pwd_err_max';
+  if (!/\p{L}/u.test(v) || !/\d/.test(v)) return 'pwd_err_mix';
+  return null;
+}
+
 // Same rule as the backend's passwordProblem(): a message, or null when it's fine.
 export function passwordProblem(value) {
   const v = value || '';

@@ -61,7 +61,7 @@ const expectNoInternalFields = (body) => {
 
 describe('the serializer', () => {
   const row = {
-    id: 5, userId: 9, referenceNumber: 'REQ-1005', status: 'in_progress', serviceType: 'Home Healthcare', serviceKey: 'homecare',
+    id: 5, userId: 9, referenceNumber: 'REQ-1005', status: 'in_progress', serviceType: 'Hospitalization Assistance', serviceKey: 'hospital',
     patientName: 'A B', patientAge: 40, origin: 'X', destination: 'Y', country: 'India', createdAt: new Date('2026-11-01T00:00:00Z'), updatedAt: new Date('2026-11-02T00:00:00Z'),
     bitrixLeadId: 1, bitrixSyncAttempts: 2, bitrixLastError: 'boom', bitrixSyncFailedAt: new Date(), originGeonameId: 1, destinationGeonameId: 2, originTimezone: 'Asia/Kolkata',
     originCityName: 'X', originCountryCode: 'IN', destinationCityName: 'Y', destinationCountryCode: 'IN', someFutureColumn: 'secret',
@@ -69,16 +69,16 @@ describe('the serializer', () => {
       id: 3, referenceNumber: 'REQ-1005', status: 'in_progress', urgency: 'urgent', notes: 'internal', billingAmount: '10.00', billingStatus: 'pending', bitrixLeadId: 4, corporateId: 7,
       policyReference: 'p', additionalInfo: 'a', specialRequirements: 's', referralSource: 'r', serviceRequestId: 5, patientName: 'A B', someFutureColumn: 'secret', createdAt: new Date(), updatedAt: new Date(),
       stageEvents: [{ id: 1, caseId: 3, stage: 'submitted', note: 'hello', occurredAt: new Date(), internal: 'x' }],
-      documents: [{ id: 2, caseId: 3, type: 'Medical Report', name: 'r.pdf', fileUrl: '/uploads/abc', fileSizeBytes: 10, uploadedAt: new Date() }],
+      documents: [{ id: 2, caseId: 3, type: 'Medical Report', name: 'r.pdf', fileUrl: '/uploads/abc', fileSizeBytes: 10, uploadedAt: new Date(), clientUploadId: null }],
     },
-    requestDocuments: [{ id: 6, serviceRequestId: 5, originalName: 'x.pdf', storageKey: 'k', sha256: 'h', sizeBytes: 1, mimeType: 'application/pdf', uploadedAt: new Date(), replacesId: null, supersededAt: null, scanStatus: 'clean', scanEngine: 'clamav', reviewStatus: 'pending', rejectionReason: null, uploadedByUserId: 9, caseDocumentId: null }],
+    requestDocuments: [{ id: 6, serviceRequestId: 5, originalName: 'x.pdf', storageKey: 'k', sha256: 'h', sizeBytes: 1, mimeType: 'application/pdf', uploadedAt: new Date(), replacesId: null, supersededAt: null, scanStatus: 'clean', scanEngine: 'clamav', reviewStatus: 'pending', rejectionReason: null, uploadedByUserId: 9, caseDocumentId: null, clientUploadId: null }],
   };
 
   it('keeps only the listed fields, at every level, and nothing a column added later', () => {
     const out = toPatientRequest(row);
     expect(allKeys(out).has('someFutureColumn')).toBe(false);
     expectNoInternalFields(out);
-    expect(Object.keys(out).sort()).toEqual(REQUEST_FIELDS.filter((f) => f in row).concat(['case', 'requestDocuments']).sort());
+    expect(Object.keys(out).sort()).toEqual(REQUEST_FIELDS.filter((f) => f in row).concat(['case', 'requestDocuments', 'clientUploadIdSupported']).sort()); // Phase 5: the flag that says this server remembers upload ids
     expect(Object.keys(out.case).sort()).toEqual([...CASE_FIELDS.filter((f) => f in row.case), 'stageEvents', 'documents'].sort());
     expect(Object.keys(out.case.stageEvents[0]).sort()).toEqual(STAGE_EVENT_FIELDS.filter((f) => f in row.case.stageEvents[0]).sort());
     expect(Object.keys(out.case.documents[0]).sort()).toEqual(CASE_DOCUMENT_FIELDS.slice().sort());
@@ -115,7 +115,7 @@ describe('the three endpoints, with a request that has internal data on it', () 
   async function requestWithInternalData() {
     const patient = await createPatient();
     const created = await request(app).post('/requests').set(auth(patient.token)).send({
-      serviceType: 'Home Healthcare', serviceKey: 'homecare', patientName: 'John Doe', patientAge: 40, patientGender: 'Male', patientContact: '+91 9876543210',
+      serviceType: 'Hospitalization Assistance', serviceKey: 'hospital', patientName: 'John Doe', patientAge: 40, patientGender: 'Male', patientContact: '+91 9876543210',
       origin: 'Pune, India', destination: 'Pune, India', country: 'India', preferredDate: '2099-01-01', description: 'Needs a nurse', urgency: 'planned',
     });
     expect(created.status).toBe(201);
@@ -137,7 +137,7 @@ describe('the three endpoints, with a request that has internal data on it', () 
   it('POST /requests returns the request without internal fields', async () => {
     const r = await requestWithInternalData();
     expectNoInternalFields(r.created.body);
-    expect(r.created.body.request).toMatchObject({ serviceKey: 'homecare', status: 'submitted', patientName: 'John Doe', urgency: 'planned' });
+    expect(r.created.body.request).toMatchObject({ serviceKey: 'hospital', status: 'submitted', patientName: 'John Doe', urgency: 'planned' });
     expect(r.created.body.request.referenceNumber).toMatch(/^REQ-\d+$/);
   });
 
@@ -147,14 +147,14 @@ describe('the three endpoints, with a request that has internal data on it', () 
     expect(res.status).toBe(200);
     expectNoInternalFields(res.body);
     const req = res.body.request;
-    expect(req).toMatchObject({ id: r.id, serviceType: 'Home Healthcare', serviceKey: 'homecare', patientName: 'John Doe', patientAge: 40, patientGender: 'Male', patientContact: '+91 9876543210', country: 'India', description: 'Needs a nurse', urgency: 'planned', status: 'submitted' });
+    expect(req).toMatchObject({ id: r.id, serviceType: 'Hospitalization Assistance', serviceKey: 'hospital', patientName: 'John Doe', patientAge: 40, patientGender: 'Male', patientContact: '+91 9876543210', country: 'India', description: 'Needs a nurse', urgency: 'planned', status: 'submitted' });
     expect(req.preferredDate).toBe('2099-01-01T00:00:00.000Z');
     expect(req.case).toMatchObject({ status: 'submitted', urgency: 'routine' });
     expect(Object.keys(req.case).sort()).toEqual(['createdAt', 'documents', 'id', 'referenceNumber', 'stageEvents', 'status', 'updatedAt', 'urgency']);
     expect(req.case.stageEvents.map((e) => [e.stage, e.note])).toEqual([['submitted', 'Request received from patient app.'], ['in_progress', 'Team assigned']]);
     expect(Object.keys(req.case.stageEvents[0]).sort()).toEqual(['id', 'note', 'occurredAt', 'stage']);
     expect(req.case.documents).toHaveLength(1);
-    expect(Object.keys(req.case.documents[0]).sort()).toEqual(['fileSizeBytes', 'id', 'name', 'type', 'uploadedAt']);
+    expect(Object.keys(req.case.documents[0]).sort()).toEqual(['clientUploadId', 'fileSizeBytes', 'id', 'name', 'type', 'uploadedAt']); // Phase 5 adds the app's own upload id (null for older documents)
     expect(JSON.stringify(res.body)).not.toContain('secret-name');
     expect(JSON.stringify(res.body)).not.toContain('internal staff note');
     expect(JSON.stringify(res.body)).not.toContain('crm error');
@@ -166,7 +166,7 @@ describe('the three endpoints, with a request that has internal data on it', () 
     expect(res.status).toBe(200);
     expect(res.body.requests).toHaveLength(1);
     expectNoInternalFields(res.body);
-    expect(res.body.requests[0]).toMatchObject({ id: r.id, serviceKey: 'homecare', status: 'submitted' });
+    expect(res.body.requests[0]).toMatchObject({ id: r.id, serviceKey: 'hospital', status: 'submitted' });
     expect('case' in res.body.requests[0]).toBe(false);
     for (const field of ['id', 'referenceNumber', 'serviceType', 'serviceKey', 'status', 'origin', 'destination', 'createdAt']) expect(res.body.requests[0][field]).toBeDefined();
   });

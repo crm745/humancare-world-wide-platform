@@ -4,9 +4,10 @@ const {
   createCaseByCorporate,
 } = require('./cases.service');
 const { addDocumentToCase } = require('../documents/documents.service');
+const { scanBeforeStore } = require('../documents/legacy-scan');
 const { toSafeDocument } = require('../documents/document-response');
 const { sendMedicalReportToBitrix } = require('../bitrix/bitrix.service');
-const { ingestUpload, discardStored, discardTemp } = require('../../storage/ingest');
+const { ingestUpload, validateUpload, discardStored, discardTemp } = require('../../storage/ingest');
 const { AREAS } = require('../../storage/keys');
 
 async function listMyCases(req, res, next) {
@@ -55,9 +56,14 @@ async function uploadCaseDocument(req, res, next) {
         await discardTemp(req.file);
         return res.status(403).json({ error: 'This case was not submitted by your organization.' });
       }
-      // Checked, virus-scanned (refused unless ClamAV says clean) and stored under a generated key before the row exists.
-      stored = await ingestUpload({ file: req.file, area: AREAS.CASE_DOCUMENTS, policy: 'organization' });
-      document = await addDocumentToCase(caseRecord.id, { type: req.body.type, name: req.file.originalname, fileUrl: stored.key, fileSizeBytes: stored.size });
+      // Scan before store (documents/legacy-scan.js: infected 422 and quarantined; scanner down or no verdict 503, deleted), then checked and moved into the storage service under a generated key.
+      await validateUpload(req.file, { policy: 'organization' }); // type, structure (a .doc is refused) before anything is scanned or stored
+      const scan = await scanBeforeStore(req.file);
+      stored = await ingestUpload({ file: req.file, area: AREAS.CASE_DOCUMENTS, scan: 'deferred', policy: 'organization' });
+      if (stored.sha256 !== scan.sha256) throw Object.assign(new Error('The stored file is not the one that was scanned.'), { statusCode: 503, publicCode: 'scan_unavailable' });
+      document = await addDocumentToCase(caseRecord.id, { type: req.body.type, name: req.file.originalname, fileUrl: stored.key, fileSizeBytes: stored.size,
+        // the row's clean scan record: the verdict and the digest of exactly the bytes that were stored
+        scan });
     } catch (err) {
       await discardTemp(req.file);
       if (stored) await discardStored(stored.key);

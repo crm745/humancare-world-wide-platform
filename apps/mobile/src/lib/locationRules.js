@@ -40,11 +40,14 @@ export function locationProblem({ text, city, countryIso, structured = false, ch
 
 // The two fields, each judged on its own. `draft` is the form's draft; `charter` is whether the service is Private Charter.
 // Current Location: held to the selected Country. Destination: not (`checkCountry: false`): any country, still a verified city for Private Charter.
-export function locationProblems(draft, charter) {
+// `offline` (Private Charter): the verified list cannot be asked while the phone is offline, so a place typed by hand is accepted for now (the form only COLLECTS information). It is matched to the verified
+// list when the request is submitted, online (app/request/review.js); a city that WAS picked is still held to the country.
+export function locationProblems(draft, charter, { offline = false } = {}) {
   const d = draft || {};
+  const structured = charter && !offline;
   return {
-    location: locationProblem({ text: d.location, city: d.originCity, countryIso: d.countryIso, structured: charter }),
-    dest: locationProblem({ text: d.dest, city: d.destCity, countryIso: d.countryIso, structured: charter, checkCountry: false }),
+    location: locationProblem({ text: d.location, city: d.originCity, countryIso: d.countryIso, structured }),
+    dest: locationProblem({ text: d.dest, city: d.destCity, countryIso: d.countryIso, structured, checkCountry: false }),
   };
 }
 

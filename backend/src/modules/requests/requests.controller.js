@@ -1,12 +1,13 @@
 const fs = require('fs');
 const {
   createRequest,
+  findRequestByClientRequestId,
   listRequestsForUser,
   getRequestForUser,
   listDocumentsForUser,
 } = require('./requests.service');
-const { addDocumentToCase } = require('../documents/documents.service');
-const { ingestUpload, discardStored, discardTemp } = require('../../storage/ingest');
+const { addDocumentToCase, findCaseDocumentByClientUploadId } = require('../documents/documents.service');
+const { ingestUpload, validateUpload, discardStored } = require('../../storage/ingest');
 const { AREAS } = require('../../storage/keys');
 const { toSafeDocument } = require('../documents/document-response');
 const { addPatientDocument, scanRequestDocument, toUploadResponse } = require('../request-review/request-review.service');
@@ -20,10 +21,26 @@ const { prisma } = require('../../db/prisma');
 const { streamRequestSummaryPdf } = require('./request-summary.pdf');
 const {
   MOBILITY, URGENCY, EQUIPMENT, isTransportKey, PRIVATE_CHARTER_KEY, PRIVATE_CHARTER_SERVICE_TYPE,
+  isCommercialAirKey, isGroundKey, usesCriticalLevelPage, oxygenLpmProblem, commercialAirCareLevelProblem,
 } = require('../../common/constants/request.constants');
 const { validatePrivateCharterRequest, isObject } = require('./private-charter.validation');
-const { resolveCityRefs } = require('../geo/geo.service');
+const { parseClientRequestId } = require('./client-request-id');
+const { parseClientUploadId, isUniqueViolation } = require('./client-upload-id');
+const { scanBeforeStore, sameStoredContent, withUploadLock } = require('../documents/legacy-scan');
+const { hashFile, httpError } = require('../request-review/request-review.files');
+const { isScanClean } = require('../documents/document-scan');
+const { resolveCityRefs, getVerifiedCity } = require('../geo/geo.service');
+const { isTeleStructuredRequest, isStructuredTeleRow, validateTeleRequest } = require('./tele-consultation.validation');
 const { toPatientRequest, toPatientRequests } = require('./request-response');
+const { isMortalKey, isMortalRequestKey, OLD_MORTAL_KEYS, validateMortalRequest } = require('./mortal-remains.validation');
+const { isHomeKey, validateHomeRequest } = require('./home-healthcare.validation');
+const { isMvtStructuredRequest, cityRefOf, validateMvtRequest } = require('./medical-value-travel.validation');
+const { isMarineStructuredRequest, cityRefOf: marineCityRefOf, validateMarineRequest } = require('./marine-medical-safety.validation');
+const { isCorporateStructuredRequest, validateCorporateRequest, isNewCorporateFormat } = require('./corporate-medical.validation');
+const { validateGenericRequest, unknownFieldsLogLine } = require('./generic-request.validation');
+const { legacyBypassProblem } = require('./legacy-body-guard');
+const { validateTransportRequest } = require('./transport-request.validation');
+const { closedRequestProblem, fileCountProblem, fileContentProblem, safeDocumentName } = require('./upload-policy');
 
 const REQUIRED_FIELDS = ['serviceType', 'patientName', 'origin', 'destination'];
 const { REQUIRED_SERVICE_BY_KEY } = require('../bitrix/bitrix-lead');
@@ -31,21 +48,8 @@ const { REQUIRED_SERVICE_BY_KEY } = require('../bitrix/bitrix-lead');
 // since older app builds don't send one; "hospital", "marine" (Marine Medical Safety) and
 // "medvalue" (Medical Value Travel) have no Bitrix service mapped yet.
 const SERVICE_KEYS = new Set([...Object.keys(REQUIRED_SERVICE_BY_KEY), 'hospital', 'marine', 'medvalue', 'air']);
-// Mortal Remains as the app asks it now ("Within India / International"); older builds
-// sent plain "mortal" with the ordinary patient form.
-const MORTAL_KEYS = ['mortal_domestic', 'mortal_international'];
-const MORTAL_FIELDS = ['deceasedRelation', 'placeOfDeath', 'dateOfDeath'];
-
-// The deceased's details: all three given, and a date of death that isn't in the future.
-function mortalFieldsError(body) {
-  if (!MORTAL_KEYS.includes(body.serviceKey)) return null;
-  const missing = MORTAL_FIELDS.filter((field) => !body[field]);
-  if (missing.length) return `Missing required field(s): ${missing.join(', ')}`;
-  // A day's slack: "today" in the family's time zone (up to UTC+14) can be tomorrow in UTC.
-  const date = new Date(body.dateOfDeath);
-  if (Number.isNaN(date.getTime()) || date.getTime() > Date.now() + 24 * 60 * 60 * 1000) return 'Invalid dateOfDeath';
-  return null;
-}
+// Mortal Remains: the app sends the single key "mortal"; the two older keys (mortal_domestic / mortal_international) are no longer accepted for new
+// requests. Its rules live in mortal-remains.validation.js. Rows already stored with an older key are untouched and still recognised (isMortalRequestKey).
 
 const FIELD_ERRORS_MESSAGE = 'Please correct the highlighted fields.';
 
@@ -68,7 +72,53 @@ function medicalFieldsError(body) {
   if (present(body.urgency) && !URGENCY.includes(body.urgency)) {
     return `Invalid urgency. Use one of: ${URGENCY.join(', ')}`;
   }
-  return null;
+  return groundIssueError(body) || criticalLevelCareError(body) || onBoardEquipmentError(body) || oxygenLpmError(body);
+}
+
+// Ground Ambulance: the Present Medical Issue (the request's description) is mandatory. Enforced here whatever the app did; the text is stored as typed.
+// Every other service keeps description optional. (An older Ground app build that sends no description is refused: it is the approved rule.)
+function groundIssueError(body) {
+  if (!isGroundKey(body.serviceKey)) return null;
+  if (typeof body.description === 'string' && body.description.trim() !== '') return null;
+  return 'description (the Present Medical Issue) is required for Ground Ambulance requests';
+}
+
+// Commercial Air's Required on board is Oxygen and Cardiac monitor. The Ventilator is the care level "Ventilated", so a new Commercial Air
+// request cannot ask for it as equipment. (false is tolerated, as older app builds always sent it; it is not stored.)
+function onBoardEquipmentError(body) {
+  if (isGroundKey(body.serviceKey)) {
+    // Ground Ambulance: Required on board is Oxygen only. Cardiac monitor and Ventilator (a care level) are refused when asked for; false is tolerated
+    // (older builds always sent it) and is not stored.
+    if (body.equipCardiacMonitor === true) return 'equipCardiacMonitor is not accepted for Ground Ambulance requests (Required on board is Oxygen only)';
+    if (body.equipVentilator === true) return 'equipVentilator is not accepted for Ground Ambulance requests (Ventilated is a care level)';
+    return null;
+  }
+  if (!isCommercialAirKey(body.serviceKey)) return null;
+  return body.equipVentilator === true || (present(body.equipVentilator) && typeof body.equipVentilator !== 'boolean')
+    ? 'equipVentilator is not accepted for Commercial Air requests (Ventilated is a care level)'
+    : null;
+}
+
+// Commercial Air and Ground Ambulance have their own care levels (ICU, Ventilated, Tracheostomy, ECMO), checked on the server. Every other
+// service keeps its careLevel exactly as before; Private Charter never gets here (its own validator, above, is untouched).
+function criticalLevelCareError(body) {
+  if (!usesCriticalLevelPage(body.serviceKey) || !present(body.careLevel)) return null;
+  return commercialAirCareLevelProblem(body.careLevel);
+}
+
+// Oxygen flow rate (LPM), Commercial Air and Ground Ambulance. Checked on the server whatever the app did: required when
+// Oxygen is chosen, refused when it is not, refused for every other service, and a sensible number.
+// (Private Charter never gets here: it has its own validator above, which does not accept the field.)
+function oxygenLpmError(body) {
+  const given = present(body.equipOxygenLpm);
+  if (!usesCriticalLevelPage(body.serviceKey)) {
+    return given ? 'equipOxygenLpm is only accepted for Commercial Air and Ground Ambulance requests' : null;
+  }
+  if (body.equipOxygen === true) {
+    if (!given) return 'equipOxygenLpm is required when Oxygen is selected';
+    return oxygenLpmProblem(body.equipOxygenLpm);
+  }
+  return given ? 'equipOxygenLpm is only accepted when Oxygen is selected (equipOxygen true)' : null;
 }
 
 //the function for submitting the request
@@ -78,6 +128,28 @@ async function submitRequest(req, res, next) {
     // an array or a bare value: refuse all of those here instead of failing further down.
     if (!isObject(req.body)) {
       return res.status(400).json({ error: 'The request body must be a JSON object.', fields: {} });
+    }
+    // Idempotent submission: the app sends one UUID (`clientRequestId`) per logical submission and reuses it for every retry. It is OPTIONAL (an older app build sends none and is
+    // handled exactly as before). It is taken out of the body here, so no service validator ever sees it, and it is looked up BEFORE anything else: a retry of a submission that
+    // was already saved gets the ORIGINAL request back (HTTP 200) without being validated, resolved or saved again, so a rule that changed in between (a date that has since
+    // passed, a city lookup that is down) can never turn a saved request into an error. The database's unique index (user, key) is the final guard for the race this lookup cannot see.
+    const idKey = parseClientRequestId(req.body.clientRequestId);
+    if (idKey.present && !idKey.valid) {
+      return res.status(400).json({ error: FIELD_ERRORS_MESSAGE, fields: { clientRequestId: 'clientRequestId must be a UUID.' } });
+    }
+    let clientRequestId;
+    if (idKey.present) {
+      clientRequestId = idKey.id;
+      const { clientRequestId: _key, ...bodyWithoutKey } = req.body;
+      req.body = bodyWithoutKey;
+      const existing = await findRequestByClientRequestId(req.user.id, clientRequestId);
+      if (existing) {
+        // A key belongs to ONE submission of ONE service: reusing it for another service is a bug in the caller, never a replay.
+        if (typeof req.body.serviceKey === 'string' && existing.serviceKey && req.body.serviceKey !== existing.serviceKey) {
+          return res.status(409).json({ error: 'This request ID was already used for a different service.', code: 'client_request_id_reused' });
+        }
+        return res.status(200).json({ request: toPatientRequest(existing) });
+      }
     }
     // The Private Charter name belongs to that service key alone: a request that uses it with
     // another (or no) key, such as the app's old "air" default, is refused, never relabelled.
@@ -96,22 +168,103 @@ async function submitRequest(req, res, next) {
       if (Object.keys(fields).length) return res.status(400).json({ error: FIELD_ERRORS_MESSAGE, fields });
       // Which legacy formats are still arriving, by field name only: never the values.
       if (legacy.length) console.info('[legacy-format] privatecharter:', legacy.join(', '));
-      const request = await createRequest(req.user.id, data);
+      const request = await createRequest(req.user.id, data, { clientRequestId });
       // A brand-new request has no Case link yet: its tracking comes from the configured intended flow (see request-response.js).
       return res.status(201).json({ request: toPatientRequest(request, { newRequest: true }) });
     }
+    // Teleconsultation in its structured format has its own validator (isolated in tele-consultation.validation.js): it derives the address
+    // fields and the description itself, and the stored request is saved like any other. A Teleconsultation request WITHOUT the structured
+    // fields (an older app build) is not caught here and keeps the original rules below.
+    if (isTeleStructuredRequest(req.body)) {
+      const { error, data } = validateTeleRequest(req.body);
+      if (error) return res.status(400).json({ error });
+      const request = await createRequest(req.user.id, data, { clientRequestId });
+      return res.status(201).json({ request: toPatientRequest(request) });
+    }
+    // Mortal Remains has its own validator (isolated in mortal-remains.validation.js); it derives the description, the address copy and the stored
+    // formats itself. The two older keys are refused for new requests.
+    if (OLD_MORTAL_KEYS.includes(req.body.serviceKey)) {
+      return res.status(400).json({ error: 'serviceKey must be "mortal" for Mortal Remains requests' });
+    }
+    if (isMortalKey(req.body.serviceKey)) {
+      const { error, data } = validateMortalRequest(req.body);
+      if (error) return res.status(400).json({ error });
+      const request = await createRequest(req.user.id, data, { clientRequestId });
+      return res.status(201).json({ request: toPatientRequest(request) });
+    }
+    // Home Healthcare has its own validator (isolated in home-healthcare.validation.js): it enforces the new format only (the older generic body, with
+    // Current Location, Destination and Urgency, is refused) and composes the description and the one-line address copy itself.
+    if (isHomeKey(req.body.serviceKey)) {
+      const { error, data } = validateHomeRequest(req.body);
+      if (error) return res.status(400).json({ error });
+      const request = await createRequest(req.user.id, data, { clientRequestId });
+      return res.status(201).json({ request: toPatientRequest(request) });
+    }
+    // Medical Value Travel in its structured format has its own validator (isolated in medical-value-travel.validation.js). It is chosen by the fields it
+    // carries (treatmentScope, specialty, ...): an older app build sends the generic body for "medvalue", which has none of them and keeps the generic rules
+    // below. A picked city is looked up here (the server decides its country); a typed city is kept as typed and never verified.
+    if (isMvtStructuredRequest(req.body)) {
+      const cities = {};
+      for (const field of ['currentCity', 'destinationCity']) {
+        const ref = cityRefOf(req.body[field]);
+        if (ref.id) cities[field] = await getVerifiedCity(ref.id);
+      }
+      const { error, data } = validateMvtRequest(req.body, { cities });
+      if (error) return res.status(400).json({ error });
+      const request = await createRequest(req.user.id, data, { clientRequestId });
+      return res.status(201).json({ request: toPatientRequest(request) });
+    }
+    // Marine Medical Safety in its structured format has its own validator (isolated in marine-medical-safety.validation.js), chosen by the fields it carries
+    // (serviceScope, originCity, destinationCity, medicalHistory). An older app build sends the generic body for "marine", which has none of them and keeps the
+    // generic rules below. A picked city is looked up here by the real GeoNames lookup (the server decides its country); a typed city or port is kept exactly as
+    // typed and never verified.
+    if (isMarineStructuredRequest(req.body)) {
+      const cities = {};
+      for (const field of ['originCity', 'destinationCity']) {
+        const ref = marineCityRefOf(req.body[field]);
+        if (ref.id) cities[field] = await getVerifiedCity(ref.id);
+      }
+      const { error, data } = validateMarineRequest(req.body, { cities });
+      if (error) return res.status(400).json({ error });
+      const request = await createRequest(req.user.id, data, { clientRequestId });
+      return res.status(201).json({ request: toPatientRequest(request) });
+    }
+    // Corporate Medical Solutions in its structured, patient-side format has its own validator (isolated in corporate-medical.validation.js), chosen by the fields it
+    // carries (companyName, employeeCount, programmes, ...). An older app build sends the generic body for "corporate", which has none of them and keeps the generic
+    // rules below. The request is saved through the same flow as every other one; createRequest gives it the standard REQ- reference, which its Case copies (corporateId stays NULL).
+    if (isCorporateStructuredRequest(req.body)) {
+      const { error, data } = validateCorporateRequest(req.body);
+      if (error) return res.status(400).json({ error });
+      const request = await createRequest(req.user.id, data, { clientRequestId });
+      return res.status(201).json({ request: toPatientRequest(request) });
+    }
+    // Every structured branch above has declined this body. For Teleconsultation, Medical Value Travel, Marine and Corporate Medical Solutions that means the old generic format (or a body that
+    // only names the service in serviceType): refused, never saved as an incomplete request (legacy-body-guard.js).
+    const bypass = legacyBypassProblem(req.body);
+    if (bypass) return res.status(bypass.status).json(bypass.body);
     const missing = REQUIRED_FIELDS.filter((field) => !req.body[field]);
     if (missing.length) {
       return res.status(400).json({ error: `Missing required field(s): ${missing.join(', ')}` });
     }
+    // Commercial Air is one of two travel types: the service key says which (Stretcher or Wheelchair). Without it the request is not complete.
+    if (req.body.serviceKey === 'commercialair') {
+      return res.status(400).json({ error: 'Travel type is required: serviceKey must be commercialair_stretcher or commercialair_wheelchair' });
+    }
     if (req.body.serviceKey !== undefined && !SERVICE_KEYS.has(req.body.serviceKey)) {
       return res.status(400).json({ error: 'Unknown serviceKey' });
     }
-    const mortalError = mortalFieldsError(req.body);
-    if (mortalError) return res.status(400).json({ error: mortalError });
     const medicalError = medicalFieldsError(req.body);
     if (medicalError) return res.status(400).json({ error: medicalError });
-    const request = await createRequest(req.user.id, req.body);
+    // Ground Ambulance and Commercial Air have no validator of their own: their contact number, date, origin, destination and name are checked here (transport-request.validation.js).
+    const transportProblem = validateTransportRequest(req.body);
+    if (transportProblem) return res.status(400).json(transportProblem);
+    // The generic path's own check (generic-request.validation.js): the type and size of every key it keeps, another service's own columns refused, and ONLY the kept keys passed on
+    // to createRequest (never the raw body). A problem is a 400 here, not a database error. Stage 1 of unknown keys: they are ignored as before and their NAMES (never values) are
+    // logged once, so a later stage can refuse them with the facts in hand.
+    const { error: genericError, data: genericData, unknownFields } = validateGenericRequest(req.body);
+    if (genericError) return res.status(400).json({ error: genericError });
+    if (unknownFields.length) console.info(unknownFieldsLogLine(req.body.serviceKey, unknownFields, SERVICE_KEYS));
+    const request = await createRequest(req.user.id, genericData, { clientRequestId });
     res.status(201).json({ request: toPatientRequest(request) });
   } catch (err) {
     next(err);
@@ -147,6 +300,19 @@ async function getMyRequestById(req, res, next) {
   }
 }
 //
+// "Check status" after a submission's answer was lost: the patient's own request for a client request ID, or 404 (not saved, YET: an answer can arrive late). Owner only.
+async function getMyRequestByClientRequestId(req, res, next) {
+  try {
+    const idKey = parseClientRequestId(req.params.clientRequestId);
+    if (!idKey.present || !idKey.valid) return res.status(400).json({ error: 'clientRequestId must be a UUID.' });
+    const request = await findRequestByClientRequestId(req.user.id, idKey.id);
+    if (!request) return res.status(404).json({ error: 'Request not found', code: 'not_found' });
+    res.json({ request: toPatientRequest(request) });
+  } catch (err) {
+    next(err);
+  }
+}
+//
 async function listMyDocuments(req, res, next) {
   try {
     const documents = await listDocumentsForUser(req.user.id);
@@ -155,13 +321,36 @@ async function listMyDocuments(req, res, next) {
     next(err);
   }
 }
+// The type every Mortal Remains upload is stored as.
+const MORTAL_DOCUMENT_TYPE = 'Supporting Document';
+
+// Why an upload to a request on the original (Case) path must be refused, or null: the request already holds the most documents it may (30; Mortal Remains 10), or the file is empty, too big,
+// unreadable or not what its type and name claim (upload-policy.js: one policy for every service). Two uploads arriving at the same instant could pass the count together; the count is
+// taken again, under a per-Case lock, right before the row is written (see accept below).
+async function legacyUploadProblem(request, file) {
+  return fileCountProblem(await prisma.document.count({ where: { caseId: request.case.id } }), request.serviceKey) || fileContentProblem(file);
+}
+
 //
 async function uploadRequestDocument(req, res, next) {
+  // The file is already on disk (multer's temporary file). On every way out that is not "handed on" (a refusal, a database failure, any unexpected error) it is deleted. `fileOwned` flips once the
+  // storage service (ingestUpload) or the review service has taken it over: both always remove the temporary file themselves, and from then on an OBJECT in storage is what a row refers to.
+  // That object is cleaned up where it is made (legacy path: below, only when no row refers to it; review path: request-review.service.js addPatientDocument).
+  let fileOwned = false;
+  const discardFile = () => (req.file ? fs.promises.rm(req.file.path, { force: true }).catch(() => {}) : Promise.resolve());
+  const releaseUnlessStored = async () => {
+    if (fileOwned || !req.file) return;
+    await discardFile();
+  };
   try {
     if (!req.file) return res.status(400).json({ error: 'file is required' });
-    // The file is already on disk (multer). If the request is not found or is not the patient's, or
-    // has nothing to attach it to, it must not be left behind unreferenced.
-    const discardFile = () => fs.promises.rm(req.file.path, { force: true }).catch(() => {});
+    // Phase 5: the app's id for this logical upload (optional; an older app sends none). A malformed one is refused, never guessed at.
+    const uploadId = parseClientUploadId(req.body && req.body.clientUploadId);
+    if (uploadId.present && !uploadId.valid) {
+      await discardFile();
+      return res.status(400).json({ error: 'clientUploadId must be a UUID.' });
+    }
+    const clientUploadId = uploadId.present ? uploadId.id : undefined;
     let request;
     try {
       request = await getRequestForUser(req.user.id, req.params.id);
@@ -169,14 +358,37 @@ async function uploadRequestDocument(req, res, next) {
       await discardFile();
       throw err;
     }
+    // Teleconsultation (structured format) takes no documents. Requests made before it keep what they have and still take uploads.
+    if (isStructuredTeleRow(request)) {
+      await discardFile();
+      return res.status(400).json({ error: 'Document uploads are not available for Teleconsultation requests.' });
+    }
+    // Corporate Medical Solutions (employee-submitted, structured format) takes no documents. Requests made before it keep what they have and still take uploads.
+    if (isNewCorporateFormat(request)) {
+      await discardFile();
+      return res.status(400).json({ error: 'Document uploads are not available for Corporate Medical Solutions requests.' });
+    }
     // A request in the review workflow has no Case yet: its files are kept with the request, scanned
     // by ClamAV, and reviewed by an Admin. The same URL and form field as before; an optional
     // "replacesDocumentId" field marks an earlier document as replaced.
     if (request.reviewStatus != null) {
+      // A repeat of an upload the server already holds is answered with the original whatever the request's state is (upload recovery); anything new must be allowed: the request is
+      // still open and the file is what it claims to be. (The review workflow's own cap of 30 and its checks run inside addPatientDocument.)
+      const replay = clientUploadId ? (request.requestDocuments || []).find((d) => d.clientUploadId === clientUploadId) : null; // from the request already loaded above (it carries each document's clientUploadId)
+      if (!replay) {
+        const problem = closedRequestProblem(request) || (await fileContentProblem(req.file));
+        if (problem) {
+          await discardFile();
+          return res.status(problem.status).json(problem.body);
+        }
+      }
       const stored = await addPatientDocument({
-        userId: req.user.id, requestId: request.id, file: req.file, replacesDocumentId: req.body && req.body.replacesDocumentId,
+        userId: req.user.id, requestId: request.id, file: req.file, replacesDocumentId: req.body && req.body.replacesDocumentId, clientUploadId,
         documentRequestId: req.body && req.body.documentRequestId,
       });
+      fileOwned = !stored.replayed; // a replay deleted its own copy; a new document owns the file
+      // A repeat of an upload the server already has: the original is the answer. No second scan, replacement or count (and its new file was deleted).
+      if (stored.replayed) return res.status(200).json({ document: toUploadResponse(stored) });
       // Fail closed: if the scanner is down the document is saved but stays "error" (unusable)
       // until the worker's next sweep scans it.
       const scanned = await scanRequestDocument(stored.id).catch(() => null);
@@ -191,37 +403,103 @@ async function uploadRequestDocument(req, res, next) {
       await discardFile();
       return res.status(409).json({ error: 'This request has no case yet.' });
     }
-    // This is the request form's one upload: "Upload Medical Report", or for Mortal
-    // Remains "Upload Death Certificate". The lead has no death-certificate field, so
-    // that one stays with us (Bitrix has it on the deal; sent once deals are synced).
-    const mortal = MORTAL_KEYS.includes(request.serviceKey);
-    // Checked, virus-scanned (refused unless ClamAV says clean) and stored under a generated key before the row exists.
-    const stored = await ingestUpload({ file: req.file, area: AREAS.CASE_DOCUMENTS, policy: 'patient' });
-    let document;
+    // Mortal Remains has one combined upload ("Death Certificate / Additional Supporting Documents"): the server cannot tell which file is the
+    // certificate, so every file is stored as a neutral "Supporting Document" (never "Death Certificate", never "Medical Report") and none is ever
+    // sent to Bitrix (only "Medical Report" documents are, by this upload and by the retry sweep). Checked first: at most 10 files, and the file's
+    // content must be what its type and name claim.
+    // The file's SHA-256, taken now: it is the identity of the CONTENT (a repeat is the same upload only if its digest equals the stored original's) and the scan below is bound to it, so
+    // "clean" describes exactly the bytes that are kept. Never the name or the size.
+    let sha256;
     try {
-      document = await addDocumentToCase(request.case.id, {
-        type: mortal ? 'Death Certificate' : 'Medical Report',
-        name: req.file.originalname,
-        fileUrl: stored.key,
-        fileSizeBytes: stored.size,
-      });
-    } catch (err) {
-      await discardStored(stored.key);
-      throw err;
+      sha256 = await hashFile(req.file.path);
+    } catch {
+      await discardFile();
+      return res.status(400).json({ error: 'The uploaded file could not be read.' });
     }
-    if (!mortal && request.bitrixLeadId) {
-      // The request form takes several reports, and the lead's Medical Report field may only
-      // keep one of them: the lead comment lists the names of all of them.
-      const reports = await prisma.document.findMany({
-        where: { caseId: request.case.id, type: 'Medical Report' },
-        orderBy: { uploadedAt: 'asc' },
-      });
-      const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-      const comments = commentWithReports(leadInputFromRequest(request, user).comments, reports.map((r) => r.name));
-      await sendMedicalReportToBitrix(request.bitrixLeadId, document, { comments });
-    }
-    res.status(201).json({ document: toSafeDocument(document) });
+    // A repeat of an upload this case already has returns the original BEFORE anything else (after the owner check above): no limit check, no scan, no second document, no Bitrix message.
+    // Its new file is deleted. Same id with different content is refused, never answered with a document that does not match.
+    const replayLegacy = async (prior) => {
+      await discardFile();
+      if (!(await sameStoredContent(prior, sha256))) return res.status(409).json({ error: 'That upload id was already used for a different file.', code: 'client_upload_id_reused' });
+      return res.status(200).json({ document: { ...toSafeDocument(prior), clientUploadId: prior.clientUploadId } });
+    };
+    const mortal = isMortalRequestKey(request.serviceKey);
+    const accept = async () => {
+      if (clientUploadId) {
+        const prior = await findCaseDocumentByClientUploadId(request.case.id, clientUploadId);
+        if (prior) return replayLegacy(prior);
+      }
+      // The same rules for every service: not on a cancelled or completed request, at most 30 documents (Mortal Remains 10), and the file's content must be what its type and name claim.
+      const problem = closedRequestProblem(request) || (await legacyUploadProblem(request, req.file));
+      if (problem) {
+        await discardFile();
+        return res.status(problem.status).json(problem.body);
+      }
+      // The storage service's checks first (storage/ingest.js validateUpload: real type, declared type, extension, document structure; a .doc is refused), so a file that could never be stored is
+      // refused before it is scanned. (A refusal is answered by the error handler; the temporary file is deleted on the way out.)
+      await validateUpload(req.file, { policy: 'patient' });
+      // SCAN BEFORE STORE (documents/legacy-scan.js): the row below is created only after a confirmed clean verdict, so nothing (the patient's download, the corporate portal, the Bitrix24
+      // message and its retry sweep) can ever see a document that was not scanned. Infected: 422 and quarantined. Scanner down, timeout or any other non-verdict: 503, deleted, FAIL CLOSED.
+      const scan = await scanBeforeStore(req.file, { expectedSha256: sha256 }); // { sha256, engine, scannedAt }: stored with the row as its clean scan record
+      // Then checked (type, structure, size) and moved into the storage service under a generated key (storage/ingest.js; the scan was already done, bound to this digest). The temporary file is
+      // always removed by ingestUpload.
+      const stored = await ingestUpload({ file: req.file, area: AREAS.CASE_DOCUMENTS, scan: 'deferred', policy: 'patient' });
+      fileOwned = true; // the temporary file is gone; the stored object is cleaned up explicitly below if no row ends up referring to it
+      if (stored.sha256 !== scan.sha256) {
+        await discardStored(stored.key); // the stored bytes are not the ones that were scanned: they cannot be vouched for
+        throw httpError(503, 'We could not scan this file for viruses right now, so it was not saved. Please try again in a moment.', 'scan_unavailable');
+      }
+      let document;
+      try {
+        // The count is taken again here, one upload at a time per Case (per process), so parallel uploads cannot both pass the check above and exceed the cap.
+        const written = await withUploadLock(`cap:${request.case.id}`, async () => {
+          const full = fileCountProblem(await prisma.document.count({ where: { caseId: request.case.id } }), request.serviceKey);
+          if (full) return { full };
+          return {
+            document: await addDocumentToCase(request.case.id, {
+              type: mortal ? MORTAL_DOCUMENT_TYPE : 'Medical Report',
+              name: safeDocumentName(req.file.originalname), // never the raw client text: no control or path characters, at most 191 characters (upload-policy.js)
+              fileUrl: stored.key,
+              fileSizeBytes: stored.size,
+              clientUploadId,
+              scan,
+            }),
+          };
+        });
+        if (written.full) {
+          await discardStored(stored.key);
+          return res.status(written.full.status).json(written.full.body);
+        }
+        document = written.document;
+      } catch (err) {
+        // A write that actually succeeded must never lose its file: only an object no row refers to is deleted.
+        const kept = await prisma.document.findFirst({ where: { fileUrl: stored.key }, select: { id: true } }).catch(() => null);
+        if (!kept) await discardStored(stored.key);
+        // The same upload arrived at the same instant in another process and won: the unique index is the final protection. Return the original; nothing else happens for this copy.
+        if (clientUploadId && isUniqueViolation(err)) {
+          const prior = await findCaseDocumentByClientUploadId(request.case.id, clientUploadId).catch(() => null);
+          if (prior) return replayLegacy(prior);
+        }
+        throw err;
+      }
+      if (!mortal && request.bitrixLeadId) {
+        // The request form takes several reports, and the lead's Medical Report field may only
+        // keep one of them: the lead comment lists the names of all of them.
+        const reports = await prisma.document.findMany({
+          where: { caseId: request.case.id, type: 'Medical Report' },
+          orderBy: { uploadedAt: 'asc' },
+        });
+        const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+        // Only documents with a confirmed clean scan are named (and, by the shared sender, only those are ever forwarded).
+        const comments = commentWithReports(leadInputFromRequest(request, user).comments, reports.filter(isScanClean).map((r) => r.name));
+        await sendMedicalReportToBitrix(request.bitrixLeadId, document, { comments });
+      }
+      return res.status(201).json({ document: { ...toSafeDocument(document), ...(document.clientUploadId ? { clientUploadId: document.clientUploadId } : {}) } });
+    };
+    // One copy of the same upload at a time (per process): a second copy waits, then finds the document and is answered from it: no second scan and no second Bitrix message.
+    return clientUploadId ? await withUploadLock(`${request.case.id}:${clientUploadId}`, accept) : await accept();
   } catch (err) {
+    await releaseUnlessStored().catch(() => {}); // a failed upload never leaves its file behind
     next(err);
   }
 }
@@ -229,7 +507,7 @@ async function uploadRequestDocument(req, res, next) {
 async function downloadRequestSummary(req, res, next) {
   try {
     const request = await getRequestForUser(req.user.id, req.params.id);
-    streamRequestSummaryPdf(res, request);
+    await streamRequestSummaryPdf(res, request);
   } catch (err) {
     next(err);
   }
@@ -239,6 +517,7 @@ module.exports = {
   submitRequest,
   listMyRequests,
   getMyRequestById,
+  getMyRequestByClientRequestId,
   listMyDocuments,
   uploadRequestDocument,
   downloadRequestSummary,

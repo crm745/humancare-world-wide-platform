@@ -5,6 +5,8 @@ const mockStore = { rows: [], calls: [] };
 
 jest.mock('../../src/db/prisma', () => ({
   prisma: {
+    // requireAuth looks the patient up once (a retired account is refused at once); these tests have no such account row.
+    user: { findUnique: jest.fn(async () => null) },
     notification: {
       findMany: jest.fn(async (args) => { mockStore.calls.push(['findMany', args]); return []; }),
       findFirst: jest.fn(async () => null),

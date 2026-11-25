@@ -3,6 +3,7 @@ import { ChevronLeft, Search, SlidersHorizontal } from 'lucide-react-native';
 import { headerSpec, scaleFor } from '../../lib/myRequestsLayout';
 import { COLORS } from '../../theme/colors';
 import { PressBox } from '../PressBox';
+import { ConnectionBanner } from '../network/ConnectionBanner';
 
 // The My Requests header (its own, not the shared TopBar / SearchHeader): the back button and title, the search field and
 // the filter button, and the status chips. The sizes are the design's (lib/myRequestsLayout.js), scaled to the screen.
@@ -38,6 +39,7 @@ function Chip({ label, count, on, onPress, L }) {
 export function RequestsHeader({ width, title, backLabel, searchPlaceholder, filterLabel, query, onQuery, onBack, onFilters, chips, value, onChange, isRTL }) {
   const L = headerSpec(scaleFor(width));
   return (
+    <>
     <View style={{ backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: LINE, paddingTop: L.padTop, paddingHorizontal: L.padSide, paddingBottom: L.padBottom, gap: L.gap }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: L.titleGap }}>
         <PressBox
@@ -72,5 +74,7 @@ export function RequestsHeader({ width, title, backLabel, searchPlaceholder, fil
         {chips.map((c) => <Chip key={c.value} label={c.label} count={c.count} on={value === c.value} onPress={() => onChange(c.value)} L={L} />)}
       </ScrollView>
     </View>
+    <ConnectionBanner />
+    </>
   );
 }

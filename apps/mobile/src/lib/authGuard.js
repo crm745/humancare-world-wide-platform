@@ -23,6 +23,7 @@ export const PUBLIC_ROUTES = new Set([
   '/terms',
   '/privacy',
   '/help-support',
+  '/cant-connect', // the offline startup screen for a saved session that could not be validated: static, shows no account data (app/cant-connect.js)
 ]);
 
 export const PATIENT_LOGIN = '/login';
@@ -100,5 +101,6 @@ export async function ensureAuthenticated() {
   const err = new Error(apiAuthStatus === 'anon' ? 'Please log in to continue.' : 'We could not check your session. Please try again.');
   if (apiAuthStatus === 'anon') err.status = 401;
   err.code = apiAuthStatus === 'anon' ? 'not_signed_in' : 'session_unverified';
+  err.notProcessed = true; // refused before any request was made
   throw err;
 }

@@ -61,9 +61,9 @@ describe('the screen', () => {
     expect(screen).toContain("{ notifications }) => notifications");
   });
   test('the existing API-based behaviour is unchanged', () => {
-    expect(screen).toContain('No notifications yet.');
+    expect(screen).toContain("t('notif_empty')"); // "No notifications yet.", in the person's language
     expect(screen).toContain("{loading && gate.visible && <RowsSkeleton label={t('sk_loading_notifications')} count={5} lines={2} />}");
-    expect(screen).toContain('{error && !data && <LoadFailure onRetry={reload} />}');
+    expect(screen).toContain('{error && !data && <LoadFailure titleKey="lf_title_notifications" error={error} onRetry={reload} />}');
     expect(screen).toContain('${read ? \'opacity-55\' : \'\'}');
     expect(screen).toContain('timeAgo(n.createdAt)');
     expect(screen).toContain("<TopBar title={t('notifications_title')} />");

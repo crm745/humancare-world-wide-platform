@@ -47,6 +47,12 @@ model User {
   googleId     String?  @unique @map("google_id")
   appleId      String?  @unique @map("apple_id")
   pushToken    String?  @map("push_token")
+  // Set when the patient retired their account (POST /auth/me/delete/confirm). The row is KEPT, not deleted: their requests, cases and documents
+  // still point at it (those foreign keys are Restrict on purpose). Everything that identifies or lets anyone sign in to the account is
+  // cleared at the same moment, and requireAuth refuses a token for a retired account at once. NULL for every live account.
+  deletedAt    DateTime? @map("deleted_at")
+  // The devices this patient is signed in on (see AuthSession). No column: the rows point here.
+  authSessions AuthSession[]
   createdAt    DateTime @default(now()) @map("created_at")
   requests     ServiceRequest[]
   consents     UserConsent[]
@@ -226,6 +232,37 @@ model AdminInvitation {
 // active per Admin (enforced in code under a row lock on admin_users). It locks after 30
 // minutes idle and ends at the absolute limit; both times are fixed when it is created or
 // last used. History is kept 365 days after expiry/revocation.
+// One signed-in DEVICE of a patient or a corporate user (admins have their own AdminSession). Every access and refresh token carries this row's id (`sid`); a token whose session is revoked,
+// idle or past its lifetime is refused, so signing out one device ends only that device and a password reset or an account retirement ends them all.
+//   refreshHash / previousHash   SHA-256 of the current / the previous refresh token's random id (jti), never the token. Each refresh rotates it; a token that is neither is a REUSE and revokes the
+//                                session (a short grace window for the previous one covers a lost answer on a bad connection).
+//   lastActivityAt               the last authenticated request (written at most once a minute): the server's idle timeout is 30 minutes after it.
+//   absoluteExpiresAt            createdAt + 7 days: the refresh policy, whatever the activity.
+// Exactly one of userId / corporateUserId is set: createSession (src/modules/auth/session.service.js) is the only writer and refuses anything else. (MySQL does not allow a CHECK on columns that have a
+// cascading foreign key, so the database cannot enforce it.)
+model AuthSession {
+  id                String         @id @db.Char(36)
+  userId            Int?           @map("user_id")
+  user              User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  corporateUserId   Int?           @map("corporate_user_id")
+  corporateUser     CorporateUser? @relation(fields: [corporateUserId], references: [id], onDelete: Cascade)
+  refreshHash       String         @db.Char(64) @map("refresh_hash")
+  previousHash      String?        @db.Char(64) @map("previous_hash")
+  rotatedAt         DateTime?      @map("rotated_at")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  lastActivityAt    DateTime       @default(now()) @map("last_activity_at")
+  absoluteExpiresAt DateTime       @map("absolute_expires_at")
+  revokedAt         DateTime?      @map("revoked_at")
+  revokedReason     String?        @db.VarChar(64) @map("revoked_reason")
+  // The device as the client reported itself (its User-Agent), shortened: shown in the list of signed-in devices. Not an identifier.
+  userAgent         String?        @db.VarChar(255) @map("user_agent")
+
+  @@index([userId, revokedAt, absoluteExpiresAt])
+  @@index([corporateUserId, revokedAt, absoluteExpiresAt])
+  @@index([absoluteExpiresAt])
+  @@map("auth_sessions")
+}
+
 model AdminSession {
   id                Int       @id @default(autoincrement())
   adminId           Int       @map("admin_id")
@@ -509,6 +546,8 @@ model CorporateUser {
   mustChangePassword Boolean   @default(false) @map("must_change_password")
   passwordChangedAt  DateTime? @map("password_changed_at")
   createdAt    DateTime  @default(now()) @map("created_at")
+  // The devices this corporate user is signed in on (see AuthSession). No column: the rows point here.
+  authSessions AuthSession[]
 
   @@map("corporate_users")
 }
@@ -526,7 +565,9 @@ model ServiceRequest {
   patientGender     String?  @map("patient_gender")
   patientLocation   String?  @map("patient_location")
   patientContact    String?  @map("patient_contact")
-  origin            String
+  // VARCHAR(2000): a Corporate Medical Solutions request keeps the company's complete Office Address here (up to 2,000 characters, never cut). Every other service
+  // still stores at most 191 characters in it (its validators and forms are unchanged).
+  origin            String   @db.VarChar(2000)
   destination       String
   country           String?
   // A calendar day, no time of day (SQL DATE). Written as a "YYYY-MM-DD" date at 00:00 UTC, which
@@ -539,11 +580,32 @@ model ServiceRequest {
   deceasedRelation  String?   @map("deceased_relation")
   placeOfDeath      String?   @map("place_of_death")
   dateOfDeath       DateTime? @map("date_of_death")
+  // Mortal Remains only: two independent choices, each validated by the API (not a database enum).
+  transferScope     String?   @map("transfer_scope") @db.VarChar(16) // "domestic" | "international"
+  transportMode     String?   @map("transport_mode") @db.VarChar(32) // "private_charter" | "commercial_air_cargo" | "ground_transportation"
+  // Home Healthcare only (validated by the API, not a database enum). Both are optional answers. Oxygen, Care Level and the Service Date reuse
+  // equip_oxygen, equip_oxygen_lpm, care_level and preferred_date.
+  careRequirement   String?   @map("care_requirement") @db.VarChar(16) // "12_hours" | "24_hours"
+  caretakerTypes    String?   @map("caretaker_types") @db.VarChar(255) // comma-joined, canonical order: "nurse" | "caretaker" | "nurse,caretaker"
+  // Medical Value Travel only (validated by the API): the approved specialty label, and the typed name when the specialty is "Other". NULL on every other service
+  // and on requests made before these columns (those keep them inside the description).
+  specialty         String?   @db.VarChar(191)
+  otherSpecialty    String?   @map("other_specialty") @db.VarChar(191)
+  // Teleconsultation only (validated by the API): "online" | "house_call". A House Call's Domestic / International scope is in transfer_scope. NULL otherwise
+  // and on requests made before this column (those keep it inside the description).
+  consultationType  String?   @map("consultation_type") @db.VarChar(16)
+  // Corporate Medical Solutions, employee-submitted (patient side) only; validated by the API. The company the employee's request is for, how many employees it
+  // covers, and the programmes chosen (a JSON array of keys such as ["doctor","nurse"]). The employee's name is patient_name and the gender patient_gender; the
+  // two optional requirement texts are in the description. NULL on every other service and on requests made before these columns.
+  companyName       String?   @map("company_name") @db.VarChar(191)
+  employeeCount     Int?      @map("employee_count")
+  selectedProgrammes Json?    @map("selected_programmes")
   // The medical page of the New Request form. Mobility and the equipment flags are only set
   // for patient-transport services (null otherwise, and on requests made before the page
   // existed); urgency is null on those older requests too.
   mobility          String?   @db.VarChar(191) // one or more of "bedridden" | "wheelchair" | "walking", joined with commas (Private Charter is multi-select)
   equipOxygen       Boolean?  @map("equip_oxygen")
+  equipOxygenLpm    Float?    @map("equip_oxygen_lpm") // litres per minute; Commercial Air only, and only while equipOxygen is true
   equipCardiacMonitor Boolean? @map("equip_cardiac_monitor")
   equipVentilator   Boolean?  @map("equip_ventilator")
   urgency           String?   @db.VarChar(16) // "critical_6h" | "urgent_24h" | "planned"
@@ -577,6 +639,11 @@ model ServiceRequest {
   updatedAt         DateTime  @updatedAt @map("updated_at")
   case              Case?
 
+  // Idempotent submission (migration 20261119130000_service_request_client_request_id): the random UUID the app sends once per logical submission and reuses for
+  // every retry of it. NULL on every request saved before this and on every request from an older app build (MySQL allows many NULLs in a unique index).
+  // Unique per patient, so a submission that arrives twice, or at the same moment twice, is saved once. Never shown to anyone but its owner.
+  clientRequestId        String?   @map("client_request_id") @db.VarChar(36)
+
   // Request-first review workflow (Private Charter only; see backend/REQUEST-REVIEW-WORKFLOW.md).
   // NULL on every older request and on every other service: those keep the original flow, where a
   // Case is created together with the request. Otherwise one of: "awaiting_documents" (nothing
@@ -592,6 +659,7 @@ model ServiceRequest {
   requestEvents          RequestEvent[]
   notifications          Notification[]
 
+  @@unique([userId, clientRequestId], map: "uq_service_requests_user_client_request")
   @@index([reviewStatus, createdAt])
   @@map("service_requests")
 }
@@ -637,7 +705,11 @@ model RequestDocument {
   documentRequestId Int?     @map("document_request_id")
   documentRequest   DocumentRequest? @relation(fields: [documentRequestId], references: [id], onDelete: Restrict)
   dealShares        BitrixDealDocument[]
+  // Phase 5: the app's random id for this logical upload, reused by every retry of it (see src/modules/requests/client-upload-id.js). NULL for every older row and every older
+  // app build; MySQL's unique index allows any number of NULLs.
+  clientUploadId    String?  @map("client_upload_id") @db.VarChar(36)
 
+  @@unique([serviceRequestId, clientUploadId], map: "uq_request_documents_request_client_upload")
   @@index([documentRequestId])
   @@index([serviceRequestId])
   @@index([scanStatus])
@@ -684,7 +756,8 @@ model Case {
   patientGender       String?   @map("patient_gender")
   patientContact      String?   @map("patient_contact")
   serviceType         String    @map("service_type")
-  origin              String
+  // VARCHAR(2000) like service_requests.origin: the Case copies its request's origin, which can now be a 2,000-character Office Address.
+  origin              String    @db.VarChar(2000)
   destination         String
   country             String?
   urgency             String?   @default("routine") // "routine" | "urgent" | "critical"
@@ -1502,8 +1575,22 @@ model Document {
   fileUrl       String   @map("file_url")
   fileSizeBytes Int?     @map("file_size_bytes")
   uploadedAt    DateTime @default(now()) @map("uploaded_at")
+  // Phase 5: the app's random id for this logical upload, reused by every retry of it (see src/modules/requests/client-upload-id.js). NULL for every older row and every older
+  // app build; MySQL's unique index allows any number of NULLs.
+  clientUploadId String? @map("client_upload_id") @db.VarChar(36)
+  // Phase 5 (legacy scan protection): the scan record of this file (see src/modules/documents/document-scan.js). scan_status NULL = a document from before scanning existed: never scanned,
+  // treated as NOT clean. New uploads are stored only after a confirmed clean ClamAV verdict and carry it.
+  sha256            String?   @db.Char(64)
+  scanStatus        String?   @map("scan_status") @db.VarChar(16)
+  scanEngine        String?   @map("scan_engine") @db.VarChar(40)
+  scanDetail        String?   @map("scan_detail") @db.VarChar(255)
+  scannedAt         DateTime? @map("scanned_at")
+  scanAttempts      Int       @default(0) @map("scan_attempts")
+  scanNextAttemptAt DateTime? @map("scan_next_attempt_at")
 
+  @@unique([caseId, clientUploadId], map: "uq_documents_case_client_upload")
   @@index([caseId])
+  @@index([scanStatus, scanNextAttemptAt], map: "idx_documents_scan_status")
   @@map("documents")
 }
 

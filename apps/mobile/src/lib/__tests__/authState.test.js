@@ -398,6 +398,6 @@ describe('wiring', () => {
   });
   test('the cover screen tells a storage failure from a network failure', () => {
     const gate = read('../../components/AuthGate.js');
-    expect(gate).toContain("decision.reason === 'storage'");
+    expect(gate).toContain("reason === 'storage'"); // (cantConnectState: the storage wording and no "saved session is safe" pill)
   });
 });

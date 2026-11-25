@@ -3,7 +3,11 @@ import { Image, Pressable, ScrollView, Text, View, useWindowDimensions } from 'r
 import { useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, FileQuestion, Share2 } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
+import { useNetwork } from '../state/NetworkContext';
 import { downloadErrorInfo } from '../lib/download';
+import { useRetryOnRestore } from '../lib/useRetryOnRestore';
+import { ConnectionBanner } from '../components/network/ConnectionBanner';
+import { NeedsInternet } from '../components/network/NeedsInternet';
 import { previewKind } from '../lib/documentPreview';
 import { shareDocumentFile, fetchDocumentFile } from '../lib/documentFile';
 import { useDocumentFile } from '../lib/useDocumentFile';
@@ -37,11 +41,13 @@ function Message({ title, text, children }) {
   );
 }
 
-function ActionButton({ label, onPress, busy }) {
+// `disabled` (with `hint`, the reason) is for the phone being offline: pale, not pressable, and a screen reader is told why.
+function ActionButton({ label, onPress, busy, disabled = false, hint }) {
+  const off = busy || disabled;
   return (
     <PressBox
-      accessibilityRole="button" accessibilityLabel={label} onPress={onPress} disabled={busy}
-      style={({ pressed }) => ({ minHeight: 48, minWidth: 160, paddingHorizontal: 22, borderRadius: 14, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', opacity: busy ? 0.5 : pressed ? 0.88 : 1 })}
+      accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled: off }} accessibilityHint={disabled ? hint : undefined} onPress={onPress} disabled={off}
+      style={({ pressed }) => ({ minHeight: 48, minWidth: 160, paddingHorizontal: 22, borderRadius: 14, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', opacity: off ? 0.45 : pressed ? 0.88 : 1 })}
     >
       <Text style={{ fontFamily: FONT[700], fontSize: 15, color: '#FFFFFF' }}>{label}</Text>
     </PressBox>
@@ -63,6 +69,7 @@ function ImagePreview({ uri, onFailed }) {
 
 export default function DocumentPreview() {
   const { t, toast } = useApp();
+  const { isOffline } = useNetwork();
   const params = useLocalSearchParams();
   const id = first(params.id);
   const name = first(params.name) || '';
@@ -74,6 +81,7 @@ export default function DocumentPreview() {
   // Share is an explicit tap. For a file that cannot be previewed nothing has been downloaded yet: it is fetched now, then shared.
   const share = async () => {
     if (sharing) return;
+    if (isOffline && !file.file) { toast(t('net_offline_text')); return; } // nothing is downloaded yet; the button is switched off offline, so this is only the safety net
     setSharing(true);
     let temporary = null;
     try {
@@ -88,15 +96,19 @@ export default function DocumentPreview() {
     }
   };
 
+  // The connection came back after the file failed to load: it is fetched again once (a read; the file is never uploaded or changed).
+  useRetryOnRestore({ failed: file.status === 'error', retry: () => { setBroken(false); file.retry(); }, enabled: Boolean(id) && kind !== 'unsupported' });
+
   let body;
   if (!id) {
     body = <Message title={t('docs_err_missing')} />;
   } else if (kind === 'unsupported') {
-    body = <Message title={t('dp_unsupported_title')} text={t('dp_unsupported_text')}><ActionButton label={t('dp_share')} onPress={share} busy={sharing} /></Message>;
+    body = <Message title={t('dp_unsupported_title')} text={t('dp_unsupported_text')}><ActionButton label={t('dp_share')} onPress={share} busy={sharing} disabled={isOffline} hint={t('net_offline_text')} /><NeedsInternet /></Message>;
   } else if (file.status === 'error') {
     body = (
       <Message title={t(downloadErrorInfo(file.error).key)}>
-        <ActionButton label={t('docs_try_again')} onPress={() => { setBroken(false); file.retry(); }} />
+        <ActionButton label={t('docs_try_again')} onPress={() => { setBroken(false); file.retry(); }} disabled={isOffline} hint={t('net_offline_text')} />
+        <NeedsInternet />
       </Message>
     );
   } else if (file.status !== 'ready') {
@@ -110,7 +122,7 @@ export default function DocumentPreview() {
       </Centered>
     );
   } else if (broken) {
-    body = <Message title={t(kind === 'image' ? 'dp_image_failed' : 'docs_err_generic')}><ActionButton label={t('docs_try_again')} onPress={() => { setBroken(false); file.retry(); }} /></Message>;
+    body = <Message title={t(kind === 'image' ? 'dp_image_failed' : 'docs_err_generic')}><ActionButton label={t('docs_try_again')} onPress={() => { if (isOffline) return; setBroken(false); file.retry(); }} /></Message>;
   } else if (kind === 'image') {
     body = <ImagePreview uri={file.file.uri} onFailed={() => setBroken(true)} />;
   } else if (PDF_VIEWER_AVAILABLE) {
@@ -142,6 +154,7 @@ export default function DocumentPreview() {
           </PressBox>
         ) : null}
       </View>
+      <ConnectionBanner />
       <View style={{ flex: 1 }}>{body}</View>
     </Screen>
   );

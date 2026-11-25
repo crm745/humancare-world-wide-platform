@@ -30,6 +30,47 @@ const EQUIPMENT = [
 // these ask for mobility and equipment. The key may carry a suffix ("commercialair_stretcher").
 const isTransportKey = (serviceKey) => /^(air|privatecharter|commercialair|ground)(_|$)/.test(serviceKey || '');
 
+// --- Commercial Air care level ("Critical level") ------------------------------------------------------------
+// Commercial Air has its OWN four care-level options, apart from the CARE_LEVEL_KEYS below (which Private Charter, and older
+// requests, use and which stay exactly as they are): ICU, Ventilated, Tracheostomy, ECMO. Stored as the keys, comma-joined
+// ("crit_icu,crit_ecmo"), in the same careLevel text column. One or more may be chosen, each at most once.
+const COMMERCIAL_AIR_CARE_LEVEL_LABEL_EN = {
+  crit_icu: 'ICU',
+  crit_ventilated: 'Ventilated',
+  crit_tracheostomy: 'Tracheostomy',
+  crit_ecmo: 'ECMO',
+};
+const COMMERCIAL_AIR_CARE_LEVEL_KEYS = Object.keys(COMMERCIAL_AIR_CARE_LEVEL_LABEL_EN);
+// Why a careLevel is not acceptable for Commercial Air, or null when it is. Only the four keys; the old care levels, the old
+// translated labels and free text are refused. A string (not a list), like every other service's careLevel.
+function commercialAirCareLevelProblem(value) {
+  const allowed = `Use one or more of: ${COMMERCIAL_AIR_CARE_LEVEL_KEYS.join(', ')} (comma-separated).`;
+  if (typeof value !== 'string') return `Invalid careLevel. ${allowed}`;
+  const pieces = value.split(',').map((piece) => piece.trim());
+  if (pieces.some((piece) => !COMMERCIAL_AIR_CARE_LEVEL_KEYS.includes(piece))) return `Invalid careLevel. ${allowed}`;
+  if (new Set(pieces).size !== pieces.length) return 'Invalid careLevel. Each option can be chosen only once.';
+  return null;
+}
+
+// --- Commercial Air oxygen flow rate -------------------------------------------------------------
+// Commercial Air only ("commercialair_stretcher" / "commercialair_wheelchair", or the bare key of older
+// builds). When Oxygen is chosen under "Required on board" the flow rate in litres per minute (LPM) is
+// required; without Oxygen it is refused. A positive number, up to OXYGEN_LPM_MAX, with at most one decimal.
+const isCommercialAirKey = (serviceKey) => /^commercialair(_|$)/.test(serviceKey || '');
+// Ground Ambulance ("ground") has the same medical page as Commercial Air, without Travel type: the four critical levels, Oxygen with its
+// flow rate, and no Patient mobility, Cardiac monitor or Ventilator. Its rules are keyed on this key alone (Private Charter and "air" are not it).
+const isGroundKey = (serviceKey) => /^ground(_|$)/.test(serviceKey || '');
+// The services that ask the critical levels (crit_*) and the oxygen flow rate.
+const usesCriticalLevelPage = (serviceKey) => isCommercialAirKey(serviceKey) || isGroundKey(serviceKey);
+const OXYGEN_LPM_MAX = 15;
+// Why a value is not an acceptable flow rate, or null when it is. Only a JSON number is accepted (not text).
+function oxygenLpmProblem(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'equipOxygenLpm must be a number (litres per minute).';
+  if (value <= 0 || value > OXYGEN_LPM_MAX) return `equipOxygenLpm must be greater than 0 and at most ${OXYGEN_LPM_MAX} LPM.`;
+  if (Math.abs(value * 10 - Math.round(value * 10)) > 1e-9) return 'equipOxygenLpm can have at most one decimal place.';
+  return null;
+}
+
 // --- Private Charter Air Ambulance (serviceKey "privatecharter") --------------------------
 // The strict validation in modules/requests/private-charter.validation.js applies to this
 // key only. The service name is the backend's own: a client-sent serviceType must match it.
@@ -95,5 +136,7 @@ module.exports = {
   CRITICAL_LEVEL_COLUMN_MAX, criticalLevelList, criticalLevelColumn, criticalLevelText, CITY_NAME_MIN, CITY_NAME_MAX,
   CARE_LEVEL_LABEL_EN,
   MOBILITY, MOBILITY_LABEL, mobilityText, URGENCY, URGENCY_LABEL, URGENCY_TO_CASE, EQUIPMENT, isTransportKey,
+  isCommercialAirKey, isGroundKey, usesCriticalLevelPage, OXYGEN_LPM_MAX, oxygenLpmProblem,
+  COMMERCIAL_AIR_CARE_LEVEL_KEYS, COMMERCIAL_AIR_CARE_LEVEL_LABEL_EN, commercialAirCareLevelProblem,
   PRIVATE_CHARTER_KEY, PRIVATE_CHARTER_SERVICE_TYPE, GENDERS, CARE_LEVEL_KEYS, CARE_LEVEL_EXCLUSIVE, CARE_LEVEL_LEGACY_LABELS,
 };

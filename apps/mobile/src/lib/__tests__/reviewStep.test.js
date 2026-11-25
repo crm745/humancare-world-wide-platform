@@ -21,9 +21,15 @@ const FULL = {
   service: 'air', name: 'Ananya Sharma', age: '34', gender: 'Female', cc: '+91', phone: '9876543210', country: 'India',
   location: 'City General Hospital, Andheri West, Mumbai, Maharashtra, India', dest: 'Sunrise Heart Institute, Baner, Pune, Maharashtra, India',
   date: '2026-11-15', urgency: 'urgent_24h', desc: 'Post-operative cardiac patient needing monitoring during the transfer.',
-  care: ['care_stable'], mobility: 'wheelchair', equipOxygen: true, equipCardiac: true, equipVentilator: false,
+  care: ['care_stable'], mobility: 'wheelchair', equipOxygen: true, oxygenLpm: '4', equipCardiac: true, equipVentilator: false,
   travelType: 'organ_transfer', criticalLevel: ['ecmo'], oxygenRequired: true, oxygenFlowLpm: '4',
-  airlineMode: 'stretcher', mortalTransfer: 'domestic', relation: 'Father', deathPlace: 'Sunrise Heart Institute, Pune', deathDate: '2026-10-01',
+  airlineMode: 'stretcher', mortalTransfer: 'domestic', transferScope: 'domestic', transportMode: 'private_charter', relation: 'Father', deathPlace: 'Sunrise Heart Institute, Pune', deathDate: '2026-10-01',
+  teleScope: 'international', teleType: 'house_call', address: 'Flat 4B, Rose Villa\nMG Road, Pune 411001', allergies: 'Penicillin.',
+  homeAddress: 'Flat 4B, Rose Villa  \r\nMG Road, Pune 411001\n', homeCaretakers: ['nurse', 'caretaker'], homeCareHours: '12_hours', homeCareLevel: 'full_icu', homeOxygen: 'yes',
+  treatmentScope: 'international', specialty: 'Other', otherSpecialty: 'Sports medicine',
+  serviceScope: 'international', marineCare: ['crit_icu', 'crit_ecmo'], marineOxygen: 'yes',
+  corpCompany: 'Acme Industries Pvt Ltd', corpEmployees: '250', corpProgrammes: ['events', 'doctor'], corpAny: 'Two doctors on site.', corpSpecial: 'Night shift cover.',
+  corpOfficeAddress: 'Plot 14, Andheri East,\nMumbai 400069', corpOfficeCountry: 'United Arab Emirates', corpOfficeCountryIso: 'AE',
   files: [
     { uri: 'file:///x/discharge-summary.pdf', name: 'discharge-summary.pdf', mimeType: 'application/pdf', size: 1258291 },
     { uri: 'file:///x/ecg.png', name: 'ecg.png', mimeType: 'image/png', size: 655360 },
@@ -100,8 +106,8 @@ describe('empty fields and empty sections are hidden', () => {
     expect(v.patient.fields.find((f) => f.key === 'contact')).toBeUndefined();
   });
   test('Required on board: only the items that are on; none on hides the whole row', () => {
-    expect(reviewView({ ...base, equipOxygen: false, equipCardiac: true }, svc('ground'), t).medical.equipment).toEqual({ items: ['Cardiac monitor'], none: false });
-    expect(reviewView({ ...base, equipOxygen: false, equipCardiac: false, equipVentilator: false }, svc('ground'), t).medical.equipment).toBe(null);
+    expect(reviewView({ ...base, equipOxygen: false, equipCardiac: true }, svc('air'), t).medical.equipment).toEqual({ items: ['Cardiac monitor'], none: false });
+    expect(reviewView({ ...base, equipOxygen: false, equipCardiac: false, equipVentilator: false }, svc('air'), t).medical.equipment).toBe(null);
   });
   test('a real value that looks empty is NOT hidden: age 0', () => {
     expect(reviewView({ ...base, age: '0' }, svc('ground'), t).patient.fields.find((f) => f.key === 'age')).toMatchObject({ value: '0' });
@@ -144,7 +150,7 @@ describe('"Show more" only for long text', () => {
 });
 
 describe('every service shows every field its form collects', () => {
-  const KEYS = Object.keys(SERVICES).filter((k) => k !== 'corporate');
+  const KEYS = Object.keys(SERVICES);
   const draftKeys = (() => {
     const src = read('state/AppContext.js');
     const body = src.slice(src.indexOf('export const INITIAL_DRAFT = {'), src.indexOf('\n};', src.indexOf('export const INITIAL_DRAFT = {')));
@@ -153,7 +159,7 @@ describe('every service shows every field its form collects', () => {
 
   test('every key of the form\'s draft is either shown somewhere or is bookkeeping (nothing collected is left off)', () => {
     const known = new Set([
-      ...Object.keys(FORM_FIELDS.always), ...Object.keys(FORM_FIELDS.transport), ...Object.keys(FORM_FIELDS.commercialair), ...Object.keys(FORM_FIELDS.mortal), ...Object.keys(FORM_FIELDS.privatecharter), ...NOT_SHOWN,
+      ...Object.keys(FORM_FIELDS.always), ...Object.keys(FORM_FIELDS.transport), ...Object.keys(FORM_FIELDS.commercialair), ...Object.keys(FORM_FIELDS.mortal), ...Object.keys(FORM_FIELDS.privatecharter), ...Object.keys(FORM_FIELDS.tele), ...Object.keys(FORM_FIELDS.home), ...Object.keys(FORM_FIELDS.mvt), ...Object.keys(FORM_FIELDS.marine), ...Object.keys(FORM_FIELDS.corporate), ...NOT_SHOWN,
     ]);
     expect(draftKeys.length).toBeGreaterThan(25);
     expect(draftKeys.filter((k) => !known.has(k))).toEqual([]);
@@ -168,30 +174,61 @@ describe('every service shows every field its form collects', () => {
     country: (v) => v.patient.fields.some((f) => f.key === 'country' && f.value === 'India'),
     location: (v) => v.trip.from === FULL.location,
     dest: (v) => v.trip.to === FULL.dest,
-    date: (v) => v.trip.rows.some((r) => r.key === 'date' && r.value === '15 Nov 2026'),
+    // the date of service is on the Trip; for Teleconsultation (a House Call's Preferred Visit Date) it is with the medical details
+    date: (v) => v.trip.rows.some((r) => r.key === 'date' && r.value === '15 Nov 2026') || v.medical.details.some((r) => r.key === 'visitDate' && r.value === '15 Nov 2026')
+      || v.patient.fields.some((f) => f.key === 'serviceDate' && f.value === '15 Nov 2026')
+      || v.medical.details.some((r) => r.key === 'treatmentDate' && r.value === '15 Nov 2026') // Medical Value Travel's Preferred Treatment Date
+      || v.medical.details.some((r) => r.key === 'serviceDate' && r.value === '15 Nov 2026'), // Marine Medical Safety's Date of Service
+    homeAddress: (v) => v.patient.fields.some((f) => f.key === 'address' && f.value === FULL.homeAddress),
+    homeCaretakers: (v) => v.medical.details.some((r) => r.key === 'caretaker' && r.value === 'Nurse, Caretaker'),
+    homeCareHours: (v) => v.medical.details.some((r) => r.key === 'hours' && r.value === '12 Hours'),
+    homeCareLevel: (v) => v.medical.details.some((r) => r.key === 'careLevel' && r.value === 'Full ICU'),
+    homeOxygen: (v) => v.medical.details.some((r) => r.key === 'oxygen' && r.value.includes('4 LPM')),
+    teleScope: (v) => v.patient.fields.some((f) => f.key === 'scope' && f.value === 'International'),
+    // Medical Value Travel: the Treatment Scope is a patient detail; the Specialty (and the Other text) a medical one
+    treatmentScope: (v) => v.patient.fields.some((f) => f.key === 'scope' && f.value === 'International'),
+    specialty: (v) => v.medical.details.some((r) => r.key === 'specialty' && r.value === 'Other: Sports medicine'),
+    otherSpecialty: (v) => v.medical.details.some((r) => r.key === 'specialty' && r.value.includes('Sports medicine')),
+    // Marine Medical Safety: the Service Scope is a patient detail; the Critical Level and the Oxygen answer are medical ones
+    serviceScope: (v) => v.patient.fields.some((f) => f.key === 'scope' && f.value === 'International'),
+    marineCare: (v) => v.medical.details.some((r) => r.key === 'criticalLevel' && r.value === 'ICU, ECMO'),
+    marineOxygen: (v) => v.medical.details.some((r) => r.key === 'oxygen' && r.value.includes('4 LPM')),
+    teleType: (v) => v.patient.fields.some((f) => f.key === 'type' && f.value === 'House Call'),
+    address: (v) => v.patient.fields.some((f) => f.key === 'address' && f.value === FULL.address),
+    allergies: (v) => v.medical.details.some((r) => r.key === 'allergies' && r.value === 'Penicillin.'),
     urgency: (v) => !!v.medical.urgency,
     desc: (v) => v.medical.condition === FULL.desc,
     files: (v) => v.documents.length === 2,
     care: (v) => v.medical.care.length === 1,
     mobility: (v) => v.medical.mobility === 'Wheelchair',
-    equipOxygen: (v) => !!v.medical.equipment && v.medical.equipment.items.includes('Oxygen'),
+    equipOxygen: (v) => !!v.medical.equipment && v.medical.equipment.items.some((item) => item.startsWith('Oxygen')),
+    oxygenLpm: (v) => (!!v.medical.equipment && v.medical.equipment.items.includes('Oxygen (4 LPM)')) || v.medical.details.some((r) => r.key === 'oxygen' && r.value === 'Oxygen (4 LPM)'),
     equipCardiac: (v) => !!v.medical.equipment && v.medical.equipment.items.includes('Cardiac monitor'),
     equipVentilator: () => true, // false in FULL (see below: checked with a draft that has it on)
-    airlineMode: (v) => v.trip.rows.some((r) => r.key === 'travel'),
+    airlineMode: (v) => v.medical.travel === 'Stretcher', // Travel type is in the Medical details (it was on the Trip)
     travelType: (v) => v.trip.rows.some((r) => r.key === 'travelType' && r.value === 'Organ Transfer'),
     criticalLevel: (v) => v.medical.criticalLevel === 'ECMO',
     oxygenRequired: (v) => v.medical.oxygen === 'Yes, 4 LPM',
     oxygenFlowLpm: (v) => v.medical.oxygen === 'Yes, 4 LPM',
-    mortalTransfer: (v) => v.trip.rows.some((r) => r.key === 'transfer'),
+    transferScope: (v) => v.patient.fields.some((f) => f.key === 'scope' && f.value === 'Domestic'),
+    transportMode: (v) => v.patient.fields.some((f) => f.key === 'mode' && f.value === 'Private Charter'),
     relation: (v) => v.patient.fields.some((f) => f.key === 'relation'),
     deathPlace: (v) => v.patient.fields.some((f) => f.key === 'deathPlace' && f.value === FULL.deathPlace),
     deathDate: (v) => v.patient.fields.some((f) => f.key === 'deathDate' && f.value === '01 Oct 2026'),
+    // Corporate Medical Solutions: the company and the employee count are patient details; the programmes and the two requirements are medical ones
+    corpCompany: (v) => v.patient.fields.some((f) => f.key === 'company' && f.value === 'Acme Industries Pvt Ltd'),
+    corpEmployees: (v) => v.patient.fields.some((f) => f.key === 'employees' && f.value === '250'),
+    corpProgrammes: (v) => v.medical.details.some((r) => r.key === 'programmes' && r.value === 'Doctor, Events'),
+    corpAny: (v) => v.medical.details.some((r) => r.key === 'anyRequirement' && r.value === 'Two doctors on site.'),
+    corpSpecial: (v) => v.medical.details.some((r) => r.key === 'specialRequirement' && r.value === 'Night shift cover.'),
+    corpOfficeAddress: (v) => v.patient.fields.some((f) => f.key === 'officeAddress' && f.value === 'Plot 14, Andheri East,\nMumbai 400069'),
+    corpOfficeCountry: (v) => v.patient.fields.some((f) => f.key === 'officeCountry' && f.value === 'United Arab Emirates'),
   };
 
   KEYS.forEach((key) => {
     test(`${key}: every field it collects is on the page`, () => {
       // the service key the form sends: the sub-type is part of it for Commercial Airlines and Mortal Remains
-      const full = key === 'commercialair' ? 'commercialair_stretcher' : key === 'mortal' ? 'mortal_domestic' : key;
+      const full = key === 'commercialair' ? 'commercialair_stretcher' : key === 'mortal' ? 'mortal' : key;
       const v = reviewView({ ...FULL, equipVentilator: true }, svc(full), t);
       const expected = fieldsFor(full);
       Object.keys(expected).forEach((field) => {
@@ -221,19 +258,31 @@ describe('every service shows every field its form collects', () => {
     expect(hospital.patient.fields.map((f) => f.key)).not.toContain('relation');
   });
 
-  test('Mortal Remains: the deceased\'s details, the transfer type and "Details", and the documents are the death certificate', () => {
-    const v = reviewView(FULL, svc('mortal_domestic'), t);
+  test('Mortal Remains: the deceased\'s details, the Transfer Scope and Transport Mode, "Details", and the documents are neutral supporting documents', () => {
+    const v = reviewView(FULL, svc('mortal'), t);
     expect(v.patient.titleKey).toBe('rd_deceased');
-    expect(v.patient.fields.find((f) => f.key === 'name').label).toBe('Deceased name');
+    expect(v.patient.fields.find((f) => f.key === 'name').label).toBe("Deceased Person's Name");
+    // the approved review order: name, age, gender, relationship, scope, mode, place of death, country, date of death, contact
+    expect(v.patient.fields.map((f) => f.key)).toEqual(['name', 'age', 'gender', 'relation', 'scope', 'mode', 'deathPlace', 'country', 'deathDate', 'contact']);
+    expect(v.patient.fields.find((f) => f.key === 'scope')).toMatchObject({ label: 'Transfer Scope', value: 'Domestic' });
+    expect(v.patient.fields.find((f) => f.key === 'mode')).toMatchObject({ label: 'Transport Mode', value: 'Private Charter' });
     expect(v.medical.conditionLabel).toBe('Details');
+    expect(v.medical.urgency).toBeTruthy();
+    expect(v.trip.rows.map((r) => r.key)).toEqual(['date']);
     expect(v.trip.rows.find((r) => r.key === 'date').label).toBe('Preferred transfer date');
-    expect(v.trip.rows.find((r) => r.key === 'transfer').value).toBe('Within India');
-    expect(v.documents[0].meta.startsWith('Death certificate')).toBe(true);
+    // one combined upload section: the app cannot tell the certificate from the other files, so none is called a Death certificate
+    expect(v.documents[0].meta.startsWith('Supporting document')).toBe(true);
+    expect(v.documents[0].meta.startsWith('Death certificate')).toBe(false);
+  });
+  test('Mortal Remains: age 0 is shown (it is a valid age for the deceased)', () => {
+    const v = reviewView({ ...FULL, age: '0' }, svc('mortal'), t);
+    expect(v.patient.fields.find((f) => f.key === 'age').value).toBe('0');
   });
 
   test('Commercial Airlines: the travel type', () => {
     const v = reviewView(FULL, svc('commercialair_stretcher'), t);
-    expect(v.trip.rows.find((r) => r.key === 'travel').value).toBe('Stretcher (CAS)');
+    expect(v.medical.travel).toBe('Stretcher');
+    expect(v.trip.rows.map((r) => r.key)).toEqual(['date']); // no longer on the Trip
   });
 });
 
@@ -267,12 +316,51 @@ describe('Edit and Change go to the right step; Submit is unchanged', () => {
   test('changeService and submit (the payloads, uploads, validation and error handling) are byte-for-byte what they were', () => {
     const a = review.indexOf('  const changeService = () => {');
     const b = review.indexOf('  // While files upload');
-    expect(crypto.createHash('sha256').update(review.slice(a, b)).digest('hex')).toBe('1f2805677623e1bee4e60c793b742838ba3038b2e0f61a8469d08a1b50b48d2c');
+    // Re-recorded for Commercial Air, Ground Ambulance and Teleconsultation: the only changes to this block are the `equipOxygenLpm`, `careLevel`, `mobility`,
+    // `equipCardiacMonitor` and `equipVentilator` lines in the "every other service" body (checked in commercialAirOxygen / CareLevel / Form.test.js and
+    // groundAmbulanceForm.test.js), and the Teleconsultation branch added before the Private Charter one (checked in teleConsultationForm.test.js).
+    // Re-recorded again for Mortal Remains: the only changes to this block are (1) the Mortal Remains body, sent through buildMortalPayload (lib/mortalRemains.js,
+    // checked in mortalRemainsForm.test.js) instead of the generic body (which keeps its own lines, minus its deceased fields), and (2) the failed-upload message,
+    // which names the files for Mortal Remains. Every other service's body, the Teleconsultation branch and the Private Charter branch are untouched.
+    // Re-recorded once more for Home Healthcare: the only change to this block is one extra branch, `isHomeService(d.service) ? await apiPost('/requests', buildHomePayload(d))`,
+    // between the Mortal Remains body and the generic body (checked in homeHealthcareForm.test.js). The generic body itself, the Teleconsultation branch and the Private
+    // Charter branch are untouched.
+    // Re-recorded once more for Medical Value Travel: the only change to this block is one extra branch, `isMvtService(d.service) ? await apiPost('/requests', buildMvtPayload(d))`,
+    // between the Home Healthcare body and the generic body (checked in medicalValueTravelForm.test.js). The generic body (which an older `medvalue` request still
+    // uses on the server), the Home Healthcare and Mortal Remains branches, the Teleconsultation branch and the Private Charter branch are untouched.
+    // Re-recorded once more for Marine Medical Safety: the only change to this block is one extra branch, `isMarineService(d.service) ? await apiPost('/requests', buildMarinePayload(d))`,
+    // between the Medical Value Travel body and the generic body (checked in marineMedicalSafetyForm.test.js). The generic body (which an older `marine` request still uses on the
+    // server), the Medical Value Travel, Home Healthcare and Mortal Remains branches, the Teleconsultation branch and the Private Charter branch are untouched.
+    // Re-recorded once more for Corporate Medical Solutions: the only change to this block is one extra branch before the Private Charter one,
+    // `if (isCorporateService(d.service)) { ... await apiPost('/requests', buildCorporatePayload(d)) ... }` (checked in corporateMedicalForm.test.js). Every other branch is untouched.
+    // The Private Charter branch itself is untouched.
+    // Re-recorded for Phase 4 (idempotent submission): every send now goes through `send(...)`, which adds the submission's idempotency key (lib/requestSubmission.js) and confirms
+    // the key once the server has saved the request; the catch starts with the unknown-outcome check (an answer that never arrived is not shown as a failure); the
+    // "Check status" function sits before the upload label. The payload builders, the generic body, the uploads and the field-error handling are untouched
+    // (requestIdempotency.test.js checks all of this).
+    // Re-recorded again for the Phase 4 follow-up (recovery safety): a retry sends the ORIGINAL payload, so `send` passes `sendOriginal`; the catch tells an edited form (nothing sent)
+    // apart from an unconfirmed outcome and a confirmed refusal; and the explicit choices (send the original again, submit the changes as a new request, keep the original) sit next to
+    // "Check status". The payload builders and every service's body are untouched.
+    // Re-recorded for the simplified offline experience: the recovery cards and their handlers (Check status, send the original, keep the original, submit changes) are gone from submit();
+    // a lost answer is one short message and the same Submit button is the retry (same key, original payload). The payload builders and every other line are as before.
+    // Re-recorded for Phase 5: submit() now sends every service's documents through sendWithDocuments (runSubmission with per-file upload ids, a Cancel button, and unknown outcomes kept apart
+    // from refusals); the payload builders themselves, and every other line of the block, are as before (uploadRecovery.test.js).
+    // Re-recorded for the new network design: a lost or already-sent answer sets a notice (setNotice) shown above the button instead of a toast (components/network/StatusNotice.js).
+    // Re-recorded for the offline fixes: a Private Charter place typed offline is matched to the verified city list, online, before anything is sent (charterDraft; lib/citySearch.js resolveCharterCities).
+    // Re-recorded for the restart-protection fix: guardedSend (lib/submissionGate.js) asks the server about an unresolved earlier submission before any send, send() passes the service, and a blocked or lost answer sets the Try again label (submissionRestart.test.js).
+    // Re-recorded for the Phase 4 final safety fix: a refusal of a LATER attempt (session expired or unverified, a 4xx) while an earlier attempt is unconfirmed no longer ends the
+    // pending state: Review tells the person about the refusal and keeps the unconfirmed card (requestUnknownState.test.js).
+    // Re-recorded for the localization pass: the one toast of this block ("Upload at least one document ...") now reads t('req_err_need_doc') and the error toast reads errorText(err, t) (lib/errorText.js: the app's own errors in the person's language); nothing else in the block changed.
+    // Re-recorded for the server-error localization (M1): the field errors of a refusal are read with fieldErrorsFromError(err, t), so a refused field is shown in the person's language when the server sent its stable code (lib/serverErrors.js); the English text stays the fallback. Nothing else in the block changed.
+    // Re-recorded for the merge of the notification / Private Charter redesign branch with the login-frontend branch: the only change to this block is the generic body's `mobility` line, which keeps the
+    // draft's list shape (singleChoice(mobilityList(d.mobility)): at most one key is sent) next to Commercial Air's and Ground's no-mobility rule (asksPatientMobility).
+    expect(crypto.createHash('sha256').update(review.slice(a, b)).digest('hex')).toBe('c999b174e8dc790cc7003ebc571c5c41a4119dd6d5b42ef8daba5ae913ecdc8a');
   });
   test('the payload bodies are still there', () => {
-    expect(review).toContain('buildPrivateCharterPayload(d)');
+    expect(review).toContain('buildPrivateCharterPayload(charterDraft)');
     expect(review).toContain("patientLocation: d.location,");
-    expect(review).toContain("...(mortal ? { deceasedRelation: d.relation, placeOfDeath: d.deathPlace, dateOfDeath: d.deathDate } : {}),");
+    // (Mortal Remains' own body, lib/mortalRemains.js buildMortalPayload, replaced the generic body's deceased fields)
+    expect(review).toContain('buildMortalPayload(d)');
   });
 });
 
@@ -299,7 +387,7 @@ describe('the pieces', () => {
   test('the document row: one line with an ellipsis, a chevron only when it opens, primarySoft / #E0F5F4 tiles', () => {
     const blocks = read('components/request/DetailsBlocks.js');
     expect(blocks).toContain("backgroundColor: doc.isImage ? '#E0F5F4' : COLORS.primarySoft");
-    expect(blocks).toContain('{doc.openable ? <ChevronRight size={20}');
+    expect(blocks).toContain('{doc.openable && !offline ? <ChevronRight size={20}');
     expect(blocks).toContain('if (!doc.openable) return <View style={box}>{body}</View>;');
   });
   test('the care level and mobility sit side by side on the review page', () => {
@@ -343,7 +431,7 @@ describe('Edit and Change are translated, and labels are in sentence case', () =
     expect(i18n.EN.lbl_medical_report).toBe('Medical report');
     expect(i18n.EN.lbl_death_certificate).toBe('Death certificate');
     expect(i18n.EN.field_contact_number).toBe('Contact number');
-    expect(i18n.EN.lbl_deceased_name).toBe('Deceased name');
+    expect(i18n.EN.lbl_deceased_name).toBe("Deceased Person's Name"); // the approved wording (a proper name, not sentence case)
     expect(i18n.EN.field_location).toBe('Current location');
     expect(i18n.EN.field_preferred_date).toBe('Date of service');
     expect(i18n.EN.field_relation).toBe('Your relation to the deceased');

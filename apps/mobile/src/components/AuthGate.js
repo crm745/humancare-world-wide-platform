@@ -1,17 +1,27 @@
 import { useEffect } from 'react';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 import { router, usePathname } from 'expo-router';
 import { useApp } from '../state/AppContext';
+import { useNetwork } from '../state/NetworkContext';
+import { cantConnectState, cantConnectText } from '../lib/cantConnect';
+import { StateView } from './network/StateView';
+import { TextButton } from './network/TextButton';
 import { guardDecision, loginRouteFor, setCurrentPath } from '../lib/authGuard';
 import { Spinner } from './Spinner';
-import { Text } from './ui';
 import { COLORS } from '../theme/colors';
+
+// The state the cover shows: 'storage' (the phone could not read the saved session) or the connection / server.
+function retryView(reason, net, t) {
+  const state = cantConnectState({ authStatus: reason === 'storage' ? 'error' : 'unreachable', net });
+  return { icon: state.icon, title: cantConnectText(t, state.titleKey), body: cantConnectText(t, state.bodyKey), pill: state.safePill ? { icon: 'shield', text: cantConnectText(t, 'cc_safe') } : null };
+}
 
 // The one authentication gate for the whole app (see lib/authGuard.js for the rules). It sits over the
 // navigator: a protected screen is covered, and never visible, until the session has been checked with
 // the server; no valid session means a redirect to Login. Public screens are never covered.
 export function AuthGate() {
-  const { authStatus, retryAuth } = useApp();
+  const { t, authStatus, retryAuth } = useApp();
+  const net = useNetwork();
   const pathname = usePathname();
   const decision = guardDecision({ pathname, status: authStatus });
 
@@ -32,21 +42,15 @@ export function AuthGate() {
     >
       {decision.action === 'retry' ? (
         <>
-          <Text className="font-inter-bold" style={{ fontSize: 16, color: '#0D2340', textAlign: 'center' }}>
-            {decision.reason === 'storage' ? "We couldn't open your saved session" : "We can't reach the server"}
-          </Text>
-          <Text style={{ marginTop: 6, fontSize: 13.5, color: '#5B6B84', textAlign: 'center' }}>
-            {decision.reason === 'storage' ? 'Try again, or log in again.' : 'Check your connection and try again.'}
-          </Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Try again" onPress={retryAuth} style={{ marginTop: 18, minHeight: 44, minWidth: 140, borderRadius: 12, backgroundColor: COLORS.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 }}>
-            <Text className="font-inter-bold" style={{ fontSize: 14.5, color: '#FFFFFF' }}>Try again</Text>
-          </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel="Log in" onPress={() => router.replace(loginRouteFor(pathname))} style={{ marginTop: 6, minHeight: 44, justifyContent: 'center' }}>
-            <Text className="font-inter-bold" style={{ fontSize: 14, color: COLORS.primary }}>Log in</Text>
-          </Pressable>
+          {/* The same state layout as Can't Connect (components/network/StateView.js), in the person's language: what is wrong, Try again, and (when the connection is the problem) that the saved session is safe. */}
+          <StateView
+            {...retryView(decision.reason, net, t)}
+            retryLabel={cantConnectText(t, 'cc_try_again')} onRetry={retryAuth} style={{ width: '100%', maxWidth: 360 }}
+          />
+          <TextButton title={t('login_btn')} onPress={() => router.replace(loginRouteFor(pathname))} style={{ marginTop: 6 }} />
         </>
       ) : (
-        <View accessible accessibilityLabel="Loading" accessibilityRole="progressbar">
+        <View accessible accessibilityLabel={t('a11y_loading')} accessibilityRole="progressbar">
           <Spinner size={30} color={COLORS.primary} trackColor={COLORS.primarySoft} />
         </View>
       )}

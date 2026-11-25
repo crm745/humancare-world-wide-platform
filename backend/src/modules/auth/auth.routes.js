@@ -6,6 +6,7 @@ const {
   otpSendIpLimiter,
   patientLoginLimiter,
   otpVerifyLimiter,
+  logoutLimiter,
 } = require('../../common/middleware/rate-limit.middleware');
 const {
   register,
@@ -31,6 +32,12 @@ const {
   resetPassword,
   changePassword,
   corporateLogout,
+  logout,
+  listMySessions,
+  revokeMySession,
+  revokeOtherSessions,
+  startAccountDeletion,
+  confirmAccountDeletion,
 } = require('./auth.controller');
 
 const authRouter = Router();
@@ -64,6 +71,12 @@ authRouter.post('/corporate/reset-password', resetPassword);
 // The two routes a restricted (first-login) corporate token may still use.
 authRouter.post('/corporate/change-password', requireAuth(['corporate'], { allowPasswordChangePending: true }), changePassword);
 authRouter.post('/corporate/logout', corporateLogout);
+// Patient sign-out: revokes the session on the server (see logout in auth.controller.js).
+authRouter.post('/logout', logoutLimiter, logout);
+// The signed-in devices: list them, sign one out, sign all the others out (patients and corporate users; a corporate user with a restricted first-login session cannot).
+authRouter.get('/sessions', requireAuth(['patient', 'corporate']), listMySessions);
+authRouter.post('/sessions/revoke-others', logoutLimiter, requireAuth(['patient', 'corporate']), revokeOtherSessions);
+authRouter.delete('/sessions/:id', logoutLimiter, requireAuth(['patient', 'corporate']), revokeMySession);
 
 authRouter.post('/refresh', refreshAccessToken);
 authRouter.get('/me', requireAuth(undefined, { allowPasswordChangePending: true }), getMe);
@@ -72,5 +85,9 @@ authRouter.patch('/me', requireAuth(['patient']), updateMe);
 authRouter.post('/me/contact', requireAuth(['patient']), patientLoginLimiter, otpSendIpLimiter, requestContactChange);
 authRouter.post('/me/contact/verify-otp', requireAuth(['patient']), otpVerifyLimiter, verifyContactChange);
 authRouter.post('/push-token', requireAuth(['patient']), savePushToken);
+// Retire the signed-in PATIENT's own account (never a corporate or admin one: the role list refuses them). Step 1 sends a code to the account's own contact
+// (no password is asked for); step 2 needs that code, the step-1 ticket and the explicit confirmation. The row is kept and anonymised, never deleted: see auth.controller.js.
+authRouter.post('/me/delete/start', requireAuth(['patient']), patientLoginLimiter, otpSendIpLimiter, startAccountDeletion);
+authRouter.post('/me/delete/confirm', requireAuth(['patient']), otpVerifyLimiter, confirmAccountDeletion);
 
 module.exports = { authRouter };

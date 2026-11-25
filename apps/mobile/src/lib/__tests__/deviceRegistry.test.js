@@ -274,12 +274,21 @@ describe('wiring (source checks)', () => {
     expect(push).toContain('onSessionChange(() => registry.reset())');
   });
 
-  test('logout: a patient unregisters BEFORE clearTokens; corporate does not', () => {
+  test('logout: a patient unregisters BEFORE the tokens are cleared; corporate does not (Log out and the idle timeout both go through signOutSession)', () => {
+    const signOut = read('../signOut.js');
+    const ending = read('../sessionEnd.js');
+    // the unregister runs in beforeClear, which sessionEnd.js awaits before it clears the tokens
+    expect(ending.indexOf('await beforeClear()')).toBeGreaterThan(-1);
+    expect(ending.indexOf('await beforeClear()')).toBeLessThan(ending.indexOf('await clear()'));
+    expect(signOut).toContain("import { unregisterThisDevice } from './pushNotifications';");
+    expect(signOut.indexOf('if (!isCorporate) {')).toBeGreaterThan(-1);
+    expect(signOut.indexOf('unregisterThisDevice()')).toBeGreaterThan(signOut.indexOf('if (!isCorporate) {'));
+    expect(signOut).toContain('return { push };');
+    // the screen tells the person when the server did not confirm it
     const body = profile.slice(profile.indexOf('const signOut = async'));
-    expect(body.indexOf('unregisterThisDevice()')).toBeGreaterThan(-1);
-    expect(body.indexOf('unregisterThisDevice()')).toBeLessThan(body.indexOf('await clearTokens()'));
-    expect(body).toContain('isCorporate ? { ok: true } : await unregisterThisDevice()');
+    expect(body).toContain('const { push } = await signOutSession({ isCorporate, beforeClear: clearDraftEverywhere });');
     expect(body).toContain("toast(t('prof_logout_push_failed'))");
+    expect(read('../../components/IdleSessionGuard.js')).toContain('signOutSession({ isCorporate })');
   });
 
   test('registration runs on sign-in for patients only, mounted once in the shell next to the tap handler', () => {
@@ -289,6 +298,6 @@ describe('wiring (source checks)', () => {
   });
 
   test('the installation id is never deleted', () => {
-    for (const source of [push, handler, profile]) expect(source).not.toMatch(/removeItem|INSTALL_ID_KEY/);
+    for (const source of [push, handler, profile, read('../signOut.js')]) expect(source).not.toMatch(/removeItem|INSTALL_ID_KEY/);
   });
 });

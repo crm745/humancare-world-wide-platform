@@ -3,12 +3,13 @@ import { Pressable, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import Constants from 'expo-constants';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BookOpen, Bell, Check, ChevronRight, CircleHelp, CreditCard, FileText, Globe, LogOut, ShieldCheck, User } from 'lucide-react-native';
+import { BookOpen, Bell, Check, ChevronRight, CircleHelp, CreditCard, FileText, Globe, Info, LogOut, ShieldCheck, User, UserX } from 'lucide-react-native';
 import { initialsOf, useApp } from '../state/AppContext';
 import { LANGUAGES } from '../data/mock';
+import I18N from '../data/i18n.json';
+import { translate } from '../lib/translate';
 import { navReplace } from '../lib/nav';
-import { clearTokens } from '../lib/session';
-import { unregisterThisDevice } from '../lib/pushNotifications';
+import { signOutSession } from '../lib/signOut';
 import { BottomNav, Screen, TopBar, useScrollToTopOnTabTap } from '../components/layout';
 import { useFabScrollPad } from '../components/sos/hooks';
 import { SectionLabel, Text } from '../components/ui';
@@ -24,7 +25,7 @@ function LanguageSheet({ visible, onClose }) {
   const { t, lang, setLang, toast } = useApp();
   const choose = (l) => {
     setLang(l.code);
-    toast('Language set to ' + l.name);
+    toast(translate(I18N, l.code, 'lang_set_toast', { name: l.name }));
     setTimeout(onClose, 350);
   };
   return (
@@ -80,7 +81,7 @@ function Section({ label, rows }) {
 }
 
 export default function Profile() {
-  const { t, isCorporate, profile, toast, refreshProfile } = useApp();
+  const { t, isCorporate, profile, toast, refreshProfile, clearDraftEverywhere } = useApp();
   const [refreshing, setRefreshing] = useState(false);
   const insets = useSafeAreaInsets();
   // The scroll area ends above the tab bar; its bottom padding is its own (24) or the room the floating SOS button needs, whichever is more.
@@ -92,17 +93,16 @@ export default function Profile() {
   // Signed-out people already have an account, so they land on their login screen.
   // The destination is shown first, then the tokens are cleared: clearing them while this screen is still open
   // would let the auth gate send the person to Login before Getting Started opens.
-  // A patient's phone is removed from their notifications FIRST (that call needs the tokens, so it comes before clearTokens). It is
-  // bounded (a few seconds) and never blocks signing out: if the server did not confirm it, the person is signed out anyway and told.
-  // Corporate sign-out is unchanged.
+  // Logging out on purpose also deletes the saved request draft and its key (an expired session does not: the same account finds its draft when it signs in again).
+  // Log out: the saved draft goes first (the account is read from the tokens), a patient's phone is removed from their notifications (bounded, and it never blocks signing out), the server is told in the
+  // background (a patient's refresh token stops working), then the tokens are cleared. If the server did not confirm the phone's removal, the person is signed out anyway and told. Corporate sign-out is unchanged.
   const signingOut = useRef(false);
   const signOut = async () => {
     if (signingOut.current) return;
     signingOut.current = true;
     try {
-      const push = isCorporate ? { ok: true } : await unregisterThisDevice();
       navReplace(isCorporate ? '/corporate-login' : '/login');
-      await clearTokens();
+      const { push } = await signOutSession({ isCorporate, beforeClear: clearDraftEverywhere });
       if (!push.ok) toast(t('prof_logout_push_failed'));
     } finally {
       signingOut.current = false;
@@ -132,6 +132,8 @@ export default function Profile() {
   const support = [
     { Icon: CircleHelp, label: t('prof_help'), onPress: () => router.push('/help-support') },
     { Icon: BookOpen, label: t('prof_terms'), onPress: () => router.push('/terms') },
+    // About HumanCare: the company, its services, its contacts and legal pages (about.js). Directly above Delete account.
+    { Icon: Info, label: t('prof_about'), onPress: () => router.push('/about') },
   ];
 
   const email = profile.email || '';
@@ -165,6 +167,23 @@ export default function Profile() {
           <Section label={t('prof_account')} rows={account} />
           <Section label={t('prof_preferences')} rows={preferences} />
           <Section label={t('prof_support')} rows={support} />
+
+          {/* Delete account: patients only (a corporate account is managed by Admin, and the server refuses it too). It opens a screen that explains what
+              happens and re-authenticates: it never deletes anything by itself. Directly above Log out. */}
+          {isCorporate ? null : (
+            <PressBox
+              accessibilityRole="button"
+              accessibilityLabel={t('prof_delete')}
+              onPress={() => router.push('/delete-account')}
+              style={({ pressed }) => ({
+                minHeight: 56, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                backgroundColor: pressed ? '#FFF1F1' : '#FFF6F6', borderWidth: 1, borderColor: '#F3C4C4', borderRadius: 18,
+              })}
+            >
+              <UserX size={20} strokeWidth={1.9} color="#C53030" />
+              <Text className="font-inter-bold" style={{ fontSize: 15.5, color: '#C53030' }}>{t('prof_delete')}</Text>
+            </PressBox>
+          )}
 
           <PressBox
             accessibilityRole="button"

@@ -207,7 +207,7 @@ describe('LoadFailure: a short message and Try again', () => {
   const lf = comp('LoadFailure.js');
   test('message, a button that runs onRetry', () => {
     expect(lf).toContain("t('sk_load_failed')");
-    expect(lf).toContain("title={t('sk_try_again')} onPress={onRetry}");
+    expect(lf).toContain("retryLabel={onRetry ? t('sk_try_again') : undefined} onRetry={onRetry}");
   });
 });
 
@@ -253,7 +253,7 @@ describe('every data screen: skeleton while the first load runs, then content', 
       expect(src).toContain('onRetry=');
     });
     expect(app('tracking')).toContain('<LoadFailure');
-    expect(app('my-documents')).toContain("t('docs_try_again')");
+    expect(app('my-documents')).toContain('<LoadFailure titleKey="lf_title_documents"');
   });
   test('a failed pull keeps the content and says "Couldn\'t refresh. Pull down to try again."', () => {
     ['my-requests', 'home', 'request-tracking', 'request-details', 'notifications', 'corporate-dashboard', 'my-documents'].forEach((name) => {
@@ -313,7 +313,8 @@ describe('Profile and the forms', () => {
     expect(read('../../state/AppContext.js')).toContain("apiGet('/auth/me')");
   });
   test('forms have no pull-to-refresh', () => {
-    ['personal-details', 'edit-profile', 'login', 'register', 'login-otp', 'register-otp', 'complete-profile', 'change-contact', 'corporate-new-case', 'forgot-password', 'reset-password', 'set-password'].forEach((name) => {
+    // (personal-details is not here any more: it re-reads the profile on a pull, and while editing only re-checks the connection; tests/networkRefresh.test.js)
+    ['edit-profile', 'login', 'register', 'login-otp', 'register-otp', 'complete-profile', 'change-contact', 'corporate-new-case', 'forgot-password', 'reset-password', 'set-password'].forEach((name) => {
       expect(app(name)).not.toContain('RefreshControl');
     });
     ['step1', 'step2', 'step3'].forEach((n) => {
@@ -324,7 +325,7 @@ describe('Profile and the forms', () => {
   test('personal details loads with a skeleton (and keeps its own Try again)', () => {
     const src = app('personal-details');
     expect(src).toContain('<FormSkeleton');
-    expect(src).toContain("t('pd_try_again')");
+    expect(src).toContain('<LoadFailure titleKey="lf_title_profile"');
   });
 });
 

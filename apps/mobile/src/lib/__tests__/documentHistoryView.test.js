@@ -165,7 +165,7 @@ describe('wiring (source checks)', () => {
   test('the screen shows the banner, the history and the upload card, and refreshes them all from one reload', () => {
     expect(screen).toMatch(/if \(s\.kind === 'review'\) return <ReviewBanner request=\{request\} \/>;/);
     expect(screen).toMatch(/<DocumentHistory request=\{request\} styled \/>/);
-    expect(screen).toMatch(/<AdditionalDocuments request=\{request\} onUploaded=\{reload\} \/>/);
+    expect(screen).toMatch(/<AdditionalDocuments request=\{request\} onUploaded=\{reload\} pendingUploads=\{pendingUploads\} \/>/);
     expect(screen).toContain("fetcher: () => apiGet(`/requests/me/${id}`).then(({ request: r }) => r),");
   });
 

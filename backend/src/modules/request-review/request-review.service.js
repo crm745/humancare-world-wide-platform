@@ -17,6 +17,8 @@ const { UPLOAD_DIR } = require('../../middleware/upload.middleware');
 const { URGENCY_TO_CASE } = require('../../common/constants/request.constants');
 const clamav = require('../../integrations/clamav/clamav');
 const { requestRecordData } = require('../requests/request-record');
+const { findOwnedByClientRequestId, isUniqueViolation } = require('../requests/client-request-id');
+const { sameReviewFile } = require('../requests/client-upload-id');
 const { ensureDealCreation } = require('../bitrix/deal-outbox');
 const { appendAuditLog } = require('../../common/audit/business-audit');
 const { SHARE_SELECT } = require('../bitrix/deal-document.service');
@@ -117,23 +119,34 @@ async function createCaseForRequest(tx, request, { actorType, actorId, note, sou
 // `data` is what the Private Charter validator returned. A submission creates the REQUEST ONLY (with its permanent
 // reference and first audit event, in one transaction). The Case and the Bitrix Deal-creation event are created later,
 // together, when an Admin approves the request (approveRequest). No Bitrix call is made here.
-async function createReviewRequest(userId, data) {
-  return prisma.$transaction(async (tx) => {
-    const created = await tx.serviceRequest.create({
-      data: {
-        ...requestRecordData(userId, data),
-        referenceNumber: `TEMP-${Date.now()}-${randomSuffix()}`,
-        status: 'submitted',
-        reviewStatus: REQUEST_STATUS.AWAITING_DOCUMENTS,
-      },
+// `clientRequestId` (optional): the same submission arriving again, or at the same moment twice, is saved once. The loser of the unique index rolls back everything it began
+// (request and first event) and gets the first one back, so no second request or event exists.
+async function createReviewRequest(userId, data, { clientRequestId } = {}) {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const created = await tx.serviceRequest.create({
+        data: {
+          ...requestRecordData(userId, data),
+          ...(clientRequestId && { clientRequestId }),
+          referenceNumber: `TEMP-${Date.now()}-${randomSuffix()}`,
+          status: 'submitted',
+          reviewStatus: REQUEST_STATUS.AWAITING_DOCUMENTS,
+        },
+      });
+      const request = await tx.serviceRequest.update({ where: { id: created.id }, data: { referenceNumber: `REQ-${1000 + created.id}` } });
+      await appendEvent(tx, {
+        serviceRequestId: request.id, action: ACTION.REQUEST_CREATED, toStatus: REQUEST_STATUS.AWAITING_DOCUMENTS,
+        actorType: 'patient', actorId: userId, detail: { referenceNumber: request.referenceNumber },
+      });
+      return request;
     });
-    const request = await tx.serviceRequest.update({ where: { id: created.id }, data: { referenceNumber: `REQ-${1000 + created.id}` } });
-    await appendEvent(tx, {
-      serviceRequestId: request.id, action: ACTION.REQUEST_CREATED, toStatus: REQUEST_STATUS.AWAITING_DOCUMENTS,
-      actorType: 'patient', actorId: userId, detail: { referenceNumber: request.referenceNumber },
-    });
-    return request;
-  });
+  } catch (err) {
+    if (clientRequestId && isUniqueViolation(err)) {
+      const existing = await findOwnedByClientRequestId(prisma, userId, clientRequestId);
+      if (existing) return existing;
+    }
+    throw err;
+  }
 }
 
 // ---- patient uploads --------------------------------------------------------------------------
@@ -143,7 +156,12 @@ async function createReviewRequest(userId, data) {
 // document as replaced; the earlier row is kept untouched apart from that mark. The first document
 // moves the request into review, and any upload while changes were requested puts it back into
 // review. The file is removed again if anything fails.
-async function addPatientDocument({ userId, requestId, file, replacesDocumentId, documentRequestId }) {
+//
+// Phase 5: an optional `clientUploadId` (the app's id for this logical upload) makes the upload idempotent. It is looked up under the request's row lock, AFTER the owner check and
+// BEFORE anything else happens, so a repeat returns the original document ({ ...document, replayed: true }) without creating a second row, replacing anything, counting against the
+// limit, writing an event or changing the request's status. The caller must then NOT scan it again (the original's scan, or the worker's sweep, owns that). The newly stored copy
+// of a repeat is deleted. Two repeats at the same instant are serialised by the lock, and the unique index is the final protection.
+async function addPatientDocument({ userId, requestId, file, replacesDocumentId, documentRequestId, clientUploadId }) {
   let stored = null;
   try {
     // Checked (size, content type, extension) and moved into storage under a generated key; the temporary file is removed.
@@ -151,10 +169,17 @@ async function addPatientDocument({ userId, requestId, file, replacesDocumentId,
     stored = await ingestUpload({ file, area: AREAS.REQUEST_DOCUMENTS, scan: 'deferred', policy: 'patient' });
     const sha256 = stored.sha256;
     const id = numericId(requestId, 'The request');
-    return await prisma.$transaction(async (tx) => {
+    const outcome = await prisma.$transaction(async (tx) => {
       const request = await lockRequest(tx, id);
       if (!request || request.userId !== userId) throw httpError(404, 'Request not found');
       if (request.reviewStatus == null) throw httpError(409, 'This request is not in the document review workflow.');
+      if (clientUploadId) {
+        const prior = await tx.requestDocument.findFirst({ where: { serviceRequestId: id, clientUploadId } });
+        if (prior) {
+          if (!sameReviewFile(prior, sha256)) throw httpError(409, 'That upload id was already used for a different file.', 'client_upload_id_reused');
+          return { ...prior, replayed: true };
+        }
+      }
       const given = documentRequestId !== undefined && documentRequestId !== null && documentRequestId !== '';
       let documentRequest = null;
       if (request.reviewStatus === REQUEST_STATUS.APPROVED) {
@@ -183,6 +208,7 @@ async function addPatientDocument({ userId, requestId, file, replacesDocumentId,
           serviceRequestId: id, originalName: cleanOriginalName(file.originalname), storageKey: stored.key, sizeBytes: stored.size,
           mimeType: clip(stored.contentType, 191), sha256, uploadedByUserId: userId, replacesId: replaced ? replaced.id : null,
           documentRequestId: documentRequest ? documentRequest.id : null,
+          ...(clientUploadId && { clientUploadId }),
         },
       });
       if (replaced) await tx.requestDocument.update({ where: { id: replaced.id }, data: { supersededAt: new Date() } });
@@ -203,7 +229,17 @@ async function addPatientDocument({ userId, requestId, file, replacesDocumentId,
       }
       return document;
     });
+    if (outcome && outcome.replayed) await discardStored(stored.key); // the original is kept; this newly stored copy is not (gone before the answer is sent)
+    return outcome;
   } catch (err) {
+    if (clientUploadId && isUniqueViolation(err)) {
+      // Lost the race to the same upload (the lock above normally prevents this; the unique index is the last word): the original is the answer.
+      const prior = await prisma.requestDocument.findFirst({ where: { serviceRequestId: Number(requestId), clientUploadId } }).catch(() => null);
+      if (prior) {
+        if (stored) await discardStored(stored.key); // this copy is not kept: the original is
+        return { ...prior, replayed: true };
+      }
+    }
     fs.rm(file.path, { force: true }, () => {});
     if (stored) await discardStored(stored.key); // the database refused the document: nothing may refer to the stored object
     throw err;
@@ -214,6 +250,7 @@ async function addPatientDocument({ userId, requestId, file, replacesDocumentId,
 const toUploadResponse = (document) => ({
   id: document.id, name: document.originalName, fileSizeBytes: document.sizeBytes, uploadedAt: document.uploadedAt,
   replacesId: document.replacesId, scanStatus: document.scanStatus, reviewStatus: document.reviewStatus,
+  ...(document.clientUploadId ? { clientUploadId: document.clientUploadId } : {}), // Phase 5: lets the app match the document to the file it sent
 });
 
 // ---- scanning ---------------------------------------------------------------------------------
@@ -263,10 +300,8 @@ async function confirmFileMissing(document) {
 // and review). It never throws and never touches the saved verdict. A failure is logged with the document, the step
 // and the error code (not the message, which holds file-system paths), because the file then needs to be moved by hand.
 function quarantineFile(document, file) {
-  if (!file) { // object storage: no folder to move it to, so the infected object is deleted (the saved verdict already blocks every use of it)
-    storageFor(document.storageKey).delete(document.storageKey).catch((err) => {
-      console.error(`[scan] document ${document.id} (request ${document.serviceRequestId}) is INFECTED but its stored object could not be deleted (${err && err.code || 'error'}); it must be removed by hand.`);
-    });
+  if (!file) { // object storage: the infected object is RETAINED where it is (never deleted, moved or copied). The saved infected verdict and its audit event block every download, review, share and publication of it.
+    console.warn(`[scan] document ${document.id} (request ${document.serviceRequestId}) is INFECTED. Its stored object is retained in place and stays blocked by the saved verdict.`);
     return true;
   }
   const name = path.basename(document.storageKey);
@@ -663,8 +698,14 @@ async function lockedOpenRequest(tx, requestId, { allowApproved = false } = {}) 
 
 // Copies one approved request document into the Case's documents (the same copy the approval makes), and links the two.
 async function copyDocumentToCase(tx, caseRecord, d) {
+  // The copy inherits the source's scan record, but ONLY a confirmed one: a clean verdict AND the digest the file was just verified against (fileProblem). Anything less is copied
+  // with no scan record at all (NULL = not clean), never as a clean legacy document.
+  const verified = d.scanStatus === SCAN.CLEAN && !!d.sha256 && !!d.scanEngine;
   const row = await tx.document.create({
-    data: { caseId: caseRecord.id, type: 'Medical Report', name: d.originalName, fileUrl: `/uploads/${d.storageKey}`, fileSizeBytes: d.sizeBytes },
+    data: {
+      caseId: caseRecord.id, type: 'Medical Report', name: d.originalName, fileUrl: `/uploads/${d.storageKey}`, fileSizeBytes: d.sizeBytes,
+      ...(verified ? { sha256: d.sha256, scanStatus: SCAN.CLEAN, scanEngine: d.scanEngine, scannedAt: d.scannedAt || null } : {}),
+    },
   });
   await tx.requestDocument.update({ where: { id: d.id }, data: { caseDocumentId: row.id } });
   return row;

@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { useApp } from '../state/AppContext';
+import { errorText } from '../lib/errorText';
 import { navReplace } from '../lib/nav';
 import { beginSignIn, saveTokens } from '../lib/session';
 import { hasValidTokens, postSignInRoute } from '../lib/tokens';
 import { clearAuthSteps } from '../lib/authFlow';
 import { BackButton, Body, Screen } from './layout';
 import { Button, Input, Heading, Spacer, Text } from './ui';
+import { useNetwork } from '../state/NetworkContext';
 import { OtpInput, otpComplete } from './widgets';
 import { RecaptchaNotice } from './RecaptchaNotice';
+import { NeedsInternet } from './network/NeedsInternet';
+import { classifyOtpError, isTransientOtpKind } from '../lib/otpErrors';
 
 const RESEND_COOLDOWN_SECONDS = 30; // matches the backend's own cooldown
 
@@ -19,21 +23,12 @@ function formatTime(totalSeconds) {
 }
 
 // Inline text for the error codes the auth API returns; anything else falls back to a toast.
-function otpErrorMessage(err) {
-  switch (err.code) {
-    case 'otp_invalid':
-      return 'Incorrect code. Please try again.';
-    case 'otp_expired':
-      return 'This code has expired. Request a new one with "Resend OTP".';
-    case 'otp_locked':
-      return 'Too many incorrect attempts. Request a new code with "Resend OTP".';
-    case 'otp_missing':
-      return 'This code is no longer valid. Request a new one with "Resend OTP".';
-    case 'ticket_invalid':
-      return 'This step has expired. Go back and start again.';
-    default:
-      return null;
-  }
+// (lib/otpErrors.js tells the kinds apart: a wrong code, an expired one, no internet, a timeout and a server error each get their own, true message.)
+function otpErrorMessage(err, t) {
+  const view = classifyOtpError(err);
+  if (view.key) return { text: t(view.key), kind: view.kind, keepCode: view.keepCode };
+  if (view.literal) return { text: view.literal, kind: view.kind, keepCode: view.keepCode };
+  return { text: null, kind: view.kind, keepCode: view.keepCode };
 }
 
 // Shared by every 6-digit code screen (login, register, forgot password, corporate).
@@ -50,9 +45,16 @@ export function OtpScreen({ titleKey, identifier, contact, note, session, compac
   const { t, toast, setSession, setProfile } = useApp();
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setErrorText] = useState(null);
+  const [errorKind, setErrorKind] = useState(null); // see lib/otpErrors.js: a failure that is not about the code (network, timeout, server) is shown until the connection is back, and never clears the code
+  const [errorAtRestore, setErrorAtRestore] = useState(0);
   const [secondsLeft, setSecondsLeft] = useState(RESEND_COOLDOWN_SECONDS);
   const [resending, setResending] = useState(false);
+  const { isOffline, restoredCount } = useNetwork(); // verifying and resending need the internet; the code stays typed
+  const setError = (text, kind = null) => { setErrorText(text); setErrorKind(text ? kind : null); setErrorAtRestore(restoredCount); };
+  // A "no internet" / "timed out" message is true only until the connection returns (and the offline line under the button says it meanwhile): then it goes by itself, with the code still typed.
+  const staleFailure = (errorKind === 'network' || errorKind === 'timeout') && (restoredCount !== errorAtRestore || (errorKind === 'network' && isOffline));
+  const shownError = staleFailure ? null : error;
   const [currentId, setCurrentId] = useState(identifier);
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(identifier);
@@ -66,9 +68,9 @@ export function OtpScreen({ titleKey, identifier, contact, note, session, compac
   const changeCode = (next) => { setCode(next); setError(null); };
 
   const verify = async () => {
-    if (!otpComplete(code)) { setError('Enter all 6 digits.'); return; }
+    if (!otpComplete(code)) { setError(t('err_enter_6_digits')); return; }
     // A code screen with nothing to verify the code against cannot sign anyone in: no session without credentials.
-    if (!onVerify) { toast('This step cannot be completed. Please go back and try again.'); return; }
+    if (!onVerify) { toast(t('otp_err_step')); return; }
 
     setBusy(true);
     try {
@@ -84,7 +86,7 @@ export function OtpScreen({ titleKey, identifier, contact, note, session, compac
       // Signing in needs usable credentials and a session kind this app knows (patient or corporate), each
       // going to its own destination. Checked before anything is stored or announced.
       const destination = postSignInRoute(session);
-      if (!destination || !hasValidTokens(result)) throw Object.assign(new Error('We could not complete sign-in. Please try again.'), { code: 'invalid_credentials_response' });
+      if (!destination || !hasValidTokens(result)) throw Object.assign(new Error(t('err_signin_incomplete')), { code: 'invalid_credentials_response' });
       await saveTokens({ token: result.token, refreshToken: result.refreshToken }, { signIn: true, attempt });
       clearAuthSteps();
       if (result.profile) setProfile(result.profile);
@@ -92,11 +94,11 @@ export function OtpScreen({ titleKey, identifier, contact, note, session, compac
       navReplace(destination);
     } catch (err) {
       if (err.code === 'stale_sign_in') return; // replaced by a newer sign-in or a sign-out: nothing to show
-      const message = otpErrorMessage(err);
-      if (!message) { toast(err.message || 'Could not verify code'); return; }
-      setError(message);
-      // A locked or expired code can't be retried, so clear the boxes for the new one.
-      if (err.code !== 'otp_invalid') setCode('');
+      const shown = otpErrorMessage(err, t);
+      if (!shown.text) { toast(errorText(err, t, 'otp_verify_failed')); return; }
+      setError(shown.text, shown.kind);
+      // Only a code that cannot be tried again (expired, locked, lost) clears the boxes. A failure that is not about the code (no internet, a timeout, a server error) keeps it typed.
+      if (!shown.keepCode) setCode('');
     } finally {
       setBusy(false);
     }
@@ -107,15 +109,15 @@ export function OtpScreen({ titleKey, identifier, contact, note, session, compac
     setResending(true);
     try {
       await onResend(currentId);
-      toast('A new code has been sent.');
+      toast(t('otp_resent'));
       setCode('');
       setError(null);
       setSecondsLeft(RESEND_COOLDOWN_SECONDS);
     } catch (err) {
       if (err.secondsLeft) setSecondsLeft(err.secondsLeft);
-      const message = otpErrorMessage(err);
-      if (message) setError(message);
-      else toast(err.message || 'Could not resend code');
+      const shown = otpErrorMessage(err, t);
+      if (shown.text) setError(shown.text, shown.kind);
+      else toast(errorText(err, t, 'otp_resend_failed'));
     } finally {
       setResending(false);
     }
@@ -134,9 +136,9 @@ export function OtpScreen({ titleKey, identifier, contact, note, session, compac
       setError(null);
       setSecondsLeft(RESEND_COOLDOWN_SECONDS);
       setEditing(false);
-      toast('Code sent to the new number/email.');
+      toast(t('otp_sent_new'));
     } catch (err) {
-      toast(err.message || 'Could not send a code to that number/email.');
+      toast(errorText(err, t, 'otp_send_new_failed'));
     } finally {
       setSavingEdit(false);
     }
@@ -153,10 +155,10 @@ export function OtpScreen({ titleKey, identifier, contact, note, session, compac
 
         {editing ? (
           <View className={compact ? 'mb-6 mt-1.5' : 'mb-8 mt-3.5'}>
-            <Input large value={editValue} onChangeText={setEditValue} autoCapitalize="none" placeholder="Mobile number or email" />
+            <Input large value={editValue} onChangeText={setEditValue} autoCapitalize="none" placeholder={t('ph_phone_or_email')} />
             <View className="mt-2.5 flex-row justify-end gap-4">
-              <Text className="font-inter-bold text-[13.5px] text-faint" onPress={() => setEditing(false)}>Cancel</Text>
-              <Text className="font-inter-bold text-[13.5px] text-primary" onPress={savingEdit ? undefined : saveEdit}>{savingEdit ? 'Sending…' : 'Save & resend'}</Text>
+              <Text className="font-inter-bold text-[13.5px] text-faint" onPress={() => setEditing(false)}>{t('sos_modal_cancel')}</Text>
+              <Text className="font-inter-bold text-[13.5px] text-primary" onPress={savingEdit || isOffline ? undefined : saveEdit}>{savingEdit ? 'Sending…' : 'Save & resend'}</Text>
             </View>
           </View>
         ) : (
@@ -166,13 +168,13 @@ export function OtpScreen({ titleKey, identifier, contact, note, session, compac
           </Text>
         )}
 
-        <OtpInput value={code} onChange={changeCode} large={!compact} error={!!error} />
-        {error ? <Text className={`mt-2.5 text-[13px] text-danger ${compact ? '' : 'text-center'}`}>{error}</Text> : null}
+        <OtpInput value={code} onChange={changeCode} large={!compact} error={!!shownError && !isTransientOtpKind(errorKind)} />
+        {shownError ? <Text className={`mt-2.5 text-[13px] ${isTransientOtpKind(errorKind) ? 'text-muted' : 'text-danger'} ${compact ? '' : 'text-center'}`}>{shownError}</Text> : null}
         <View className={`items-center ${compact ? 'mt-4' : 'mt-5'}`}>
           {secondsLeft > 0 ? (
             <Text className="text-[14.5px] text-faint">Resend OTP in {formatTime(secondsLeft)}</Text>
           ) : onResend ? (
-            <Pressable onPress={resend} disabled={resending}>
+            <Pressable onPress={resend} disabled={resending || isOffline} accessibilityRole="button" accessibilityState={{ disabled: resending || isOffline }} accessibilityHint={isOffline ? t('net_offline_text') : undefined} style={isOffline ? { opacity: 0.45 } : undefined}>
               <Text className="font-inter-bold text-[14.5px] text-primary">{resending ? 'Resending…' : 'Resend OTP'}</Text>
             </Pressable>
           ) : (
@@ -181,7 +183,8 @@ export function OtpScreen({ titleKey, identifier, contact, note, session, compac
         </View>
         {recaptcha ? <RecaptchaNotice /> : null}
         <Spacer />
-        <Button large={!compact} title={t('otp_verify_btn')} onPress={verify} loading={busy} />
+        <Button large={!compact} title={t('otp_verify_btn')} onPress={verify} loading={busy} needsNetwork />
+        <NeedsInternet />
       </Body>
     </Screen>
   );

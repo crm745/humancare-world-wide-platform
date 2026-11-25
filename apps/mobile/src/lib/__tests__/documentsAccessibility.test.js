@@ -184,7 +184,7 @@ describe('DocumentCard: how it hands this to the screen reader', () => {
   test('the button carries the single label and its busy and disabled state', () => {
     expect(card).toContain('accessibilityRole="button"');
     expect(card).toContain('accessibilityLabel={documentAccessibilityLabel(doc, state, t)}');
-    expect(card).toContain('accessibilityState={{ busy: downloading, disabled: downloading }}');
+    expect(card).toContain('accessibilityState={{ busy: downloading, disabled: downloading || offline }}');
   });
   test('the visible parts are hidden from the reader, so nothing is said twice', () => {
     expect(card).toContain("const HIDDEN_FROM_READER = { accessibilityElementsHidden: true, importantForAccessibility: 'no-hide-descendants' };");

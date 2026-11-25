@@ -5,6 +5,7 @@ const { OAuth2Client } = require('google-auth-library');
 const appleSignin = require('apple-signin-auth');
 const { prisma } = require('../../db/prisma');
 const { deliverOtp } = require('./otp-delivery.service');
+const sessions = require('./session.service');
 
 const googleClient = new OAuth2Client();
 
@@ -106,16 +107,39 @@ function signAccessToken(payload) {
   return jwt.sign(payload, secret, { expiresIn: '15m' });
 }
 
-function signRefreshToken(payload) {
+// The refresh-token policy is 7 days (sessions.SESSION_LIFETIME_MS). A token bound to a session expires exactly when its session does (`expiresAt`); one without a session (a legacy sign-in while the sessions
+// table is unavailable) gets the same 7 days. (Before sessions existed the code issued 30 days: tokens already out there keep their own expiry until they are exchanged for a session.)
+function signRefreshToken(payload, { expiresAt = null } = {}) {
   const secret = process.env.JWT_REFRESH_SECRET;
   if (!secret) throw new Error('JWT_REFRESH_SECRET is not set');
-  return jwt.sign(payload, secret, { expiresIn: '30d' });
+  const seconds = expiresAt ? Math.floor((expiresAt.getTime() - Date.now()) / 1000) : Math.floor(sessions.SESSION_LIFETIME_MS / 1000);
+  return jwt.sign(payload, secret, { expiresIn: Math.max(1, seconds) });
 }
 
 function verifyRefreshToken(token) {
   const secret = process.env.JWT_REFRESH_SECRET;
   if (!secret) throw new Error('JWT_REFRESH_SECRET is not set');
   return jwt.verify(token, secret);
+}
+
+// A NEW session (a sign-in on a device) and its first token pair: { token, refreshToken, sessionId }. `claims` are the account's own (sub, role, tv, corporateId, pwc); the session adds `sid`
+// (both tokens) and `jti` (the refresh token). When the sessions table is unavailable (development, client not regenerated) this falls back to the legacy pair, without a session id.
+async function startSession({ claims, subjectType, subjectId, userAgent = null }) {
+  if (!sessions.sessionsAvailable()) return { token: signAccessToken(claims), refreshToken: signRefreshToken(claims), sessionId: null };
+  const session = await sessions.createSession({ subjectType, subjectId, userAgent });
+  return {
+    token: signAccessToken({ ...claims, sid: session.id }),
+    refreshToken: signRefreshToken({ ...claims, sid: session.id, jti: session.jti }, { expiresAt: session.expiresAt }),
+    sessionId: session.id,
+  };
+}
+
+// The next token pair of an EXISTING session, after a rotation (sessions.rotateRefresh / renewRefresh gave `jti` and `expiresAt`).
+function pairForSession({ claims, sessionId, jti, expiresAt }) {
+  return {
+    token: signAccessToken({ ...claims, sid: sessionId }),
+    refreshToken: signRefreshToken({ ...claims, sid: sessionId, jti }, { expiresAt }),
+  };
 }
 
 // `tv` ties the session to the account's current tokenVersion; /auth/refresh refuses
@@ -229,6 +253,8 @@ module.exports = {
   issueOtp,
   verifyOtp,
   issuePatientTokens,
+  startSession,
+  pairForSession,
   signTicket,
   readTicket,
   passwordProblem,

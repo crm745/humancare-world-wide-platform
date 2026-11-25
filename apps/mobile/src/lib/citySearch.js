@@ -105,6 +105,17 @@ export function matchTypedCity(text, cities, countryIso) {
   return same.length === 1 ? same[0] : null;
 }
 
+// For a Private Charter draft: the verified city for each place that was typed by hand and never picked. Returns { originCity?, destCity? } for the ones that name exactly ONE verified city (nothing is
+// guessed otherwise). `toChoice` is lib/privateCharter.js toCityChoice. Reads only (GET /geo/cities).
+export async function resolveCharterCities(fetcher, draft, toChoice) {
+  const patch = {};
+  const d = draft || {};
+  // The Current Location is matched among the cities of the selected country; the Destination may be in any country, so it is matched among all verified cities.
+  if (!d.originCity && String(d.location || '').trim()) { const c = await resolveTypedCity(fetcher, d.location, undefined, d.countryIso); if (c) patch.originCity = toChoice(c); }
+  if (!d.destCity && String(d.dest || '').trim()) { const c = await resolveTypedCity(fetcher, d.dest); if (c) patch.destCity = toChoice(c); }
+  return patch;
+}
+
 // For the Continue button: a city typed by hand and never picked. Resolves the one verified city it names, or null (nothing found, several
 // found, or the search failed: the person is then asked to pick a suggestion).
 export async function resolveTypedCity(fetcher, text, options, countryIso) {

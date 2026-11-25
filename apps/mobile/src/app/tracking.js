@@ -3,10 +3,15 @@ import { Pressable, View } from 'react-native';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Check } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
+import { errorText } from '../lib/errorText';
 import { apiGet } from '../lib/api';
-import { downloadAndShare } from '../lib/download';
+import { downloadDocument, downloadErrorInfo } from '../lib/download';
+import { useNetwork } from '../state/NetworkContext';
+import { useRetryOnRestore } from '../lib/useRetryOnRestore';
 import { formatDisplayDate } from '../lib/requestShape';
+import { baseServiceName } from '../lib/requestDetailsView';
 import { isRequestFor, trackingItemFromCase, trackingItemFromRequest } from '../lib/trackingItem';
+import { corporateText, programmeNames } from '../lib/corporateMedical';
 import { Body, Screen, TopBar } from '../components/layout';
 import { Card, InfoRow, Spacer, Text } from '../components/ui';
 import { AppRefreshControl } from '../components/AppRefreshControl';
@@ -82,7 +87,7 @@ export default function Tracking() {
     const path = isCase ? `/corporate/cases/${params.id}` : `/requests/me/${params.id}`;
     apiGet(path)
       .then((data) => setLoadedItem(isCase ? trackingItemFromCase(data.case) : trackingItemFromRequest(data.request)))
-      .catch((err) => { setFailed(true); toast(err.message); });
+      .catch((err) => { setFailed(true); toast(errorText(err, t)); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetch once per id/kind
   }, [params.id, isCase]);
 
@@ -112,7 +117,7 @@ export default function Tracking() {
         .catch((err) => {
           if (!active) return;
           if (!loaded.current) setFailed(true);
-          toast(err.message);
+          toast(errorText(err, t));
         });
       return () => { active = false; };
       // eslint-disable-next-line react-hooks/exhaustive-deps -- reload per id and focus; toast does not change what is fetched
@@ -145,6 +150,15 @@ export default function Tracking() {
       .then((data) => setLoadedItem(isCase ? trackingItemFromCase(data.case) : trackingItemFromRequest(data.request)))
       .catch(() => setFailed(true));
   };
+  // The connection came back after a first load that failed: it is read again once (lib/useRetryOnRestore.js).
+  useRetryOnRestore({ failed, retry: params.id ? retry : null });
+  const { isOffline } = useNetwork();
+  // A case document goes through the app's authenticated download (it renews an expired session once and says in the person's language what went wrong). Offline the row is switched off, so this is only
+  // the safety net for a state that changed since the screen drew.
+  const downloadCaseDocument = async (d) => {
+    if (isOffline) { toast(t('net_opens_online')); return; }
+    try { await downloadDocument(`/documents/${d.id}/file`, d.name); } catch (err) { toast(t(downloadErrorInfo(err).key)); }
+  };
   const gate = useSkeletonGate(!item && !failed && Boolean(params.id));
   const refreshControl = <AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />;
 
@@ -152,7 +166,7 @@ export default function Tracking() {
     return (
       <Screen>
         <TopBar title={t('tracking_details_title')} />
-        {failed || !params.id ? <LoadFailure message={t('trk_load_failed')} onRetry={params.id ? retry : undefined} /> : null}
+        {failed || !params.id ? <LoadFailure titleKey="lf_title_tracking" message={t('trk_load_failed')} onRetry={params.id ? retry : undefined} /> : null}
         {!failed && params.id && gate.visible ? <TrackingSkeleton label={t('sk_loading_tracking')} /> : null}
       </Screen>
     );
@@ -162,7 +176,7 @@ export default function Tracking() {
     <Screen>
       <TopBar title={t('tracking_details_title')} />
       <View className="flex-row items-center justify-between bg-white px-[18px] py-3.5">
-        <Text className="font-inter-black text-[14.5px] text-navy">{item.referenceNumber} · {item.serviceType}</Text>
+        <Text className="font-inter-black text-[14.5px] text-navy">{item.referenceNumber} · {baseServiceName(item, t)}</Text>
         {privateCharter ? <PrivateCharterStatusChip model={privateCharter} compact /> : <RequestStatusPill pill={item.reviewPill} status={item.status} />}
       </View>
       <View className="flex-row border-b border-line bg-white">
@@ -177,10 +191,27 @@ export default function Tracking() {
         <Body contentClassName="p-[18px]" refreshControl={refreshControl}>
           <Card className="p-[18px]">
             <InfoRow className="py-[13px]" label={t('lbl_status')} valueNode={privateCharter ? <PrivateCharterStatusChip model={privateCharter} compact /> : <RequestStatusPill pill={item.reviewPill} status={item.status} />} />
-            <InfoRow className="py-[13px]" label={t('lbl_service')} value={item.serviceType} />
-            <InfoRow className="py-[13px]" label={t('lbl_from')} value={item.origin} />
-            <InfoRow className="py-[13px]" label={t('lbl_to')} value={item.destination} />
-            <InfoRow className="py-[13px]" label={t(item.mortal ? 'lbl_deceased' : 'lbl_patient')} value={item.patientLabel} />
+            <InfoRow className="py-[13px]" label={t('lbl_service')} value={baseServiceName(item, t)} />
+            {item.corporate ? (
+              <>
+                <InfoRow className="py-[13px]" label={corporateText(t, 'corp_company')} value={item.corporate.company} />
+                <InfoRow className="py-[13px]" label={corporateText(t, 'corp_employees')} value={String(item.corporate.employees)} />
+                <InfoRow className="py-[13px]" label={corporateText(t, 'corp_programmes')} value={programmeNames(item.corporate.programmes, t).join(', ')} />
+                {item.corporate.preferredDate ? <InfoRow className="py-[13px]" label={corporateText(t, 'corp_preferred_date')} value={formatDisplayDate(item.corporate.preferredDate)} /> : null}
+                {item.corporate.officeAddress ? <InfoRow className="py-[13px]" label={corporateText(t, 'corp_office_address')} value={item.corporate.officeAddress} /> : null}
+                {item.corporate.officeCountry ? <InfoRow className="py-[13px]" label={corporateText(t, 'corp_office_country')} value={item.corporate.officeCountry} /> : null}
+              </>
+            ) : item.homeHealthcare ? (
+              <InfoRow className="py-[13px]" label={t('field_home_address')} value={item.origin} />
+            ) : item.teleConsultation ? (
+              <InfoRow className="py-[13px]" label={t('field_current_address')} value={item.origin} />
+            ) : (
+              <>
+                <InfoRow className="py-[13px]" label={t('lbl_from')} value={item.origin} />
+                <InfoRow className="py-[13px]" label={t('lbl_to')} value={item.destination} />
+              </>
+            )}
+            <InfoRow className="py-[13px]" label={item.corporate ? corporateText(t, 'corp_employee_name') : t(item.mortal ? 'lbl_deceased_name' : 'lbl_patient')} value={item.patientLabel} />
             <InfoRow className="py-[13px]" last label={t('lbl_reference_number')} value={item.referenceNumber} />
           </Card>
         </Body>
@@ -198,9 +229,9 @@ export default function Tracking() {
             <DocumentHistory request={item.request} className="" />
           ) : (
             <>
-              {item.documents.length === 0 && <Text className="py-6 text-center text-[13px] text-faint">No documents uploaded yet.</Text>}
+              {item.documents.length === 0 && <Text className="py-6 text-center text-[13px] text-faint">{t('rd_no_documents')}</Text>}
               {item.documents.map((d) => (
-                <DocRow key={d.id} label={d.name} meta={d.fileSizeBytes ? `${Math.round(d.fileSizeBytes / 1024)} KB` : ''} onPress={() => downloadAndShare(`/documents/${d.id}/file`, d.name).catch((err) => toast(err.message))} />
+                <DocRow key={d.id} label={d.name} meta={d.fileSizeBytes ? `${Math.round(d.fileSizeBytes / 1024)} KB` : ''} offline={isOffline} onPress={() => downloadCaseDocument(d)} />
               ))}
             </>
           )}

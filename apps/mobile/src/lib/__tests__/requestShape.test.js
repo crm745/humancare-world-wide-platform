@@ -1,3 +1,4 @@
+/* global describe, it, expect, __dirname */
 const { toUiStatus, formatDisplayDate, serviceKeyFromTitle, toListItem, isMortalRequest, careLevelText } = require('../requestShape');
 const I18N = require('../../data/i18n.json');
 const { requestService } = require('../../data/mock');
@@ -36,10 +37,20 @@ describe('toListItem', () => {
 
 describe('Mortal Remains requests', () => {
   const services = { mortal: { title: 'Mortal Remains Transportation' }, air: { title: 'Air Ambulance' } };
-  it('names the transfer type and sends its own service key', () => {
-    expect(requestService({ service: 'mortal', mortalTransfer: 'international' }, services))
-      .toEqual({ title: 'Mortal Remains Transportation — International', key: 'mortal_international' });
-    expect(requestService({ service: 'mortal', mortalTransfer: 'domestic' }, services).key).toBe('mortal_domestic');
+  // Mortal Remains is one service now: the key "mortal" and the fixed name, whatever else is in the draft (scope and mode are their own fields).
+  it('is sent under the single key "mortal" and the fixed service name, with no Domestic / International suffix', () => {
+    const fixed = { title: 'Mortal Remains Transportation', key: 'mortal' };
+    expect(requestService({ service: 'mortal' }, services)).toEqual(fixed);
+    expect(requestService({ service: 'mortal', transferScope: 'international', transportMode: 'private_charter' }, services)).toEqual(fixed);
+    expect(requestService({ service: 'mortal', mortalTransfer: 'international' }, services)).toEqual(fixed);
+  });
+  it('a Mortal Remains list item carries the deceased person\'s name, and no other service\'s item does', () => {
+    const mortal = toListItem({ referenceNumber: 'REQ-1064', id: 1, serviceType: 'Mortal Remains Transportation', serviceKey: 'mortal', status: 'submitted', patientName: 'Suresh Kale' });
+    expect(mortal.patientName).toBe('Suresh Kale');
+    const older = toListItem({ referenceNumber: 'REQ-1065', id: 2, serviceType: 'Mortal Remains Transportation — International', serviceKey: 'mortal_international', status: 'submitted', patientName: 'Late Asha' });
+    expect(older.patientName).toBe('Late Asha');
+    const ground = toListItem({ referenceNumber: 'REQ-1066', id: 3, serviceType: 'Ground Ambulance', serviceKey: 'ground', status: 'submitted', patientName: 'Ravi' });
+    expect(ground).not.toHaveProperty('patientName');
   });
   it('recognises old and new Mortal Remains requests', () => {
     expect(isMortalRequest({ serviceKey: 'mortal' })).toBe(true);

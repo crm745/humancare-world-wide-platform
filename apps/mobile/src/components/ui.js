@@ -1,9 +1,10 @@
 import { Pressable, Text as RNText, TextInput, View } from 'react-native';
 import { Check } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
+import { useNetwork } from '../state/NetworkContext';
 import { Spinner } from './Spinner';
 import { COLORS } from '../theme/colors';
-import { PressBox } from './PressBox';
+import { AnimatedPressBox } from './AnimatedPressBox';
 import { useFormInput } from './keyboard/formFocus';
 
 const HAS_COLOR = /(^|\s)text-(navy|ink|slate|muted|faint|white|primary|success|danger|warning|cancel|scheduled)/;
@@ -44,22 +45,31 @@ const BUTTON = {
 // and shows a spinner instead of the icon.
 // `dimmed` only looks inactive (the press still runs, so it can explain what's missing);
 // `disabled` also blocks the press.
-export function Button({ title, onPress, variant = 'primary', dimmed, disabled, loading, large, icon, className = '', textClassName = '' }) {
+export function Button({ title, onPress, variant = 'primary', dimmed, disabled, loading, large, icon, className = '', textClassName = '', needsNetwork }) {
   const v = BUTTON[variant];
-  const faded = dimmed || disabled || loading;
+  // `needsNetwork`: the button sends something to the server. While the device is known to be offline it is disabled (the form stays editable) and says why to a screen reader.
+  const { isOffline } = useNetwork();
+  const app = useApp();
+  const blocked = !!needsNetwork && isOffline;
+  const faded = dimmed || disabled || blocked || loading;
   const shadow = variant === 'primary' && !faded
     ? { shadowColor: COLORS.primary, shadowOpacity: 0.28, shadowRadius: 10, shadowOffset: { width: 0, height: 8 }, elevation: 4 }
     : null;
   return (
-    <PressBox
+    // The pale look FADES (150 ms) when the button goes off or comes back (components/AnimatedPressBox.js): no instant switch when the connection drops or returns.
+    <AnimatedPressBox
+      accessibilityRole="button"
+      faded={!!faded}
       onPress={onPress}
-      disabled={loading || disabled}
-      style={({ pressed }) => [shadow, pressed && variant === 'primary' && !faded ? { backgroundColor: COLORS.primaryPressed } : null]}
-      className={cx(`flex-row items-center justify-center gap-1.5 rounded-xl ${large ? 'py-4' : 'py-3.5'} ${v.box} ${faded ? 'opacity-45' : 'active:opacity-85'}`, className)}
+      disabled={loading || disabled || blocked}
+      accessibilityState={blocked ? { disabled: true } : undefined}
+      accessibilityHint={blocked && app ? app.t('net_action_offline') : undefined}
+      style={shadow}
+      className={cx(`flex-row items-center justify-center gap-1.5 rounded-xl ${large ? 'py-4' : 'py-3.5'} ${v.box}`, className)}
     >
       {loading ? <Spinner size={large ? 19 : 16} color={v.spinner} /> : icon}
       <Text className={`font-inter-bold ${v.text} ${large ? 'text-[16.5px]' : ''} ${textClassName}`}>{title}</Text>
-    </PressBox>
+    </AnimatedPressBox>
   );
 }
 

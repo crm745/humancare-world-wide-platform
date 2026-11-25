@@ -1,15 +1,15 @@
+const crypto = require("crypto");
 const disposableDomains = require("disposable-email-domains");
 const { prisma } = require("../../db/prisma");
 const { normalizeMobile, normalizeEmail, maskContact } = require("../../common/utils/phone");
 const {
-  signAccessToken,
-  signRefreshToken,
   verifyRefreshToken,
   hashPassword,
   comparePassword,
   issueOtp,
   verifyOtp,
-  issuePatientTokens,
+  startSession,
+  pairForSession,
   signTicket,
   readTicket,
   passwordProblem,
@@ -20,8 +20,9 @@ const {
   SocialEmailInUseError,
   SocialNoAccountError,
 } = require("./auth.service");
+const sessions = require("./session.service");
 const { EVENTS, recordSecurityEvent } = require("./security-events");
-const { revokePatientDevices } = require("../notifications/notification-devices.service");
+const { revokePatientDevices, retirePatientNotifications } = require("../notifications/notification-devices.service");
 const { PASSWORD_CHANGE_REQUIRED } = require("../../common/constants/auth.constants");
 const { isFirebasePhoneEnabled, verifyPhoneProof } = require("../../integrations/firebase/firebase");
 const { readNameFields } = require("../../common/utils/person-name");
@@ -65,9 +66,13 @@ function publicUser(user) {
 }
 //the function for getting the session for the user after the login and registration and social login and also for the corporate login and refreshing the access token and also for the getMe
 // Tokens + profile for a freshly signed-in patient.
-async function sessionFor(userId) {
+// One session per sign-in (per device): see session.service.js. `req` only supplies the device's User-Agent for the list of signed-in devices.
+const userAgentOf = (req) => (req && typeof req.get === "function" ? req.get("user-agent") : null);
+async function sessionFor(userId, req) {
   const user = await prisma.user.findUnique({ where: { id: userId }, omit: { passwordHash: false } });
-  return { ...issuePatientTokens(user), user: publicUser(user) };
+  const claims = { sub: user.id, role: "patient", tv: user.tokenVersion };
+  const { token, refreshToken } = await startSession({ claims, subjectType: sessions.SUBJECTS.PATIENT, subjectId: user.id, userAgent: userAgentOf(req) });
+  return { token, refreshToken, user: publicUser(user) };
 }
 
 function throttledResponse(res, result) {
@@ -270,7 +275,7 @@ async function registerVerifyOtp(req, res) {
   // markEmailVerified); until then it's never used to reset the password.
   await prisma.user.update({ where: { id: pending.id }, data: { isVerified: true } });
   await recordSecurityEvent(req, EVENTS.REGISTER_COMPLETED, { userId: pending.id });
-  res.status(201).json(await sessionFor(pending.id));
+  res.status(201).json(await sessionFor(pending.id, req));
 }
 
 // Called when a code sent to the account's email was just entered correctly — that
@@ -396,7 +401,7 @@ async function loginVerifyOtp(req, res) {
     });
   }
   await recordSecurityEvent(req, EVENTS.LOGIN_SUCCEEDED, { userId: user.id, detail: { method: "password_otp" } });
-  res.json(await sessionFor(user.id));
+  res.json(await sessionFor(user.id, req));
 }
 
 // Forgot password, step 1. The code goes to whichever channel was typed (mobile or
@@ -477,6 +482,8 @@ async function setPassword(req, res) {
     return result;
   });
   if (updated.count === 0) return ticketFailure(res);
+  // Every device is signed out (tokenVersion moved on too): the person signs in again with the new password.
+  await sessions.revokeAllSessions({ subjectType: sessions.SUBJECTS.PATIENT, subjectId: step.sub, reason: sessions.REASONS.PASSWORD_RESET });
 
   await recordSecurityEvent(req, step.reason === "reset" ? EVENTS.PASSWORD_RESET_COMPLETED : EVENTS.PASSWORD_SET, {
     userId: step.sub,
@@ -485,7 +492,7 @@ async function setPassword(req, res) {
     return res.json({ message: "Password updated. Please log in with your new password." });
   }
   await recordSecurityEvent(req, EVENTS.LOGIN_SUCCEEDED, { userId: step.sub, detail: { method: "otp_then_new_password" } });
-  res.json(await sessionFor(step.sub));
+  res.json(await sessionFor(step.sub, req));
 }
 
 // Codes from any patient step can be resent with that step's ticket.
@@ -494,6 +501,7 @@ const TICKET_PURPOSE = {
   login_otp: "patient_login",
   reset_otp: "patient_password_reset",
   change_contact_otp: (step) => (step.kind === "mobile" ? "patient_change_mobile" : "patient_change_email"),
+  delete_account_otp: "patient_delete_account",
 };
 const REGISTRATION_STEPS = ["register_otp"];
 
@@ -579,7 +587,7 @@ async function socialSignIn(req, res, provider, payload) {
         await recordSecurityEvent(req, EVENTS.REGISTER_COMPLETED, { userId: created.id, detail: { provider, direct: true } });
       }
       await recordSecurityEvent(req, EVENTS.SOCIAL_LOGIN_SUCCEEDED, { userId: created.id, detail: { provider } });
-      return res.json(await sessionFor(created.id));
+      return res.json(await sessionFor(created.id, req));
     }
     await recordSecurityEvent(req, EVENTS.SOCIAL_LOGIN_REFUSED, {
       identifier: payload.email,
@@ -601,7 +609,7 @@ async function socialSignIn(req, res, provider, payload) {
     });
   }
   await recordSecurityEvent(req, EVENTS.SOCIAL_LOGIN_SUCCEEDED, { userId: user.id, detail: { provider } });
-  res.json(await sessionFor(user.id));
+  res.json(await sessionFor(user.id, req));
 }
 
 async function googleLogin(req, res) {
@@ -754,8 +762,7 @@ async function corporateVerifyOtp(req, res) {
     corporateId: corporateUser.corporateId,
     ...(corporateUser.mustChangePassword && { pwc: true }),
   };
-  const token = signAccessToken(claims);
-  const refreshToken = signRefreshToken(claims);
+  const { token, refreshToken } = await startSession({ claims, subjectType: sessions.SUBJECTS.CORPORATE, subjectId: corporateUser.id, userAgent: userAgentOf(req) });
   const { passwordHash: _omit, ...safeCorporateUser } = corporateUser;
   res.json({
     token,
@@ -769,6 +776,10 @@ async function corporateVerifyOtp(req, res) {
   });
 }
 
+// Refresh: a new access token AND a new refresh token (the refresh token rotates). Order: the token's signature and expiry; the account (patient: tokenVersion, verified, not retired; corporate: still exists,
+// first-login restriction); then the SESSION (session.service.js): live, not idle, and this token is the current one. A token without a session id (issued before sessions existed) is exchanged ONCE for a
+// new session, with every one of the old checks above still applying.
+const SESSION_ENDED = "Your session has ended. Please log in again.";
 async function refreshAccessToken(req, res) {
   const { refreshToken } = req.body;
   if (!refreshToken)
@@ -796,10 +807,10 @@ async function refreshAccessToken(req, res) {
   if (payload.role === "patient") {
     const user = await prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { tokenVersion: true, isVerified: true },
+      select: { tokenVersion: true, isVerified: true, deletedAt: true },
     });
-    if (!user || !user.isVerified || user.tokenVersion !== (payload.tv ?? 0)) {
-      return res.status(401).json({ error: "Your session has ended. Please log in again." });
+    if (!user || !user.isVerified || user.deletedAt || user.tokenVersion !== (payload.tv ?? 0)) {
+      return res.status(401).json({ error: SESSION_ENDED });
     }
     claims.tv = user.tokenVersion;
   }
@@ -812,13 +823,25 @@ async function refreshAccessToken(req, res) {
       where: { id: payload.sub },
       select: { corporateId: true, mustChangePassword: true },
     });
-    if (!user) return res.status(401).json({ error: "Your session has ended. Please log in again." });
+    if (!user) return res.status(401).json({ error: SESSION_ENDED });
     claims.corporateId = user.corporateId;
     if (user.mustChangePassword) claims.pwc = true;
   }
-  const token = signAccessToken(claims);
-  const newRefreshToken = signRefreshToken(claims);
-  res.json({ token, refreshToken: newRefreshToken });
+  const subjectType = payload.role === "corporate" ? sessions.SUBJECTS.CORPORATE : sessions.SUBJECTS.PATIENT;
+
+  if (payload.sid) {
+    if (!sessions.sessionsAvailable()) return res.status(401).json({ error: SESSION_ENDED });
+    const rotated = await sessions.rotateRefresh(payload);
+    if (!rotated.ok) {
+      if (rotated.reason === "refresh_conflict") return res.status(409).json({ error: "Another refresh is in progress. Please try again.", code: rotated.reason });
+      return res.status(401).json({ error: SESSION_ENDED, code: rotated.reason });
+    }
+    const pair = pairForSession({ claims, sessionId: payload.sid, jti: rotated.jti, expiresAt: rotated.expiresAt });
+    return res.json({ token: pair.token, refreshToken: pair.refreshToken });
+  }
+
+  const started = await startSession({ claims, subjectType, subjectId: payload.sub, userAgent: userAgentOf(req) });
+  res.json({ token: started.token, refreshToken: started.refreshToken });
 }
 //the function for getting  the profile page
 async function getMe(req, res) {
@@ -1026,6 +1049,7 @@ async function resetPassword(req, res) {
     where: { id: corporateUser.id },
     data: { passwordHash, mustChangePassword: false, passwordChangedAt: new Date() },
   });
+  await sessions.revokeAllSessions({ subjectType: sessions.SUBJECTS.CORPORATE, subjectId: corporateUser.id, reason: sessions.REASONS.PASSWORD_RESET });
   res.json({
     message: "Password updated. Please log in with your new password.",
   });
@@ -1060,17 +1084,170 @@ async function changePassword(req, res) {
     data: { passwordHash, mustChangePassword: false, passwordChangedAt: new Date() },
   });
   const claims = { sub: corporateUser.id, role: "corporate", corporateId: corporateUser.corporateId };
-  res.json({
-    message: "Password updated.",
-    token: signAccessToken(claims),
-    refreshToken: signRefreshToken(claims),
+  // Every OTHER device is signed out; this device keeps its session and gets a fresh, unrestricted token pair (a session started before sessions existed has no row: it gets a new one).
+  const current = req.user.sessionId || null;
+  await sessions.revokeAllSessions({ subjectType: sessions.SUBJECTS.CORPORATE, subjectId: corporateUser.id, reason: sessions.REASONS.PASSWORD_CHANGED, exceptSessionId: current });
+  const renewed = current && sessions.sessionsAvailable() ? await sessions.renewRefresh(current) : null;
+  const pair = renewed
+    ? pairForSession({ claims, sessionId: current, jti: renewed.jti, expiresAt: renewed.expiresAt })
+    : await startSession({ claims, subjectType: sessions.SUBJECTS.CORPORATE, subjectId: corporateUser.id, userAgent: userAgentOf(req) });
+  res.json({ message: "Password updated.", token: pair.token, refreshToken: pair.refreshToken });
+}
+
+// ---- Signing out and the signed-in devices ---------------------------------------------------------------------------------------------------------
+// Ends ONE session: the one named by the caller's own refresh token (it may be expired for access purposes, and the access token may be gone), or, failing that, by its access token. A token that is
+// expired, forged, already used or of another kind ends nothing and is not told apart from a good one. A patient token from before sessions existed (no sid) falls back to the old way: tokenVersion
+// moves on, which ends every legacy token of the account. -> true when the caller gave a token to look at.
+function bearerOf(req) {
+  const header = req.headers && req.headers.authorization;
+  return typeof header === "string" && header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null;
+}
+async function endSessionOf(req) {
+  const refreshToken = req.body && req.body.refreshToken;
+  let payload = null;
+  if (typeof refreshToken === "string" && refreshToken) {
+    try { payload = verifyRefreshToken(refreshToken); } catch { payload = null; }
+  } else if (bearerOf(req) && process.env.JWT_ACCESS_SECRET) {
+    try { payload = require("jsonwebtoken").verify(bearerOf(req), process.env.JWT_ACCESS_SECRET); } catch { payload = null; }
+  }
+  if (!payload || (payload.role !== "patient" && payload.role !== "corporate") || payload.sub === undefined) return;
+  const subjectType = payload.role === "corporate" ? sessions.SUBJECTS.CORPORATE : sessions.SUBJECTS.PATIENT;
+  if (payload.sid) {
+    if (sessions.sessionsAvailable()) await sessions.revokeSession({ sessionId: payload.sid, subjectType, subjectId: payload.sub, reason: sessions.REASONS.LOGOUT });
+    return;
+  }
+  if (payload.role === "patient") {
+    await prisma.user.updateMany({ where: { id: payload.sub, tokenVersion: payload.tv ?? 0 }, data: { tokenVersion: { increment: 1 } } });
+  }
+}
+
+// POST /auth/corporate/logout: kept always-200 as before (the corporate portal calls it with or without a token); it now also ends the caller's session when it can tell which one.
+async function corporateLogout(req, res) {
+  await endSessionOf(req);
+  res.json({ message: "Logged out." });
+}
+
+// POST /auth/logout { refreshToken } (or the Bearer access token): signs out THIS device only. The same 200 for any token (it tells nothing about tokens); 400 only when no token was sent at all.
+async function logout(req, res) {
+  const hasRefresh = req.body && typeof req.body.refreshToken === "string" && req.body.refreshToken;
+  if (!hasRefresh && !bearerOf(req)) return res.status(400).json({ error: "refreshToken is required" });
+  await endSessionOf(req);
+  return res.json({ message: "Logged out." });
+}
+
+const sessionSubject = (req) => (req.user.role === "corporate" ? sessions.SUBJECTS.CORPORATE : sessions.SUBJECTS.PATIENT);
+
+// GET /auth/sessions: the devices this account is signed in on (live sessions only); `current` marks the caller's.
+async function listMySessions(req, res) {
+  if (!sessions.sessionsAvailable()) return res.json({ sessions: [] });
+  const list = await sessions.listSessions({ subjectType: sessionSubject(req), subjectId: req.user.id, currentSessionId: req.user.sessionId });
+  res.json({ sessions: list });
+}
+
+// DELETE /auth/sessions/:id: signs one device out. Another account's session id is a 404, exactly like an unknown one.
+async function revokeMySession(req, res) {
+  const ended = sessions.sessionsAvailable()
+    ? await sessions.revokeSession({ sessionId: req.params.id, subjectType: sessionSubject(req), subjectId: req.user.id, reason: sessions.REASONS.DEVICE_REMOVED })
+    : false;
+  if (!ended) return res.status(404).json({ error: "Session not found" });
+  res.json({ message: "Signed out of that device.", current: req.params.id === req.user.sessionId });
+}
+
+// POST /auth/sessions/revoke-others: signs out every device except the caller's.
+async function revokeOtherSessions(req, res) {
+  const revoked = await sessions.revokeAllSessions({ subjectType: sessionSubject(req), subjectId: req.user.id, reason: sessions.REASONS.OTHERS_REMOVED, exceptSessionId: req.user.sessionId });
+  res.json({ revoked });
+}
+
+// --- Account retirement ("Delete account") -------------------------------------------------------------------------------------------------------------
+// PATIENT accounts only (the routes are behind requireAuth(['patient'])). The account is RETIRED, not deleted: the users row stays, because the patient's
+// requests, cases and documents still point at it (those foreign keys are Restrict on purpose) and some of those records may have to be kept for
+// medical, legal or insurance reasons (see the Privacy Policy). What is cleared is everything that identifies the account or lets anyone sign in to it.
+// Nothing is deleted from the requests, cases, documents or uploaded files, and nothing is sent to or removed from Bitrix24.
+//
+// Two steps: step 1 (/me/delete/start) sends a code to the account's own verified email (or its mobile when the email was never verified); no password is asked for,
+// for any kind of account (the signed-in session plus the code sent to the account's OWN contact is the authorisation). Step 2 (/me/delete/confirm) needs that code, the
+// ticket from step 1 AND the explicit confirmation, and does the retirement in one transaction. The code's destination always comes from the account, never from the
+// request. A patient with requests still in progress is refused at both steps with a clear message: their request is being worked on and must be finished (or
+// cancelled) by Operations first.
+const ACTIVE_REQUEST_STATUSES = ["submitted", "in_progress"];
+
+function activeRequests(userId) {
+  return prisma.serviceRequest.count({ where: { userId, status: { in: ACTIVE_REQUEST_STATUSES } } });
+}
+
+async function refuseActiveRequests(req, res, user, count, step) {
+  await recordSecurityEvent(req, EVENTS.ACCOUNT_DELETE_BLOCKED, { userId: user.id, detail: { step, activeRequests: count } });
+  return res.status(409).json({
+    error: `You have ${count} request${count === 1 ? "" : "s"} in progress, so your account cannot be deleted yet. Please contact support, or try again once ${count === 1 ? "it is" : "they are"} completed or cancelled.`,
+    code: "active_requests",
+    activeRequests: count,
   });
 }
 
-// JWTs are stateless — there's no server-side session to end, so this is just a
-// well-known endpoint for the frontend to call that always succeeds.
-async function corporateLogout(req, res) {
-  res.json({ message: "Logged out." });
+// Step 1: a code to the account's own contact. Nothing changes yet. No password is asked for (a password in the request is ignored, never checked).
+async function startAccountDeletion(req, res) {
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+  if (!user || !user.isVerified || user.deletedAt) return res.status(404).json({ error: "Account not found" });
+  // An account locked out (by failed logins) cannot start a deletion either.
+  if (user.lockedUntil && user.lockedUntil > new Date()) return lockedResponse(res, user.lockedUntil);
+
+  // Before a code is sent: a patient with requests in progress is told now, not after the second step.
+  const active = await activeRequests(user.id);
+  if (active) return refuseActiveRequests(req, res, user, active, "start");
+
+  // The code goes to the account's own verified contact: its email, or its mobile when the email was never verified (as at login).
+  const dest = user.emailVerifiedAt || !user.mobile ? user.email : user.mobile;
+  const result = await sendCode(dest, "patient_delete_account");
+  if (result.throttled) return throttledResponse(res, result);
+  await recordSecurityEvent(req, EVENTS.ACCOUNT_DELETE_STARTED, { userId: user.id, detail: { method: "code" } });
+  res.json(codeStep(signTicket({ step: "delete_account_otp", sub: user.id, dest, tv: user.tokenVersion }), dest));
+}
+
+// Step 2: the code, the explicit confirmation, and then the retirement itself. The ticket must be this signed-in account's own, from before no password
+// reset, and the account must still be live.
+async function confirmAccountDeletion(req, res) {
+  const body = req.body || {};
+  if (body.confirm !== true) {
+    return res.status(400).json({ error: "Please confirm that you want to delete your account.", code: "confirmation_required" });
+  }
+  if (!body.ticket || !hasProof(body)) return res.status(400).json({ error: "ticket and code are required" });
+
+  const step = readTicket(body.ticket, "delete_account_otp");
+  if (!step || step.sub !== req.user.id) return ticketFailure(res);
+  const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+  if (!user || !user.isVerified || user.deletedAt || user.tokenVersion !== step.tv) return ticketFailure(res);
+
+  const result = await checkCode(step.dest, purposeFor(step), body);
+  if (!result.ok) return otpFailure(req, res, result, { userId: user.id, step: "account_deletion" });
+
+  const active = await activeRequests(user.id);
+  if (active) return refuseActiveRequests(req, res, user, active, "confirm");
+
+  // One transaction: the identity is cleared, every token dies (tokenVersion moves on and deletedAt is set: requireAuth and /auth/refresh both refuse
+  // the account from this moment), the patient's old login codes go, and the notification system lets go of the account (retirePatientNotifications: push devices made inactive, every open
+  // push delivery cancelled, the in-app history SOFT-deleted like the patient's own delete, so no notification row, delivery or idempotency key is destroyed). Requests, cases, documents,
+  // consents and the security log are NOT touched. The email becomes a placeholder nobody can receive mail at (the reserved ".invalid" domain), so the real one is
+  // free to sign up again and this row can never be mistaken for a half-finished sign-up.
+  const placeholder = `deleted-${user.id}-${crypto.randomBytes(6).toString("hex")}@deleted.invalid`;
+  const identifiers = [user.email, user.mobile].filter(Boolean);
+  const retiredAt = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: user.id },
+      data: {
+        name: "Deleted account", firstName: null, lastName: null, email: placeholder, mobile: null, gender: null, nationality: null, phoneCountry: null,
+        passwordHash: null, googleId: null, appleId: null, pushToken: null, isVerified: false, emailVerifiedAt: null, failedLoginCount: 0, lockedUntil: null,
+        tokenVersion: { increment: 1 }, deletedAt: retiredAt,
+      },
+    });
+    await tx.otpCode.deleteMany({ where: { identifier: { in: identifiers } } });
+    // All or nothing with the retirement itself: a retired account never keeps a live push device or an open delivery, and its notification history is never hard-deleted.
+    await retirePatientNotifications(tx, user.id, { reason: "account_deleted", now: retiredAt });
+  });
+  await sessions.revokeAllSessions({ subjectType: sessions.SUBJECTS.PATIENT, subjectId: user.id, reason: sessions.REASONS.ACCOUNT_RETIRED });
+  await recordSecurityEvent(req, EVENTS.ACCOUNT_DELETED, { userId: user.id, identifier: user.email });
+  res.json({ deleted: true });
 }
 
 module.exports = {
@@ -1097,4 +1274,10 @@ module.exports = {
   resetPassword,
   changePassword,
   corporateLogout,
+  logout,
+  listMySessions,
+  revokeMySession,
+  revokeOtherSessions,
+  startAccountDeletion,
+  confirmAccountDeletion,
 };

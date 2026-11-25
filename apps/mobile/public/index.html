@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>%WEB_TITLE%</title>
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #EEF6FD; /* the splash's own colour: nothing flashes white while the app downloads */
+      }
+      body {
+        overflow: hidden;
+      }
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+    <!-- The boot splash: the same picture as the app's splash (logo over the globe, a line sweeping under it). It is drawn by the browser at once, before any JavaScript has downloaded, and it is an
+         overlay OUTSIDE the React root: the app does not replace it, it removes it (src/lib/bootSplash.js) once its own first screen (the splash's pictures, or the screen a reload lands on) is
+         really on screen, so nothing emptier is ever drawn in between. Its files are copies of assets/images/splash-globe.jpg and logo-full.png. -->
+    <style id="boot-splash">
+      #boot { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 2147483000; display: flex; align-items: center; justify-content: center; background: #EEF6FD url(/boot/splash-globe.jpg) center / cover no-repeat; transition: opacity 0.25s ease; }
+      #boot.hide { opacity: 0; pointer-events: none; }
+      #boot .col { width: 100%; display: flex; flex-direction: column; align-items: center; }
+      #boot img { width: min(62vw, 320px); aspect-ratio: 2440 / 1405; height: auto; object-fit: contain; }
+      #boot .tag { margin-top: 14px; padding: 0 28px; text-align: center; font: 21px Georgia, "Times New Roman", serif; visibility: hidden; } /* keeps the logo where the app's splash puts it */
+      #boot .track { position: relative; width: 50%; max-width: 200px; height: 3px; margin-top: 28px; border-radius: 3px; background: #E4E9F2; overflow: hidden; }
+      #boot .bar { position: absolute; top: 0; left: 0; width: 38%; height: 100%; background: linear-gradient(90deg, #B41C2D 50%, #303A8F 50%); animation: boot-sweep 1.3s cubic-bezier(0.65, 0, 0.35, 1) infinite; }
+      @keyframes boot-sweep { from { transform: translateX(-100%); } to { transform: translateX(263%); } }
+    </style>
+  </head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript>
+      You need to enable JavaScript to run this app.
+    </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+    <div id="boot" role="img" aria-label="HumanCare">
+      <div class="col">
+        <img src="/boot/logo-full.png" alt="" />
+        <div class="tag">Excellence in Saving Lives<br />Through Humancare</div>
+        <div class="track"><div class="bar"></div></div>
+      </div>
+    </div>
+  </body>
+</html>

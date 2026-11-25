@@ -330,7 +330,10 @@ describe('POST /notifications/devices: registration', () => {
 
   test('the registration rate limit is per account (active outside the test environment)', async () => {
     const saved = process.env.NODE_ENV;
+    const savedLegacy = process.env.AUTH_ALLOW_LEGACY_TOKENS;
     process.env.NODE_ENV = 'production';
+    // These tokens carry no session id (`sid`): production refuses such a token unless this is set (auth/session.service.js legacyAccessTokensAllowed); the test is about the limiter, not about sessions.
+    process.env.AUTH_ALLOW_LEGACY_TOKENS = 'true';
     try {
       const tok = token({ sub: 77, role: 'patient' });
       mockDb.users = [{ id: 1 }, { id: 77 }];
@@ -339,7 +342,10 @@ describe('POST /notifications/devices: registration', () => {
       expect(last.status).toBe(429);
       // another patient has their own budget
       expect((await post(body({ deviceId: UUID_B, expoPushToken: TOKEN_2 }), P1)).status).toBe(200);
-    } finally { process.env.NODE_ENV = saved; }
+    } finally {
+      process.env.NODE_ENV = saved;
+      if (savedLegacy === undefined) delete process.env.AUTH_ALLOW_LEGACY_TOKENS; else process.env.AUTH_ALLOW_LEGACY_TOKENS = savedLegacy;
+    }
   });
 });
 
@@ -575,7 +581,7 @@ describe('legacy User.pushToken cleanup (exact match only)', () => {
       expect(fs.readFileSync(path.join(__dirname, '../../prisma/schema.prisma'), 'utf8')).toMatch(/pushToken\s+String\?\s+@map\("push_token"\)/);
     });
 
-    test('the cleanup is only in the patient device service: no corporate or authentication code clears it, and nothing reads it for sending', () => {
+    test('the cleanup is only in the patient device service, plus the retirement of a deleted account (which clears every personal field); no corporate code clears it, and nothing reads it for sending', () => {
       const fs = require('fs');
       const path = require('path');
       const src = path.join(__dirname, '../../src');
@@ -587,7 +593,11 @@ describe('legacy User.pushToken cleanup (exact match only)', () => {
         return undefined;
       });
       walk(src);
-      expect(writers).toEqual(['modules/notifications/notification-devices.service.js']);
+      expect(writers.sort()).toEqual(['modules/auth/auth.controller.js', 'modules/notifications/notification-devices.service.js']);
+      // the account retirement also ends the account's push devices and cancels their open deliveries (retirePatientNotifications, covered by account-retirement-notifications.test.js)
+      const auth = fs.readFileSync(path.join(src, 'modules/auth/auth.controller.js'), 'utf8');
+      const retire = auth.slice(auth.indexOf('async function confirmAccountDeletion'));
+      expect(retire).toContain('retirePatientNotifications(tx, user.id, { reason: "account_deleted"');
       expect(fs.readFileSync(path.join(src, 'modules/notifications/push-delivery-enqueue.js'), 'utf8').replace(/\/\/.*$/gm, '')).not.toMatch(/pushToken/);
     });
   });

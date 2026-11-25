@@ -7,6 +7,7 @@
 
 const { isBitrixSyncEnabled } = require('./bitrix-config');
 const { sharedDispatcher } = require('./queue/dispatcher');
+const { isScanClean } = require('../documents/document-scan');
 const { buildLeadFields, medicalReportFields, MEDICAL_REPORT_FIELD } = require('./bitrix-lead');
 const { readBuffer } = require('../../storage');
 const { keyFromStoredReference } = require('../../storage/keys');
@@ -80,6 +81,8 @@ async function createLead(input) {
 // is a single-file field the new file replaces the old one, as before. `comments` (the lead
 // comment with every report's name in it) is written in the same call when given.
 async function attachMedicalReport(leadId, document, { comments } = {}) {
+  // Defence in depth: nothing that is not confirmed clean is ever read for Bitrix24, whoever calls this.
+  if (!isScanClean(document)) throw Object.assign(new Error('The document has no confirmed clean scan, so it is not sent to Bitrix24.'), { code: 'document_not_scanned' });
   const content = await readBuffer(keyFromStoredReference(document.fileUrl));
   const fields = medicalReportFields(document.name, content);
   const lead = await callBitrix('crm.lead.get', { id: leadId });
@@ -96,8 +99,15 @@ async function attachMedicalReport(leadId, document, { comments } = {}) {
 // saved in our system, so a Bitrix problem is logged, never passed on to the uploader.
 // Nothing happens while the switch is off or before the lead exists (the retry sweep
 // sends the reports once it creates the lead).
+//
+// Only a document with a confirmed clean scan (scan_status 'clean') is ever forwarded: a NULL (never scanned), pending, infected, error or failed one is skipped, logged without its name, and
+// reported as NOT sent (false). Every caller goes through here, the retry sweep included.
 async function sendMedicalReportToBitrix(leadId, document, options) {
   if (!leadId || !isBitrixSyncEnabled()) return false;
+  if (!isScanClean(document)) {
+    console.warn(`Bitrix24 medical report NOT sent for lead ${leadId}: document ${document && document.id} has no confirmed clean scan.`);
+    return false;
+  }
   try {
     await attachMedicalReport(leadId, document, options);
     return true;

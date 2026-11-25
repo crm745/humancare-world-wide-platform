@@ -14,7 +14,12 @@ import { isPrivateCharterTracking } from './tracking/serviceFamily';
 import { formatDayMonth, formatTime } from './dateFormat';
 import { trackingView } from './requestTracking';
 import { baseServiceName, statusBadge, textOf } from './requestDetailsView';
+import { bannerConfigFor } from './trackingBannerConfig';
+import { bannerImageFor } from './trackingBannerImages';
 import { serviceKeyOf } from './myRequestsView';
+import { isNewTeleRequest } from './teleConsultation';
+import { isNewHomeRequest } from './homeHealthcare';
+import { isNewCorporateRequest } from './corporateMedical';
 
 // "15 Nov, 06:45" in the language the app is showing; '' for a missing or invalid time.
 export function whenText(iso) {
@@ -30,12 +35,12 @@ export function cityOf(cityName, place) {
 const events = (request) => (request && request.case && Array.isArray(request.case.stageEvents) ? request.case.stageEvents : []);
 const time = (e) => { const ms = Date.parse(e && e.occurredAt); return Number.isNaN(ms) ? -Infinity : ms; };
 
-// The time of the latest stage event, as "Updated ..." shows it ('' when there is none).
-export function latestUpdate(request) {
+// When the request last changed, as a time the banner turns into "2 min ago": the latest stage event, else the case's / the request's own updatedAt ('' when there is none).
+export function latestUpdateAt(request) {
   const list = events(request).filter((e) => Number.isFinite(time(e)));
-  if (!list.length) return '';
-  const last = list.reduce((best, e) => (time(e) >= time(best) ? e : best));
-  return whenText(last.occurredAt);
+  if (list.length) return list.reduce((best, e) => (time(e) >= time(best) ? e : best)).occurredAt;
+  const fallback = [request && request.case && request.case.updatedAt, request && request.updatedAt].find((v) => Number.isFinite(Date.parse(v)));
+  return fallback || '';
 }
 
 // The steps of a Private Charter request: the model's milestones that apply, in its order.
@@ -74,7 +79,8 @@ function genericSteps(request, t) {
   });
 }
 
-// The step the card talks about: the one under way, otherwise the last one finished (its marker stays a check), otherwise the first.
+// The step the request is at: the one stopped, else the one under way, else the last one finished (its marker stays a check), else the first. (The banner draws its own progress from the
+// steps; this is the single answer to "which stage is it at", shared by the request list card, the details and the tests that check they agree: fiveStageTracking.test.js.)
 export function currentIndexOf(steps) {
   const stop = steps.findIndex((s) => s.stopped);
   if (stop >= 0) return stop;
@@ -85,19 +91,6 @@ export function currentIndexOf(steps) {
   return lastDone >= 0 ? lastDone : 0;
 }
 
-// Where the chip sits on the route: 0 at the first step, 1 at the last. A cancelled request stays half way, as before.
-export function chipPosition({ index, total, cancelled }) {
-  if (cancelled) return 0.5;
-  if (!(total > 1)) return 0;
-  return Math.min(1, Math.max(0, index / (total - 1)));
-}
-
-// The segments of the footer. Up to and including the current step are lit; a cancelled request's are dimmer.
-//   'on' (white) | 'dim' (a cancelled request's reached steps) | 'off'
-export function segmentsOf({ total, index, cancelled }) {
-  return Array.from({ length: total }, (_, i) => (i <= index ? (cancelled ? 'dim' : 'on') : 'off'));
-}
-
 // Everything the screen draws. `t` is the app's translate function; null when there is no request.
 export function buildTrackingDetails(request, t) {
   if (!request) return null;
@@ -105,35 +98,40 @@ export function buildTrackingDetails(request, t) {
   const model = charter ? buildPrivateCharterTracking(request) : null;
   const steps = charter ? charterSteps(model, t) : genericSteps(request, t);
   const cancelled = charter ? model.cancellation.isCancelled : request.status === 'cancelled';
-  const total = steps.length;
-  const index = currentIndexOf(steps);
-  const current = steps[index];
-  const from = cityOf(request.originCityName, request.origin);
-  const to = cityOf(request.destinationCityName, request.destination);
-  const label = [
-    from && to ? t('mr_a11y_route', { from, to }) : from || to,
-    current ? t('mr_a11y_step', { n: index + 1, total }) : '',
-    current ? current.title : '',
-  ].filter(Boolean).join(', ');
+  // A new-format Teleconsultation has no route (its origin is an address, and it has no destination): the route is not drawn.
+  // (a new-format Home Healthcare request has a home address, not a route, either; nor does a new-format Corporate Medical Solutions request: its origin is the Office Address)
+  const tele = isNewTeleRequest(request) || isNewHomeRequest(request) || isNewCorporateRequest(request);
+  const from = tele ? '' : cityOf(request.originCityName, request.origin);
+  const to = tele ? '' : cityOf(request.destinationCityName, request.destination);
+  const serviceKey = serviceKeyOf(request);
+  const config = bannerConfigFor(serviceKey);
+  const serviceName = baseServiceName(request, t);
+  // A route needs both cities; with one or none the banner is titled by the service and says where the patient is (a home address, an office) when it knows.
+  const hasRoute = !!(from && to);
+  const area = hasRoute ? '' : textOf(request.originCityName) || textOf(request.origin) || from || to;
   return {
     reference: textOf(request.referenceNumber),
-    serviceKey: serviceKeyOf(request),
-    serviceName: baseServiceName(request, t),
+    serviceKey,
+    serviceName,
     badge: statusBadge(request, t),
+    status: textOf(request.status),
     from,
     to,
-    hasRoute: !!(from || to),
+    hasRoute,
+    area,
     steps,
-    total,
-    index,
-    currentTitle: current ? current.title : '',
+    total: steps.length,
+    index: currentIndexOf(steps),
+    currentTitle: steps.length ? steps[currentIndexOf(steps)].title : '',
     cancelled,
-    position: chipPosition({ index, total, cancelled }),
-    segments: segmentsOf({ total, index, cancelled }),
-    updated: latestUpdate(request),
+    // The banner: the chip's label and icon, the service's drawn picture (null when it has none), the short service name and when the request last changed.
+    chipLabel: t(config.shortKey || config.chipKey), // the service's own name (the same words as the title), never a second, different name for it
+    chipIcon: config.icon,
+    bannerImage: bannerImageFor(serviceKey),
+    shortName: config.shortKey ? t(config.shortKey) : '',
+    updatedAt: latestUpdateAt(request),
     // Private Charter only: the Admin's message while changes are requested, and the way to the request to answer it.
     message: charter ? changesMessage(model) : null,
     openRequest: charter ? showOpenRequest(model) : false,
-    accessibilityLabel: label,
   };
 }

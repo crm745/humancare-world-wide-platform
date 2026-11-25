@@ -66,6 +66,16 @@ const otpVerifyLimiter = rateLimit({
   message: { error: 'Too many attempts. Please try again in a few minutes.' },
 });
 
+// Sign out (POST /auth/logout): the call only revokes, so the cap is generous; it stops one IP from hammering the endpoint.
+const logoutLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInTest,
+  message: { error: 'Too many requests. Please try again in a few minutes.' },
+});
+
 // City type-ahead (GET /geo/cities): per signed-in account, since a person typing sends a request
 // every few letters. The lookup is a local database query, so this only stops scraping.
 const geoSearchLimiter = rateLimit({
@@ -90,4 +100,39 @@ const deviceRegistrationLimiter = rateLimit({
   message: { error: 'Too many device registrations. Please try again later.' },
 });
 
-module.exports = { loginLimiter, otpRequestLimiter, otpSendIpLimiter, patientLoginLimiter, otpVerifyLimiter, geoSearchLimiter, deviceRegistrationLimiter };
+// Patient writes that cost us real resources: POST /requests (a request, its Case and a CRM lead) and the document upload (disk space, a virus scan, a CRM message). Keyed by the signed-in
+// PATIENT, never by IP, so a shared office or mobile-carrier address does not make patients share a budget, and one patient's traffic never uses up another's. They run AFTER requireAuth (an
+// unauthenticated caller is a 401 before anything is counted) and, for uploads, BEFORE multer (a refused caller never makes the server write a file).
+// The numbers are far above what a person does (a handful of requests a day; at most 10 to 30 documents per request, a retry or two each) and far below what a script does. Every call counts,
+// including a retry with the same clientRequestId / clientUploadId: a retry is rare, and a client stuck in a loop is exactly what this stops.
+// The counters live in this process's memory (express-rate-limit's default store): they reset when the server restarts and are per instance.
+// Tests normally skip every limiter (the suites call the same endpoints dozens of times from one account); the rate-limit tests turn enforcement on with RATE_LIMIT_ENFORCE_IN_TEST=true.
+const skipUnlessEnforced = () => process.env.NODE_ENV === 'test' && process.env.RATE_LIMIT_ENFORCE_IN_TEST !== 'true';
+const perPatient = (req) => (req.user && req.user.id !== undefined ? `patient:${req.user.id}` : `ip:${ipKeyGenerator(req.ip)}`);
+
+const patientWriteLimiter = ({ windowMs, limit, message }) => rateLimit({
+  windowMs,
+  limit,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: perPatient,
+  skip: skipUnlessEnforced,
+  message: { error: message, code: 'rate_limited' },
+});
+
+// POST /requests: 20 in 15 minutes (a burst) and 100 in 24 hours.
+const requestSubmitLimiters = [
+  patientWriteLimiter({ windowMs: 15 * 60 * 1000, limit: 20, message: 'You are sending requests too quickly. Please wait a few minutes and try again.' }),
+  patientWriteLimiter({ windowMs: 24 * 60 * 60 * 1000, limit: 100, message: 'You have reached the daily limit for requests. Please try again tomorrow or contact HumanCare.' }),
+];
+
+// POST /requests/me/:id/documents: 60 in 15 minutes (several requests with a full set of files, retries included) and 300 in 24 hours.
+const requestUploadLimiters = [
+  patientWriteLimiter({ windowMs: 15 * 60 * 1000, limit: 60, message: 'You are uploading files too quickly. Please wait a few minutes and try again.' }),
+  patientWriteLimiter({ windowMs: 24 * 60 * 60 * 1000, limit: 300, message: 'You have reached the daily limit for uploads. Please try again tomorrow or contact HumanCare.' }),
+];
+
+module.exports = {
+  loginLimiter, otpRequestLimiter, otpSendIpLimiter, patientLoginLimiter, otpVerifyLimiter, geoSearchLimiter, logoutLimiter,
+  requestSubmitLimiters, requestUploadLimiters, deviceRegistrationLimiter,
+};

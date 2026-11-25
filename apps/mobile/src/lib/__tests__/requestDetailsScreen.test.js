@@ -39,11 +39,20 @@ describe('Request Details is drawn to the design (source checks)', () => {
     expect(screen).toContain('<Icon size={20} color={C.blueText} />');
     expect(screen).toContain("marginTop: 16, flexDirection: 'row', gap: 8");
   });
-  test('the three actions are the same as before: the summary PDF, the share text, a phone call', () => {
-    expect(screen).toContain("downloadAndShare(`/requests/me/${request.id}/summary`, `${request.referenceNumber}-summary.pdf`)");
-    expect(screen).toContain('Share.share(');
-    expect(screen).toContain("Linking.openURL('tel:+919699999065')");
-    expect(screen).toContain("toast('Downloading request summary…')");
+  // Share was removed from this page (a deliberate product decision). The summary PDF Download and the phone call are exactly as they were; the two remaining
+  // actions share the row (each is flex: 1, so they fill it evenly); Document Preview keeps its own Share.
+  test('two actions remain, the same as before: the summary PDF and a phone call; there is no Share action, handler or import', () => {
+    expect(screen).toContain("downloadDocument(`/requests/me/${request.id}/summary`, `${request.referenceNumber}-summary.pdf`)");
+    expect(screen).toContain("open('tel:+919699999065')");
+    expect(screen).toContain("toast(t('rd_downloading'))");
+    expect(screen).not.toMatch(/Share\.share|Share2|rd_share|shareRequest|onShare/);
+    expect((screen.match(/<Action Icon=/g) || [])).toHaveLength(2);
+    expect(screen).toContain("<Action Icon={Download} label={t('rd_download')} onPress={onDownload} disabled={offline} hint={t('net_offline_text')} />");
+    expect(screen).toContain("<Action Icon={Phone} label={t('rd_contact_team')} onPress={onContact} />");
+  });
+  test('Document Preview keeps its own Share', () => {
+    const preview = require('fs').readFileSync(require('path').join(__dirname, '../../app/document-preview.js'), 'utf8');
+    expect(preview).toContain('Share2');
   });
   test('live tracking: a 16/22/800 title, the Case active chip, five 6-tall segments with a 4 gap, the step line and the update time', () => {
     expect(screen).toContain('fontFamily: FONT[800], fontSize: 16, lineHeight: 22');
@@ -104,9 +113,9 @@ describe('Request Details is drawn to the design (source checks)', () => {
     expect(screen).not.toContain('Track Details');
   });
   test('what was there is kept: the load error, the reload after an upload, Document history and Additional documents', () => {
-    expect(screen).toContain("<LoadFailure message={t('rd_load_failed')} onRetry={id ? reload : undefined} />");
+    expect(screen).toContain("<LoadFailure titleKey=\"lf_title_request\" error={error} message={t('rd_load_failed')} onRetry={id ? reload : undefined} />");
     expect(screen).toContain('<DocumentHistory request={request} styled />');
-    expect(screen).toContain('<AdditionalDocuments request={request} onUploaded={reload} />');
+    expect(screen).toContain('<AdditionalDocuments request={request} onUploaded={reload} pendingUploads={pendingUploads} />');
     expect(screen).toContain("apiGet(`/requests/me/${id}`)");
   });
   test('no other screen was changed to make this one: TopBar is not used, and the form is not imported', () => {

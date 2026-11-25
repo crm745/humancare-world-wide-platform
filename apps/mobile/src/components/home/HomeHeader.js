@@ -2,12 +2,14 @@ import { Image, Pressable, View } from 'react-native';
 import { Bell } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
 import { LOGO } from '../../data/images';
+import { ConnectionBanner } from '../network/ConnectionBanner';
 
 // White bar: the notifications bell on the left (red dot when something is unread) and the
 // logo on the right. Left-to-right in every language so the sides never swap.
 export function HomeHeader({ hasUnread, onBell }) {
   const { t } = useApp();
   return (
+    <>
     <View style={{ direction: 'ltr', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 12, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E4E9F2' }}>
       <Pressable
         accessibilityRole="button"
@@ -20,5 +22,7 @@ export function HomeHeader({ hasUnread, onBell }) {
       </Pressable>
       <Image source={LOGO} accessible={false} style={{ height: 34, width: 34 * (2440 / 1405) }} resizeMode="contain" />
     </View>
+    <ConnectionBanner />
+    </>
   );
 }

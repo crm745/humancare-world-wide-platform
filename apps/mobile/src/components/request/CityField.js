@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, ScrollView, View } from 'react-native';
+import { useApp } from '../../state/AppContext';
 import { apiGet } from '../../lib/api';
+import { useRetryOnRestore } from '../../lib/useRetryOnRestore';
+import { useNetwork } from '../../state/NetworkContext';
 import {
   GEONAMES_ATTRIBUTION_FALLBACK, SEARCH_DEBOUNCE_MS, describeCityError, normaliseCityText, searchCitiesCached, searchableQuery,
 } from '../../lib/citySearch';
@@ -23,7 +26,16 @@ import { COLORS } from '../../theme/colors';
 //   - `structured` (Private Charter): `city` holds the chosen city; typing again clears it (the form clears it in onChangeText) until another is
 //     chosen. A city is chosen by tapping a GeoNames suggestion, or, when GeoNames has no match, by tapping the explicit "Use “<text>”" option
 //     (`onManual`): the typed name is then kept as a manual city (no GeoNames id). Without `structured` (every other service) the text is the answer.
-export default function CityField({ label, required, value = '', city = null, onChangeText, onSelect, error, testID, structured = false, countryIso = '', countryName = '', restrictToCountry = false, onManual, t = (key) => key }) {
+// The "problem" kept while offline: it makes the field try again when the connection returns, and is never shown.
+const QUIET_OFFLINE = Object.freeze({ kind: 'network', retry: true, message: '' });
+
+export default function CityField({ label, required, value = '', city = null, onChangeText, onSelect, error, testID, structured = false, countryIso = '', countryName = '', restrictToCountry = false, onManual }) {
+  const { t } = useApp();
+  const { isOffline } = useNetwork();
+  // Offline (or when the search cannot reach the server) the person just types: no search is made and nothing is shown about it. The field is a normal text field; the form says what it needs
+  // (a verified city) when the person continues. The search is made again by itself when the connection is back (useRetryOnRestore below).
+  const offline = useRef(isOffline);
+  useEffect(() => { offline.current = isOffline; }, [isOffline]);
   const reveal = useReveal();
   // The list gets what is left above the keyboard, at most 220 px (the top bars, the label, the field and the Continue bar take the rest).
   const listMax = useListMaxHeight({ reserved: 300, min: 110, max: 220 });
@@ -48,6 +60,7 @@ export default function CityField({ label, required, value = '', city = null, on
     if (!query) { shown.current = ''; setState('idle'); setCities([]); setProblem(null); return; }
     const key = normaliseCityText(query);
     if (shown.current === key) return; // this list is already on screen
+    if (offline.current) { shown.current = ''; setCities([]); setProblem(QUIET_OFFLINE); setState('error'); return; } // offline: no search, no message
     setState('loading');
     setProblem(null);
     searchCitiesCached(apiGet, query)
@@ -73,9 +86,13 @@ export default function CityField({ label, required, value = '', city = null, on
     clearTimeout(timer.current);
     latest.current += 1; // anything still on its way is for older text
     if (!searchableQuery(text)) { shown.current = ''; setState('idle'); setCities([]); setProblem(null); return; }
-    if (normaliseCityText(text) !== shown.current) setState('loading');
+    if (normaliseCityText(text) !== shown.current) setState(offline.current ? 'error' : 'loading');
+    if (offline.current) setProblem(QUIET_OFFLINE);
     timer.current = setTimeout(() => run(text), SEARCH_DEBOUNCE_MS);
   };
+
+  // The connection came back after a search failed: the same text is searched once more (a read; nothing is sent).
+  useRetryOnRestore({ failed: state === 'error' && !!(problem && problem.retry), retry: () => { shown.current = ''; run(value); } });
 
   const onFocus = () => {
     clearTimeout(blurTimer.current);
@@ -108,7 +125,9 @@ export default function CityField({ label, required, value = '', city = null, on
   // What is listed: the verified results, of the selected country when this field is held to it.
   const listed = suggestionsFor(cities, { countryIso, restrict: restrictToCountry, max: 10 });
   const inCountry = restrictToCountry && countryIso ? ` in ${countryName || 'the selected country'}` : '';
-  const visible = open && state !== 'idle';
+  // A failure to reach the server is never drawn as a message under the field (see above); other failures (busy, unavailable, a refused search) still are.
+  const quiet = state === 'error' && !!problem && problem.kind === 'network';
+  const visible = open && state !== 'idle' && !quiet;
   // The open list is brought into view above the keyboard (the form scrolls just enough).
   useEffect(() => {
     if (!visible) return undefined;
@@ -131,7 +150,7 @@ export default function CityField({ label, required, value = '', city = null, on
       <FieldLabel required={required}>{label}</FieldLabel>
       <Input
         value={value} onChangeText={onType} onFocus={onFocus} onBlur={onBlur}
-        placeholder="City, Country" autoCorrect={false} autoCapitalize="words" maxLength={80}
+        placeholder={t('ph_city_country')} autoCorrect={false} autoCapitalize="words" maxLength={80}
         accessibilityLabel={label} autoComplete="off"
       />
       {error ? <Text className="mt-1 text-[12px] text-danger">{error}</Text> : null}
@@ -155,7 +174,7 @@ export default function CityField({ label, required, value = '', city = null, on
           style={{ shadowColor: '#0D2340', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 3 }}
         >
           {state === 'loading' ? (
-            <View className="flex-row items-center gap-2.5 px-3.5 py-3" accessibilityRole="progressbar" accessibilityLabel="Searching cities">
+            <View className="flex-row items-center gap-2.5 px-3.5 py-3" accessibilityRole="progressbar" accessibilityLabel={t('a11y_searching_cities')}>
               <Spinner size={16} color={COLORS.primary} trackColor={COLORS.primarySoft} />
               <Text className="text-[13px] text-muted">Searching…</Text>
             </View>
@@ -170,10 +189,10 @@ export default function CityField({ label, required, value = '', city = null, on
               <Text className="text-[13px] leading-[19px] text-danger">{problem.message}</Text>
               {problem.retry ? (
                 <Pressable
-                  onPress={() => { shown.current = ''; run(value); }} accessibilityRole="button" accessibilityLabel="Retry city search"
+                  onPress={() => { shown.current = ''; run(value); }} accessibilityRole="button" accessibilityLabel={t('a11y_retry_city')}
                   className="mt-2 min-h-[44px] items-center justify-center rounded-xl border-[1.5px] border-primary active:opacity-80"
                 >
-                  <Text className="font-inter-bold text-[14px] text-primary">Retry</Text>
+                  <Text className="font-inter-bold text-[14px] text-primary">{t('btn_retry_generic')}</Text>
                 </Pressable>
               ) : null}
             </View>

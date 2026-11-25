@@ -27,15 +27,27 @@ const baseRequestBody = {
   destination: 'Dubai, UAE',
 };
 
+// A Mortal Remains request in the format the app sends now (single key "mortal"; see mortal-remains.validation.js). Dates are relative to today so
+// the body stays valid whenever the suite runs; the device offset is UTC (0), so "today" is the UTC date.
+const dayOffset = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 const mortalBody = {
-  serviceType: 'Mortal Remains Transportation — Within India',
-  serviceKey: 'mortal_domestic',
+  serviceType: 'Mortal Remains Transportation',
+  serviceKey: 'mortal',
+  transferScope: 'domestic',
+  transportMode: 'ground_transportation',
   patientName: 'Late Suresh Kale',
-  origin: 'Pune',
-  destination: 'Nagpur',
+  patientAge: 64,
+  patientGender: 'Male',
   deceasedRelation: 'Brother',
   placeOfDeath: 'Pune',
-  dateOfDeath: '2026-10-20',
+  dateOfDeath: dayOffset(-5),
+  country: 'India',
+  origin: 'Pune',
+  destination: 'Nagpur',
+  patientContact: '+919876543210',
+  preferredDate: dayOffset(3),
+  urgency: 'planned',
+  utcOffsetMinutes: 0,
 };
 
 describe('POST /requests', () => {
@@ -101,7 +113,7 @@ describe('Bitrix24 on/off switch', () => {
     process.env.BITRIX_SYNC_ENABLED = 'true';
     const { token } = await createPatient();
     const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`)
-      .send({ ...baseRequestBody, serviceType: 'Commercial Airlines — Wheelchair (CAW)', serviceKey: 'commercialair_wheelchair' });
+      .send({ ...baseRequestBody, serviceType: 'Commercial Airlines — Wheelchair (CAW)', serviceKey: 'commercialair_wheelchair', patientContact: '+91 98765 43210', preferredDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10) });
     expect(res.status).toBe(201);
     expect(res.body.request.serviceKey).toBe('commercialair_wheelchair');
     expect(createLead.mock.calls[0][0]).toMatchObject({ serviceKey: 'commercialair_wheelchair', industry: 712, origin: 'Mumbai, India' });
@@ -150,7 +162,7 @@ describe('Bitrix24 on/off switch', () => {
     expect(sendMedicalReportToBitrix.mock.calls[1][2].comments).toContain('Medical reports (2): discharge.pdf, ct-report.pdf');
   });
 
-  it('keeps a death certificate with us and does not send it to the lead as a medical report', async () => {
+  it('keeps a Mortal Remains document as a neutral Supporting Document and does not send it to the lead as a medical report', async () => {
     sendMedicalReportToBitrix.mockClear();
     process.env.BITRIX_SYNC_ENABLED = 'true';
     const { token } = await createPatient();
@@ -159,7 +171,7 @@ describe('Bitrix24 on/off switch', () => {
     const upload = await request(app).post(`/requests/me/${created.body.request.id}/documents`).set('Authorization', `Bearer ${token}`)
       .attach('file', Buffer.from('%PDF-1.4 test'), { filename: 'death-certificate.pdf', contentType: 'application/pdf' });
     expect(upload.status).toBe(201);
-    expect(upload.body.document.type).toBe('Death Certificate');
+    expect(upload.body.document.type).toBe('Supporting Document');
     expect(sendMedicalReportToBitrix).not.toHaveBeenCalled();
   });
 
@@ -176,8 +188,16 @@ describe('Mortal Remains requests', () => {
     const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`).send(mortalBody);
     expect(res.status).toBe(201);
     const saved = await prisma.serviceRequest.findUnique({ where: { id: res.body.request.id } });
-    expect(saved).toMatchObject({ serviceKey: 'mortal_domestic', deceasedRelation: 'Brother', placeOfDeath: 'Pune' });
-    expect(saved.dateOfDeath.toISOString().slice(0, 10)).toBe('2026-10-20');
+    expect(saved).toMatchObject({ serviceKey: 'mortal', deceasedRelation: 'Brother', placeOfDeath: 'Pune', transferScope: 'domestic', transportMode: 'ground_transportation' });
+    expect(saved.dateOfDeath.toISOString().slice(0, 10)).toBe(mortalBody.dateOfDeath);
+  });
+
+  it('refuses the two older Mortal Remains keys for a new request', async () => {
+    const { token } = await createPatient();
+    for (const serviceKey of ['mortal_domestic', 'mortal_international']) {
+      const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`).send({ ...mortalBody, serviceKey });
+      expect(res.status).toBe(400);
+    }
   });
 
   it.each(['deceasedRelation', 'placeOfDeath', 'dateOfDeath'])('requires %s', async (field) => {
@@ -188,8 +208,7 @@ describe('Mortal Remains requests', () => {
 
   it('refuses a date of death in the future', async () => {
     const { token } = await createPatient();
-    const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`).send({ ...mortalBody, dateOfDeath: nextWeek });
+    const res = await request(app).post('/requests').set('Authorization', `Bearer ${token}`).send({ ...mortalBody, dateOfDeath: dayOffset(7) });
     expect(res.status).toBe(400);
   });
 });
@@ -253,7 +272,7 @@ describe('request lifecycle for the patient who submitted it', () => {
 describe('POST /requests: medical page fields', () => {
   // A patient-transport service on the shared (legacy) rules. Private Charter has its own strict
   // validation, tested in private-charter-validation.test.js and in the persistence test below.
-  const airBody = { ...baseRequestBody, serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground' };
+  const airBody = { ...baseRequestBody, serviceType: 'Air Ambulance', serviceKey: 'air' };
   const post = (token, body) => request(app).post('/requests').set('Authorization', `Bearer ${token}`).send(body);
 
   it('saves mobility, equipment and urgency for an air ambulance request', async () => {
@@ -302,14 +321,15 @@ describe('POST /requests: medical page fields', () => {
   it('accepts mobility and equipment for ground ambulance and commercial airline too', async () => {
     const { token } = await createPatient();
     for (const serviceKey of ['ground', 'commercialair_stretcher', 'commercialair_wheelchair']) {
-      const res = await post(token, { ...baseRequestBody, serviceKey, mobility: 'wheelchair', equipVentilator: false });
+      const res = await post(token, { ...baseRequestBody, serviceKey, mobility: 'wheelchair', equipVentilator: false, description: 'Needs transport.' });
       expect(res.status).toBe(201);
     }
   });
 
-  it.each([['hospital'], ['homecare'], ['tele'], ['marine'], ['medvalue'], ['mortal_domestic']])('refuses mobility and equipment for %s', async (serviceKey) => {
+  // (Home Healthcare is not in this list any more: it has its own validator, which refuses these fields with its own message; see home-healthcare-validation.test.js.)
+  it.each([['hospital'], ['tele'], ['marine'], ['medvalue']])('refuses mobility and equipment for %s', async (serviceKey) => {
     const { token } = await createPatient();
-    const extra = serviceKey === 'mortal_domestic' ? { deceasedRelation: 'Son', placeOfDeath: 'Pune', dateOfDeath: '2026-10-20' } : {};
+    const extra = {}; // (Mortal Remains has its own validator; it refuses these fields too: see mortal-remains-validation.test.js)
     const mobility = await post(token, { ...baseRequestBody, ...extra, serviceKey, mobility: 'walking' });
     expect(mobility.status).toBe(400);
     expect(mobility.body.error).toMatch(/only accepted for air and ground/);

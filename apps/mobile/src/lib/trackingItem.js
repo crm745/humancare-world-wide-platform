@@ -3,6 +3,9 @@
 // are different shapes from the backend; each is flattened into the one item the screen reads.
 import { isMortalRequest } from './requestShape';
 import { reviewPill, reviewState } from './requestDocuments';
+import { isNewTeleRequest } from './teleConsultation';
+import { isNewHomeRequest } from './homeHealthcare';
+import { corporateFieldsOf } from './corporateMedical';
 
 // Opens a patient's request on the Tracking screen: the request id (never a Case id), no `kind`.
 // The screen then loads GET /requests/me/:id, which carries the Case and its stage events (a review-workflow
@@ -15,6 +18,7 @@ export const isRequestFor = (request, id) => request != null && typeof request =
 
 export function trackingItemFromRequest(request) {
   const c = request.case;
+  const corporate = corporateFieldsOf(request);
   return {
     referenceNumber: request.referenceNumber,
     serviceType: request.serviceType,
@@ -22,6 +26,15 @@ export function trackingItemFromRequest(request) {
     destination: request.destination,
     status: request.status,
     mortal: isMortalRequest(request),
+    // A new-format Teleconsultation has an address, not a trip: the screen says "Current address" and has no destination row.
+    teleConsultation: isNewTeleRequest(request),
+    // A new-format Home Healthcare request: the screen says "Home address" (the one-line copy) and has no destination row.
+    homeHealthcare: isNewHomeRequest(request),
+    // A new-format Corporate Medical Solutions request: the screen says Company, No. of Employees and Programmes (the programme keys) and has no From / To rows.
+    corporate: corporate.ok ? {
+      company: corporate.companyName, employees: corporate.employeeCount, programmes: corporate.programmes,
+      officeAddress: corporate.officeAddress, officeCountry: corporate.officeCountry, preferredDate: corporate.preferredDate,
+    } : null,
     patientLabel: `${request.patientName}${request.patientAge ? `, ${request.patientAge}` : ''}${request.patientGender ? ` / ${request.patientGender}` : ''}`,
     stageEvents: c?.stageEvents || [],
     documents: c?.documents || [],

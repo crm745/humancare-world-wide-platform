@@ -2,16 +2,18 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { Redirect } from 'expo-router';
 import { useApp } from '../state/AppContext';
+import { errorText } from '../lib/errorText';
 import { navReplace } from '../lib/nav';
 import { apiPost } from '../lib/api';
 import { beginSignIn, saveTokens } from '../lib/session';
 import { postSignInRoute } from '../lib/tokens';
 import { clearAuthSteps, getAuthStep } from '../lib/authFlow';
 import { profileFromUser } from '../lib/profile';
-import { PASSWORD_HINT, passwordProblem } from '../lib/validators';
+import { passwordProblemKey } from '../lib/validators';
 import { Body, Screen } from '../components/layout';
 import { Button, Heading, Spacer, Text } from '../components/ui';
 import { PasswordField } from '../components/widgets';
+import { NeedsInternet } from '../components/network/NeedsInternet';
 
 // Last step of two flows, both reached only after an OTP check:
 //  - reason "setup": an account from before passwords existed must set one before
@@ -27,8 +29,9 @@ export default function SetPassword() {
   if (!step) return <Redirect href="/login" />;
   const { ticket, reason } = step;
   const isSetup = reason === 'setup';
-  const pwdError = pwd1 ? passwordProblem(pwd1) : null;
-  const matchError = pwd2 && pwd1 !== pwd2 ? 'Passwords do not match.' : null;
+  const pwdProblem = pwd1 ? passwordProblemKey(pwd1) : null; // a dictionary key, or null
+  const pwdError = pwdProblem ? t(pwdProblem) : null;
+  const matchError = pwd2 && pwd1 !== pwd2 ? t('err_pwd_mismatch') : null;
   const ready = pwd1 && !pwdError && pwd1 === pwd2;
 
   const submit = async () => {
@@ -47,12 +50,12 @@ export default function SetPassword() {
         setSession('patient');
         navReplace(postSignInRoute('patient'));
       } else {
-        toast(data.message || 'Password updated. Please log in.');
+        toast(data.message || t('pwd_updated_login'));
         navReplace('/login');
       }
     } catch (err) {
       if (err.code === 'stale_sign_in') return; // replaced by a newer sign-in or a sign-out
-      toast(err.message);
+      toast(errorText(err, t));
       if (err.code === 'ticket_invalid') navReplace('/login');
     } finally {
       setBusy(false);
@@ -66,16 +69,17 @@ export default function SetPassword() {
         <Text className="mb-8 mt-3.5 text-center text-[15.5px] text-muted">{t(isSetup ? 'set_pwd_setup_sub' : 'set_pwd_reset_sub')}</Text>
         <View className="gap-5">
           <PasswordField
-            required label={t(isSetup ? 'field_password' : 'reset_pwd_new_label')} placeholder="Create a password" value={pwd1} onChangeText={setPwd1}
-            error={pwdError} hint={PASSWORD_HINT}
+            required label={t(isSetup ? 'field_password' : 'reset_pwd_new_label')} placeholder={t('ph_create_password')} value={pwd1} onChangeText={setPwd1}
+            error={pwdError} hint={t('pwd_hint')}
           />
           <PasswordField
-            required label={t(isSetup ? 'field_confirm_password' : 'reset_pwd_confirm_label')} placeholder="Re-enter your password" value={pwd2} onChangeText={setPwd2}
+            required label={t(isSetup ? 'field_confirm_password' : 'reset_pwd_confirm_label')} placeholder={t('ph_reenter_password')} value={pwd2} onChangeText={setPwd2}
             error={matchError}
           />
         </View>
         <Spacer />
-        <Button large title={t(isSetup ? 'set_pwd_btn' : 'reset_pwd_btn')} disabled={!ready} loading={busy} onPress={submit} />
+        <Button large title={t(isSetup ? 'set_pwd_btn' : 'reset_pwd_btn')} disabled={!ready} loading={busy} needsNetwork onPress={submit} />
+        <NeedsInternet />
         <Text className="mt-7 text-center text-[15px] text-muted">
           <Text className="font-inter-bold text-primary" onPress={() => navReplace('/login')}>{t('cta_back_to_login')}</Text>
         </Text>

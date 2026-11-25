@@ -122,7 +122,7 @@
       "Pediatric & Neonatal Incubator Transfers",
       "Customs, Immigration & Permit Handling"
     ],
-    "img": "IMG_COMMERCIALAIR"
+    "img": "IMG_PRIVATECHARTER"
   },
   "mortal": {
     "title": "Mortal Remains Transportation",
@@ -202,11 +202,7 @@
   "marine": {
     "title": "Marine Medical Safety",
     "desc": "Medical support for crews and passengers at sea: 24/7 tele-medical guidance for the ship, coordination of port-side care and hospital admission, and medical evacuation when a patient must be brought ashore.",
-    "stats": [
-      { "value": "24/7", "label": "Tele-Medical Advice" },
-      { "value": "100+", "label": "Ports Covered" },
-      { "value": "21+", "label": "Years Experience" }
-    ],
+    "stats": [],
     "features": [
       "24/7 Tele-Medical Advice for the Vessel",
       "Port-Side Ambulance & Hospital Coordination",

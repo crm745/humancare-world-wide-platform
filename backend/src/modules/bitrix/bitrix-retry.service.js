@@ -11,6 +11,7 @@ const { createLead, sendMedicalReportToBitrix } = require('./bitrix.service');
 const { leadInputFromRequest, leadInputFromCase, commentWithReports } = require('./bitrix-lead');
 const { isBitrixSyncEnabled, isPrivateCharterDealRequested } = require('./bitrix-config');
 const { PRIVATE_CHARTER_KEY } = require('../../common/constants/request.constants');
+const { isScanClean } = require('../documents/document-scan');
 
 const MAX_ATTEMPTS = 5;
 // ~5 attempts spaced this far apart covers roughly the "30 minutes" window the
@@ -63,7 +64,10 @@ async function retryModel(model, label, findCandidates, buildLeadInput, reportsO
         data: { bitrixLeadId: leadId, bitrixLastError: null, bitrixSyncFailedAt: null },
       });
       console.log(`Bitrix24 retry succeeded for ${label} ${record.referenceNumber} (attempt ${record.bitrixSyncAttempts + 1}).`);
-      const reports = reportsOf(record);
+      // Only documents with a confirmed clean scan go across (an older, never-scanned one is skipped, and is NOT counted as sent): the comment names only the ones that do.
+      const allReports = reportsOf(record);
+      const reports = allReports.filter(isScanClean);
+      if (reports.length < allReports.length) console.warn(`Bitrix24 retry for ${label} ${record.referenceNumber}: ${allReports.length - reports.length} medical report(s) were NOT forwarded because they have no confirmed clean scan.`);
       const comments = commentWithReports(input.comments, reports.map((report) => report.name));
       for (const report of reports) await sendMedicalReportToBitrix(leadId, report, { comments });
     } catch (err) {

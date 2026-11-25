@@ -5,6 +5,8 @@ const { pendingFiles, runSubmission } = require('../requestUploads');
 const { draftForService } = require('../requestForm');
 
 const file = (name) => ({ uri: `file:///${name}`, name, mimeType: 'application/pdf', size: 69 });
+// An upload the server ANSWERED with a refusal (a 4xx): the file was evaluated and not accepted. (A plain Error with no answer is an unknown outcome since Phase 5.)
+const refusal = (message) => Object.assign(new Error(message), { status: 422 });
 const OK = file('report-ok.pdf');
 const BAD = file('report-bad.pdf');
 const OK2 = file('report-ok-2.pdf');
@@ -17,7 +19,7 @@ function server(failing = []) {
   const upload = jest.fn(async (f, onProgress, sent) => {
     calls.push({ name: f.name, requestId: sent && sent.id });
     onProgress(0.5);
-    if (failNames.has(f.name)) throw new Error(`The server could not store ${f.name}.`);
+    if (failNames.has(f.name)) throw refusal(`The server could not store ${f.name}.`);
   });
   return { upload, calls, fix: (name) => failNames.delete(name), breakFile: (name) => failNames.add(name) };
 }
@@ -32,7 +34,7 @@ describe('one file uploads and one fails', () => {
     expect(result.sentRequest).toEqual(SAVED);
     expect(result.uploaded).toEqual([OK.uri]);
     expect(result.uploadErrors).toEqual({ [BAD.uri]: 'The server could not store report-bad.pdf.' });
-    expect(pendingFiles([OK, BAD], result.uploaded)).toEqual([BAD]);
+    expect(pendingFiles([OK, BAD], result.uploaded)).toEqual([BAD]); // (the files the form holds are matched by uri; each also gets its own upload id: see uploadRecovery.test.js)
   });
 
   it('a failed file does not stop the files after it', async () => {
@@ -43,7 +45,7 @@ describe('one file uploads and one fails', () => {
   });
 
   it('an upload that fails with no message still gets one to show', async () => {
-    const result = await runSubmission({ ...first(), upload: jest.fn(async (f) => { if (f === BAD) throw new Error(''); }) });
+    const result = await runSubmission({ ...first(), upload: jest.fn(async (f) => { if (f.uri === BAD.uri) throw refusal(''); }) });
     expect(result.uploadErrors[BAD.uri]).toBe('Upload failed. Please try again.');
   });
 
@@ -51,7 +53,7 @@ describe('one file uploads and one fails', () => {
     const create = jest.fn(async () => SAVED);
     const result = await runSubmission({ ...first({ files: [], createRequest: create }), upload: jest.fn() });
     expect(create).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ sentRequest: SAVED, uploaded: [], uploadErrors: {} });
+    expect(result).toMatchObject({ sentRequest: SAVED, uploaded: [], uploadErrors: {}, uploadUnknown: {}, note: null });
   });
 });
 
@@ -81,11 +83,13 @@ describe('the failure stays visible until the file is accepted', () => {
     const src = (p) => fs.readFileSync(path.join(__dirname, '..', '..', 'app', 'request', p), 'utf8');
     const submitted = src('submitted.js');
     expect(submitted).toMatch(/pendingFiles\(draft\.files, draft\.uploaded\)/);
-    expect(submitted).toContain('Documents not uploaded');
-    expect(submitted).toContain('Retry failed uploads');
+    expect(submitted).toContain("t('sub_docs_missing_title')"); // "Documents not uploaded", in the person's language
+    expect(submitted).toContain("t('sk_try_again')"); // one "Try again": checks first, then sends only what the server does not have
+    expect(submitted).toContain('<UploadStatusList');
     expect(submitted).toMatch(/\{!incomplete && \(\s*<Card/); // no "Next Steps" while documents are missing
     const review = src('review.js');
-    expect(review).toMatch(/isPrivateCharter\(d\.service\)\) \{[\s\S]*runSubmission\(/);
+    expect(review).toMatch(/isPrivateCharter\(d\.service\)\) \{[\s\S]*sendWithDocuments\(/);
+    expect(review).toMatch(/const sendWithDocuments = async[\s\S]*runSubmission\(/); // every service's documents go through the one runSubmission path
   });
 });
 
@@ -141,7 +145,7 @@ describe('a retry that fails again', () => {
     const s = server([BAD.name]);
     let state = first();
     state = next(state, await runSubmission({ ...state, upload: s.upload }));
-    s.upload.mockImplementationOnce(async () => { throw new Error('Still too busy. Try later.'); });
+    s.upload.mockImplementationOnce(async () => { throw refusal('Still too busy. Try later.'); });
     state = next(state, await runSubmission({ ...state, upload: s.upload }));
     expect(state.uploaded).toEqual([OK.uri]);
     expect(state.uploadErrors).toEqual({ [BAD.uri]: 'Still too busy. Try later.' });
@@ -152,18 +156,20 @@ describe('a retry that fails again', () => {
     const s = server([BAD.name]);
     let state = first();
     for (let i = 0; i < 3; i += 1) state = next(state, await runSubmission({ ...state, upload: s.upload }));
-    expect(pendingFiles(state.files, state.uploaded)).toEqual([BAD]);
+    expect(pendingFiles(state.files, state.uploaded).map((f) => f.uri)).toEqual([BAD.uri]);
     s.fix(BAD.name);
     state = next(state, await runSubmission({ ...state, upload: s.upload }));
     expect(pendingFiles(state.files, state.uploaded)).toEqual([]);
   });
 
-  it('a retry that loses the network is reported per file and does not throw', async () => {
+  it('a retry that loses the network is an UNKNOWN outcome for that file (never "failed"), reported without throwing', async () => {
     let state = first();
     state = next(state, await runSubmission({ ...state, upload: server([BAD.name]).upload }));
     const offline = jest.fn(async () => { throw new TypeError('Network request failed'); });
     const result = await runSubmission({ ...state, upload: offline });
-    expect(result.uploadErrors).toEqual({ [BAD.uri]: 'Network request failed' });
+    expect(result.uploadErrors).toEqual({}); // the server did not say no: this is not a refusal
+    expect(result.uploadUnknown).toEqual({ [BAD.uri]: 'Network request failed' });
+    expect(result.note).toEqual({ stopped: 'unconfirmed', message: 'Network request failed' });
     expect(result.sentRequest).toEqual(SAVED);
   });
 });
@@ -256,17 +262,17 @@ describe('a request needs at least one document to be submitted', () => {
   it('the form blocks Continue without a file, and the review screen never sends without one', () => {
     const step2 = read('app', 'request', 'step2.js');
     expect(step2).toMatch(/\['files', needsDocument\(draft\)\]/);
-    expect(step2).toContain('Upload at least one document to submit this request.');
+    expect(step2).toContain("t('req_err_need_doc')"); // "Upload at least one document to submit this request.", in the person's language
     const review = read('app', 'request', 'review.js');
     expect(review).toMatch(/if \(needsDocument\(d\)\) \{[\s\S]*goToStep\(2\);\s*return;/);
     // ...and it is checked before the request is created.
-    expect(review.indexOf('needsDocument(d)')).toBeLessThan(review.indexOf('runSubmission('));
+    expect(review.indexOf('needsDocument(d)')).toBeLessThan(review.indexOf('sendWithDocuments(() => buildPrivateCharterPayload(charterDraft))'));
   });
 
   it('the success screen says "not submitted" while no document is accepted, instead of "Thank You"', () => {
     const submitted = read('app', 'request', 'submitted.js');
-    expect(submitted).toContain('Request not submitted yet');
+    expect(submitted).toContain("t('sub_draft_title')"); // "Request not submitted yet", in the person's language
     expect(submitted).toContain("submissionState(draft) === 'draft'");
-    expect(submitted).toContain("isDraft ? 'Not submitted'");
+    expect(submitted).toContain("isDraft ? t('sub_not_submitted_pill')");
   });
 });

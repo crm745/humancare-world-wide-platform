@@ -1,7 +1,8 @@
 /* global describe, test, expect, jest, beforeAll, afterAll */
 // Patient invoice summary (GET /requests/me/:id) and invoice + payment status (GET /invoices/:invoiceId): ownership, what is and is not returned,
 // payable rules, and the real Express routing with real JWT authentication. No database and no network: Prisma is replaced by an in-memory fake.
-jest.mock('../../src/db/prisma', () => ({ prisma: {} }));
+// requireAuth looks the patient up once (a retired account is refused at once); these tests have no such account row.
+jest.mock('../../src/db/prisma', () => ({ prisma: { user: { findUnique: async () => null } } }));
 
 const express = require('express');
 const jwt = require('jsonwebtoken');

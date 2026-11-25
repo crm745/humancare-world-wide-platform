@@ -119,7 +119,8 @@ describe('document download controller', () => {
     storage.setStorageForTests(adapter);
     prisma.requestDocument.findUnique.mockResolvedValue(null);
     for (const fileUrl of ['/uploads/1700-legacy.pdf', 'case-documents/2026/11/' + 'b'.repeat(32) + '.pdf']) {
-      prisma.document.findUnique.mockResolvedValue(caseDocument({ fileUrl }));
+      // a new upload always carries its clean scan record; a corporate holding a patient's Case is served only such a document (documents/document-scan.js)
+      prisma.document.findUnique.mockResolvedValue(caseDocument({ fileUrl, scanStatus: 'clean' }));
       const res = makeRes();
       await downloadDocument({ params: { id: 9 }, user: { role: 'corporate', corporateId: 3 } }, res, next);
       await new Promise((r) => setImmediate(r));

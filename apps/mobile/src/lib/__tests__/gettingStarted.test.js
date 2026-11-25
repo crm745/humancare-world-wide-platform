@@ -17,15 +17,18 @@ describe('Getting Started: one page', () => {
     expect(welcome).toContain("const finish = () => router.push('/login');");
   });
   test('a new person with no saved session still lands on it from the splash', () => {
-    expect(read('app/index.js')).toContain("navReplace(token ? '/home' : '/welcome');");
+    // (the splash now decides from the resolved authentication state, in lib/splash.js; the full behaviour is checked in splash.test.js)
+    expect(read('app/index.js')).toContain('splashDecision({ status: authStatus, savedSession, minElapsed, timedOut, navigated: navigated.current })');
+    expect(read('lib/splash.js')).toContain("export const START_ROUTE = '/welcome'; // Getting Started");
+    expect(require('../splash').destinationFor('anon')).toBe('/welcome'); // no saved session -> no valid session -> Getting Started
   });
 });
 
 describe('sign out', () => {
   test('a patient goes straight to Login (a corporate account to the corporate login), not to Getting Started', () => {
     const profile = read('app/profile.js');
-    // The destination is still shown before the tokens are cleared; a patient's device is unregistered first (deviceRegistry.test.js).
-    expect(profile).toMatch(/navReplace\(isCorporate \? '\/corporate-login' : '\/login'\);\s+await clearTokens\(\);/);
+    // The destination is shown before the tokens are cleared; a patient's device is removed from their notifications first, inside signOutSession (deviceRegistry.test.js, signOutDevice.test.js).
+    expect(profile).toMatch(/navReplace\(isCorporate \? '\/corporate-login' : '\/login'\);\s+const \{ push \} = await signOutSession\(\{ isCorporate, beforeClear: clearDraftEverywhere \}\);/);
     expect(profile).not.toMatch(/signOut = async \(\) => \{ navReplace\([^)]*welcome/);
   });
 });

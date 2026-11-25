@@ -2,7 +2,8 @@
 // Hosted Razorpay Standard Checkout, backend foundation: the signed session and return tokens, session creation, single-use redemption, ownership and
 // binding, what the page receives, the return redirect, and the rule that NOTHING the browser reports completes a payment. No database and no network:
 // Prisma is an in-memory fake that also counts every attempt to write a payment.
-jest.mock('../../src/db/prisma', () => ({ prisma: {} }));
+// requireAuth looks the patient up once (a retired account is refused at once); these tests have no such account row.
+jest.mock('../../src/db/prisma', () => ({ prisma: { user: { findUnique: async () => null } } }));
 
 const express = require('express');
 const http = require('http');

@@ -19,3 +19,4 @@ node_modules
 /.synthetic-e2e-runs/
 /scripts/synthetic-e2e-orchestrator/phone-pool.local.json
 /scripts/synthetic-e2e-orchestrator/network-risk-acknowledgment.local.json
+.devdb/

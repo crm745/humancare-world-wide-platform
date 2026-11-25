@@ -10,6 +10,8 @@
 //
 // Documents that predate the workflow (the original `documents` rows, which have no scan metadata at all)
 // are NOT handled here and are never refused for lacking it: see findWorkflowSource.
+const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const { prisma } = require('../../db/prisma');
 const { storageFor } = require('../../storage');
@@ -23,6 +25,15 @@ function httpError(statusCode, message, publicCode, extra) {
   if (publicCode) err.publicCode = publicCode;
   if (extra) Object.assign(err, extra);
   return err;
+}
+
+// SHA-256 of a file on disk (streamed). Used for a freshly received upload (multer's temporary file) before it is stored: the identity of its content for a repeat of the same upload
+// (documents/legacy-scan.js, requests.controller.js). Stored objects are hashed with hashObject.
+function hashFile(file) {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash('sha256');
+    fs.createReadStream(file).on('data', (chunk) => hash.update(chunk)).on('error', reject).on('end', () => resolve(hash.digest('hex')));
+  });
 }
 
 // SHA-256 of a stored object (streamed, never held in memory).
@@ -100,6 +111,6 @@ function cleanOriginalName(name) {
 }
 
 module.exports = {
-  httpError, hashObject, fileProblem, readVerifiedFile, findWorkflowSource, assertCaseDocumentServable,
+  httpError, hashFile, hashObject, fileProblem, readVerifiedFile, findWorkflowSource, assertCaseDocumentServable,
   cleanOriginalName, STATUS_BY_PROBLEM,
 };

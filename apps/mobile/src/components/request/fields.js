@@ -3,7 +3,9 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import { Camera, FileText, Upload, X } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
-import { MAX_REPORT_BYTES, MAX_REPORT_FILES } from '../../data/mock';
+import { MAX_REPORT_FILES } from '../../data/mock';
+import { vetPickedFile } from '../../lib/fileSize';
+import { readFileSize } from '../../lib/fileSizeDevice';
 import { Text } from '../ui';
 import { COLORS } from '../../theme/colors';
 
@@ -122,11 +124,16 @@ export function ReportTiles({ files, onChange, title, maxFiles = MAX_REPORT_FILE
   const { t, toast } = useApp();
   const limit = multiple ? maxFiles : 1;
 
-  const add = (picked) => {
+  // Every source of a file comes through here, with or without a size: a size the picker did not give (the camera often does not) is READ from the file first (lib/fileSize.js), so the 10 MB
+  // limit is applied to camera photos, picked documents and files added to an existing request alike. A size that cannot be read stays unknown and the file is accepted (the server holds it to
+  // 10 MB too); an empty file is refused.
+  const add = async (pickedFiles) => {
+    const vetted = await Promise.all(pickedFiles.map((file) => vetPickedFile(file, readFileSize, ALLOWED_MIME_TYPES)));
     const next = multiple ? [...files] : [];
-    for (const file of picked) {
-      if (file.mimeType && !ALLOWED_MIME_TYPES.includes(file.mimeType)) { toast(t('req_file_type')); continue; }
-      if (file.size && file.size > MAX_REPORT_BYTES) { toast(t('req_file_big')); continue; }
+    for (const { file, problem } of vetted) {
+      if (problem === 'type') { toast(t('req_file_type')); continue; }
+      if (problem === 'too_big') { toast(t('req_file_big')); continue; }
+      if (problem === 'empty') { toast(t('srv_file_empty')); continue; }
       if (next.some((f) => f.uri === file.uri || (f.name === file.name && f.size === file.size))) continue;
       if (next.length >= limit) { toast(t('req_file_max').replace('{n}', limit)); break; }
       next.push(file);
@@ -138,7 +145,7 @@ export function ReportTiles({ files, onChange, title, maxFiles = MAX_REPORT_FILE
     const result = await DocumentPicker.getDocumentAsync({ type: ALLOWED_MIME_TYPES, multiple, copyToCacheDirectory: true });
     if (result.canceled) return;
     // The picker's `type` is only a hint to the OS file dialog, so each file is checked in add().
-    add(result.assets.map((a) => ({ uri: a.uri, name: a.name, mimeType: a.mimeType, size: a.size })));
+    await add(result.assets.map((a) => ({ uri: a.uri, name: a.name, mimeType: a.mimeType, size: a.size })));
   };
 
   const takePhoto = async () => {
@@ -148,7 +155,7 @@ export function ReportTiles({ files, onChange, title, maxFiles = MAX_REPORT_FILE
       const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 });
       if (result.canceled) return;
       const a = result.assets[0];
-      add([{ uri: a.uri, name: a.fileName || `report-${Date.now()}.jpg`, mimeType: a.mimeType || 'image/jpeg', size: a.fileSize }]);
+      await add([{ uri: a.uri, name: a.fileName || `report-${Date.now()}.jpg`, mimeType: a.mimeType || 'image/jpeg', size: a.fileSize }]);
     } catch {
       toast(t('req_camera_failed'));
     }

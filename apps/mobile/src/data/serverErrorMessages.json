@@ -1,0 +1,18 @@
+[
+ { "code": "file_type_mismatch", "pattern": "^The file content does not match its type\\." },
+ { "code": "file_empty", "pattern": "^The uploaded file is empty\\.$" },
+ { "code": "file_too_large", "pattern": "^(?:The file is larger than 10 MB\\.|File too large)$" },
+ { "code": "file_unreadable", "pattern": "^The uploaded file could not be read\\.$" },
+ { "code": "file_type_unsupported", "pattern": "^Unsupported file type\\." },
+ { "code": "file_required", "pattern": "^file is required$" },
+ { "code": "too_many_documents", "pattern": "^(?:A request can hold|A Mortal Remains request can have) at most (\\d+) documents\\.$", "params": ["max"] },
+ { "code": "request_closed", "pattern": "^This request is (?:completed|cancelled), so documents can no longer be added" },
+ { "code": "request_approved", "pattern": "^This request has been approved\\." },
+ { "code": "file_infected", "pattern": "^This file was blocked because it may contain a virus\\." },
+ { "code": "scan_unavailable", "pattern": "^We could not scan this file for viruses" },
+ { "code": "client_upload_id_reused", "pattern": "^That upload id was already used for a different file\\." },
+ { "code": "rate_limited", "pattern": "^(?:You are uploading files too quickly|You have reached the daily limit for uploads)" },
+ { "code": "uploads_not_available", "pattern": "^Document uploads are not available" },
+ { "code": "no_case_yet", "pattern": "^This request has no case yet\\." },
+ { "code": "not_found", "pattern": "^Request not found$" }
+]

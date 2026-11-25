@@ -1,4 +1,5 @@
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
+import { localizedFieldError } from './serverErrors';
 
 // Pure rules of the Private Charter request (no React, no native modules), kept apart so they can
 // be unit-tested against the backend validator: which draft is a Private Charter request, exactly
@@ -146,12 +147,16 @@ const DRAFT_TO_API = {
 };
 
 // The `fields` object of a 400 response, as { apiField: message } (text values only), or null.
-export function fieldErrorsFromError(err) {
+export function fieldErrorsFromError(err, t) {
   const fields = err && err.status === 400 && err.data && err.data.fields;
   if (!fields || typeof fields !== 'object') return null;
   const out = {};
+  const codes = err.data && err.data.fieldCodes && typeof err.data.fieldCodes === 'object' ? err.data.fieldCodes : null;
   for (const [field, message] of Object.entries(fields)) {
-    if (typeof message === 'string' && message) out[field] = message;
+    if (typeof message !== 'string' || !message) continue;
+    // With a translator and a stable code for this field, the message is shown in the person's language; otherwise the server's English text, as before.
+    const translated = t && codes ? localizedFieldError(codes[field], field, t) : null;
+    out[field] = translated || message;
   }
   return Object.keys(out).length ? out : null;
 }

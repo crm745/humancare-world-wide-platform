@@ -5,7 +5,9 @@ import { ArrowRight, Building2 } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { Body, Screen } from '../components/layout';
 import { Button, FieldLabel, Heading, Input, Text } from '../components/ui';
-import { PasswordField, Select } from '../components/widgets';
+import { PasswordField } from '../components/widgets';
+import { CountryCodeBackdrop, CountryCodeField } from '../components/CountryCodeDropdown';
+import { errorText } from '../lib/errorText';
 import { navReplace } from '../lib/nav';
 import { apiPost } from '../lib/api';
 import { saveTokens } from '../lib/session';
@@ -13,17 +15,16 @@ import { postSignInRoute } from '../lib/tokens';
 import { codeStepFrom, setAuthStep } from '../lib/authFlow';
 import { profileFromUser } from '../lib/profile';
 import { useSocialAuth } from '../lib/useSocialAuth';
+import { OfflineLine } from '../components/network/OfflineLine';
+import { Collapse } from '../components/network/Collapse';
+import { AnimatedPressBox } from '../components/AnimatedPressBox';
 import { isValidEmail, isValidMobileNumber } from '../lib/validators';
-import { COUNTRY_CODES, CALLING_CODE_COUNTRY } from '../data/mock';
 import { LOGO } from '../data/images';
 import { AppleMark } from '../components/SocialMarks';
+import { NeedsInternet } from '../components/network/NeedsInternet';
 
 const LOGO_W = 150;
 const LOGO_RATIO = 2440 / 1405;
-
-// "+91" -> "🇮🇳 +91": the country's flag (built from its two-letter code) beside the calling code.
-const flagOf = (iso) => String.fromCodePoint(...[...iso].map((ch) => 0x1f1a5 + ch.charCodeAt(0)));
-const CODE_LABELS = Object.fromEntries(COUNTRY_CODES.map((code) => [code, `${CALLING_CODE_COUNTRY[code] ? flagOf(CALLING_CODE_COUNTRY[code]) : ''} ${code}`.trim()]));
 
 // The Mobile Login / Email Login switch.
 function ModeToggle({ mode, onChange, t }) {
@@ -54,6 +55,7 @@ export default function Login() {
   const [mode, setMode] = useState('phone');
   const [phone, setPhone] = useState('');
   const [cc, setCc] = useState('+91');
+  const [codesOpen, setCodesOpen] = useState(false); // the country-code list under the number field
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [formError, setFormError] = useState(null);
@@ -74,8 +76,8 @@ export default function Login() {
       setAuthStep('login-otp', codeStepFrom(data, { setup: !!data.needsPasswordSetup }));
       router.push('/login-otp');
     } catch (err) {
-      if (err.code === 'invalid_credentials' || err.code === 'account_locked') setFormError(err.message);
-      else toast(err.message);
+      if (err.code === 'invalid_credentials' || err.code === 'account_locked') setFormError(errorText(err, t));
+      else toast(errorText(err, t));
     } finally {
       setBusy(false);
     }
@@ -83,6 +85,7 @@ export default function Login() {
 
   const switchTo = (next) => {
     setMode(next);
+    setCodesOpen(false); // switching to e-mail login (and back) starts with the list closed
     setFormError(null);
   };
 
@@ -97,11 +100,12 @@ export default function Login() {
     navReplace(destination);
   };
 
-  const socialButtons = useSocialAuth({ toast, afterSocialLogin });
+  const socialButtons = useSocialAuth({ toast, afterSocialLogin, t });
 
   return (
     <Screen bg="bg-white">
       <Body contentClassName="justify-center p-[26px]">
+        {codesOpen && mode === 'phone' ? <CountryCodeBackdrop onPress={() => setCodesOpen(false)} /> : null}
         {/* The official HumanCare logo (its picture already carries the HUMANCARE wordmark), in its own proportions. */}
         <Image
           source={LOGO} accessible accessibilityLabel={t('gs_logo_label')} resizeMode="contain"
@@ -114,22 +118,21 @@ export default function Login() {
         {mode === 'phone' ? (
           <>
             <FieldLabel large required>{t('field_mobile_number')}</FieldLabel>
-            <View className="flex-row gap-2">
-              <Select large value={cc} options={COUNTRY_CODES} labels={CODE_LABELS} onChange={setCc} title={t('field_mobile_number')} className="w-32" />
-              <Input large className="flex-1" placeholder="Mobile number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-            </View>
-            {phone && !valid ? <Text className="mt-1 text-[12px] text-danger">Enter a valid number for the selected country.</Text> : null}
+            <CountryCodeField value={cc} onChange={setCc} open={codesOpen} onOpenChange={setCodesOpen} title={t('field_mobile_number')}>
+              <Input large className="flex-1" placeholder={t('field_mobile_number')} value={phone} onChangeText={setPhone} keyboardType="phone-pad" onFocus={() => setCodesOpen(false)} onPressIn={() => setCodesOpen(false)} />
+            </CountryCodeField>
+            {phone && !valid ? <Text className="mt-1 text-[12px] text-danger">{t('err_number_for_country')}</Text> : null}
           </>
         ) : (
           <>
             <FieldLabel large required>{t('field_email_address')}</FieldLabel>
-            <Input large placeholder="Email address" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-            {email && !valid ? <Text className="mt-1 text-[12px] text-danger">Enter a valid email address.</Text> : null}
+            <Input large placeholder={t('field_email_address')} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+            {email && !valid ? <Text className="mt-1 text-[12px] text-danger">{t('change_err_email')}</Text> : null}
           </>
         )}
 
         <View className="mt-[18px]">
-          <PasswordField required label={t('field_password')} placeholder="Your password" value={password} onChangeText={setPassword} />
+          <PasswordField required label={t('field_password')} placeholder={t('ph_your_password')} value={password} onChangeText={setPassword} />
         </View>
         <View className="mt-2.5 items-end">
           <Text className="font-inter-bold text-[14.5px] text-primary" onPress={() => router.push({ pathname: '/forgot-password', params: { origin: '/login' } })}>
@@ -138,14 +141,24 @@ export default function Login() {
         </View>
 
         {formError ? <Text className="mt-4 text-center text-[13.5px] text-danger">{formError}</Text> : null}
-        <Button large title={t('login_btn')} disabled={!ready} loading={busy} onPress={submit} className={formError ? 'mt-4' : 'mt-[30px]'} />
+        <Button large title={t('login_btn')} disabled={!ready} loading={busy} needsNetwork onPress={submit} className={formError ? 'mt-4' : 'mt-[30px]'} />
+        <NeedsInternet />
         <Text className="my-[22px] text-center text-[14px] text-faint">{t('login_or')}</Text>
         <View className="gap-2.5">
-          {socialButtons.filter((b) => b.key !== 'apple').map(({ key, Mark, onPress, disabled }) => (
-            <Pressable key={key} onPress={onPress} disabled={disabled} className="h-12 flex-row items-center justify-center gap-2.5 rounded-xl border-[1.5px] border-field bg-white active:opacity-80 disabled:opacity-40">
-              <Mark />
-              <Text className="font-inter-bold text-[14px] text-ink">{t(`continue_with_${key}`)}</Text>
-            </Pressable>
+          {socialButtons.filter((b) => b.key !== 'apple').map(({ key, Mark, onPress, disabled, offline }) => (
+            <View key={key}>
+              {/* The button fades pale (150 ms) when offline and back when the connection returns; the line under it expands and fades in (180 ms), and the reverse. */}
+              <AnimatedPressBox
+                faded={!!(offline || disabled)}
+                onPress={onPress} disabled={disabled || offline}
+                accessibilityRole="button" accessibilityState={offline ? { disabled: true } : undefined} accessibilityHint={offline ? t('net_google_offline') : undefined}
+                className="h-12 flex-row items-center justify-center gap-2.5 rounded-xl border-[1.5px] border-field bg-white"
+              >
+                <Mark />
+                <Text className="font-inter-bold text-[14px] text-ink">{t(`continue_with_${key}`)}</Text>
+              </AnimatedPressBox>
+              <Collapse show={!!offline}><View style={{ paddingTop: 8 }}><OfflineLine text={t('net_google_offline')} /></View></Collapse>
+            </View>
           ))}
           {/* Apple Sign-In is not switched on yet: shown, but dimmed and it does nothing. */}
           <View

@@ -217,6 +217,7 @@ describe('wiring', () => {
   });
   test('sign out shows the destination before clearing tokens, so the gate cannot override it', () => {
     const profile = read('../../app/profile.js');
-    expect(profile).toMatch(/navReplace\(isCorporate \? '\/corporate-login' : '\/login'\);\s+await clearTokens\(\);/);
+    // The destination is shown before the tokens are cleared; a patient's device is removed from their notifications first, inside signOutSession (deviceRegistry.test.js, signOutDevice.test.js).
+    expect(profile).toMatch(/navReplace\(isCorporate \? '\/corporate-login' : '\/login'\);\s+const \{ push \} = await signOutSession\(\{ isCorporate, beforeClear: clearDraftEverywhere \}\);/);
   });
 });

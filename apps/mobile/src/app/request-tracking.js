@@ -56,7 +56,7 @@ export default function RequestTracking() {
     return (
       <Screen style={page}>
         {header}
-        {!id || (error && !request) ? <LoadFailure message={t('trk_load_failed')} onRetry={id ? reload : undefined} /> : null}
+        {!id || (error && !request) ? <LoadFailure titleKey="lf_title_tracking" error={error} message={t('trk_load_failed')} onRetry={id ? reload : undefined} /> : null}
         {loading && id && gate.visible ? <TrackingSkeleton label={t('sk_loading_tracking')} /> : null}
       </Screen>
     );
@@ -65,7 +65,7 @@ export default function RequestTracking() {
   return (
     <Screen style={page}>
       {header}
-      <Body refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      <Body clearSos refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         <Reveal animate={gate.wasShown}>
           <TrackingDetails d={details} highlightKeys={highlightKeys} onOpenRequest={() => router.push({ pathname: '/request-details', params: { id: request.id } })} />
         </Reveal>

@@ -354,7 +354,7 @@ describe('Private Charter: origin and destination cities', () => {
 
   it('never looks cities up for another service', async () => {
     resolveCityRefs.mockClear();
-    await post({ serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground', patientName: 'J', origin: 'a', destination: 'b' });
+    await post({ serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground', patientName: 'J', origin: 'a', destination: 'b', description: 'Needs transport.' });
     expect(resolveCityRefs).not.toHaveBeenCalled();
   });
 });
@@ -603,7 +603,7 @@ describe('Private Charter: unknown and deceased fields', () => {
   });
 
   it('keeps accepting patientLocation for other services', async () => {
-    const res = await post({ serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground', patientName: 'J', origin: 'a', destination: 'b', patientLocation: 'a' });
+    const res = await post({ serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground', patientName: 'J', origin: 'a', destination: 'b', patientLocation: 'a', description: 'Needs transport.' });
     expect(res.status).toBe(201);
     expect(createRequest.mock.calls[0][1].patientLocation).toBe('a');
   });
@@ -678,7 +678,7 @@ describe('Private Charter: no write when validation fails', () => {
 
 describe('Other services are untouched', () => {
   it('passes the request body to the service exactly as before', async () => {
-    const body = { serviceType: 'Ground Ambulance (GA)', serviceKey: 'ground', patientName: 'J', patientAge: '40', patientGender: 'Male', origin: 'a', destination: 'b', mobility: 'walking', careLevel: 'ICU / Critical' };
+    const body = { serviceType: 'Air Ambulance', serviceKey: 'air', patientName: 'J', patientAge: '40', patientGender: 'Male', origin: 'a', destination: 'b', mobility: 'walking', careLevel: 'ICU / Critical' };
     const res = await post(body);
     expect(res.status).toBe(201);
     expect(createRequest).toHaveBeenCalledWith(4242, body);
@@ -687,14 +687,14 @@ describe('Other services are untouched', () => {
   it('keeps the old rules: required fields, unknown service key, mortal and medical checks', async () => {
     expect((await post({ serviceType: 'Air Ambulance' })).status).toBe(400);
     expect((await post({ serviceType: 'x', serviceKey: 'nope', patientName: 'a', origin: 'o', destination: 'd' })).body.error).toBe('Unknown serviceKey');
-    expect((await post({ serviceType: 'x', serviceKey: 'mortal_domestic', patientName: 'a', origin: 'o', destination: 'd' })).status).toBe(400);
+    expect((await post({ serviceType: 'x', serviceKey: 'mortal', patientName: 'a', origin: 'o', destination: 'd' })).status).toBe(400); // Mortal Remains has its own strict validator now
     expect((await post({ serviceType: 'x', serviceKey: 'tele', patientName: 'a', origin: 'o', destination: 'd', mobility: 'walking' })).status).toBe(400);
     expect(createRequest).not.toHaveBeenCalled();
   });
 
   it('does not reject other services for fields Private Charter forbids', async () => {
     const res = await post({
-      serviceType: 'Mortal Remains', serviceKey: 'mortal_domestic', patientName: 'Late S', origin: 'o', destination: 'd',
+      serviceType: 'Hospital Assistance', serviceKey: 'hospital', patientName: 'Late S', origin: 'o', destination: 'd', // (was a Mortal Remains key: that service now has its own validator)
       deceasedRelation: 'Brother', placeOfDeath: 'Pune', dateOfDeath: '2026-10-20', someFutureField: 1,
     });
     expect(res.status).toBe(201);

@@ -239,12 +239,16 @@ describe('corporate password operations are unaffected', () => {
     expect(mockWorld.users[0].tokenVersion).toBe(3);
   });
 
-  test('the device revocation is called from exactly one place: the patient setPassword (never the corporate reset or change)', () => {
+  test('the device revocation is called from exactly one place in the auth controller: the patient setPassword (never the corporate reset or change); an account deletion goes through retirePatientNotifications instead', () => {
     const text = fs.readFileSync(path.join(__dirname, '../../src/modules/auth/auth.controller.js'), 'utf8');
     expect(text.match(/revokePatientDevices/g)).toHaveLength(2); // the import and the one call
+    const retire = text.slice(text.indexOf('async function confirmAccountDeletion'), text.indexOf('module.exports'));
+    expect(retire).toMatch(/await retirePatientNotifications\(tx, user\.id, \{ reason: "account_deleted"/); // account-retirement-notifications.test.js covers what it does
+    expect(retire).not.toMatch(/notification\.deleteMany|notification\.delete\(/); // the history is never hard-deleted
     const body = text.slice(text.indexOf('async function setPassword'), text.indexOf('\nasync function', text.indexOf('async function setPassword') + 10));
     expect(body).toMatch(/await revokePatientDevices\(tx, step\.sub\)/);
-    expect(text.slice(text.indexOf('async function resetPassword'))).not.toMatch(/revokePatientDevices\(/);
+    const reset = text.indexOf('async function resetPassword');
+    expect(text.slice(reset, text.indexOf('\nasync function', reset + 10))).not.toMatch(/revokePatientDevices\(/); // the corporate reset function only
   });
 
   test('requireAuth and the token rules are untouched: the middleware does not mention devices or tokenVersion', () => {

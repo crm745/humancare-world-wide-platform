@@ -1,7 +1,8 @@
-import { Linking, Platform, View } from 'react-native';
+import { Platform, View } from 'react-native';
 import { useApp } from '../state/AppContext';
 import { RECAPTCHA_PRIVACY_URL, RECAPTCHA_TERMS_URL } from '../lib/recaptcha';
 import { Text } from './ui';
+import { useOpenLink } from '../lib/useOpenLink';
 
 const PRIVACY = '\u0001';
 const TERMS = '\u0002';
@@ -11,6 +12,7 @@ const TERMS = '\u0002';
 // where reCAPTCHA runs. The two names are links to Google's pages, wherever the language puts them.
 export function RecaptchaNotice() {
   const { t } = useApp();
+  const open = useOpenLink();
   if (Platform.OS !== 'web') return null;
   const pieces = t('recaptcha_notice', { privacy: PRIVACY, terms: TERMS }).split(/([\u0001\u0002])/);
   return (
@@ -22,7 +24,7 @@ export function RecaptchaNotice() {
             return (
               <Text
                 key={i} accessibilityRole="link" className="text-[11.5px] text-primary underline"
-                onPress={() => Linking.openURL(privacy ? RECAPTCHA_PRIVACY_URL : RECAPTCHA_TERMS_URL)}
+                onPress={() => open(privacy ? RECAPTCHA_PRIVACY_URL : RECAPTCHA_TERMS_URL)}
               >
                 {t(privacy ? 'recaptcha_privacy' : 'recaptcha_terms')}
               </Text>

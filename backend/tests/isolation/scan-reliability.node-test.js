@@ -428,6 +428,42 @@ test('an infected file is quarantined, and nobody can download or review it', as
   await assertNotOpenable(doc);
 });
 
+test('an infected object in object storage is retained in place (never deleted, moved or copied) and stays blocked', async () => {
+  reset();
+  db.requests.push({ id: 1, userId: 7, reviewStatus: 'in_review' });
+  const key = 'requests/1/obj-infected.pdf';
+  const doc = addDoc({ storageKey: key }, { write: false });
+  const calls = [];
+  const objectAdapter = { // in-memory stand-in for S3: no pathOf, so the object-storage branch is taken; nothing leaves the process
+    provider: 's3',
+    download: async () => ({ stream: require('stream').Readable.from([Buffer.from(PDF)]), size: Buffer.byteLength(PDF) }),
+    getMetadata: async () => ({ size: Buffer.byteLength(PDF) }),
+    exists: async () => true,
+    delete: async (k) => { calls.push(['delete', k]); },
+    upload: async (k) => { calls.push(['upload', k]); },
+    copy: async (k) => { calls.push(['copy', k]); },
+  };
+  const storage = require('../../src/storage');
+  storage.setStorageForTests(objectAdapter);
+  try {
+    const scanner = async () => ({ status: 'infected', signature: 'Eicar-Test-Signature' });
+    let result;
+    const logs = await logsOf(async () => { result = await review.scanRequestDocument(doc.id, { scanner, streamScanner: scanner }); });
+    await new Promise((resolve) => setImmediate(resolve)); // let any (wrongly) fire-and-forget call land
+    assert.equal(result.scanStatus, 'infected');
+    assert.equal(row(doc.id).scanDetail, 'Eicar-Test-Signature', 'the verdict is preserved');
+    assert.deepEqual(eventsOf(doc.id), ['scan_infected'], 'the audit event is preserved');
+    assert.deepEqual(calls, [], 'the object was not deleted, moved or copied');
+    assert.equal(row(doc.id).storageKey, key, 'the record still points at the same object');
+    assert.equal(logs.error.length, 0);
+    assert.equal(logs.warn.length, 1);
+    assert.match(logs.warn[0], new RegExp(`document ${doc.id} \\(request 1\\) is INFECTED.*retained in place`));
+    await assertNotOpenable(doc);
+  } finally {
+    storage.setStorageForTests(null);
+  }
+});
+
 test('a quarantine move that fails is logged, keeps the infected verdict, and still blocks every use', async () => {
   reset();
   db.requests.push({ id: 1, userId: 7, reviewStatus: 'in_review' });

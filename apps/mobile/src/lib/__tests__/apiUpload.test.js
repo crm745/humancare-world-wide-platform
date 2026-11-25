@@ -360,12 +360,12 @@ describe('apiUpload on web: refresh failures (revision 3)', () => {
 });
 
 describe('existing callers', () => {
-  test('the create flow and the retry screen are untouched: they still call apiUpload with four arguments and no fields', () => {
+  test('the create flow and the retry screen call apiUpload with the file\'s own upload id (fieldsFor) and a cancel signal, and never send a replacement id (Phase 5)', () => {
     const fs = require('fs');
     const path = require('path');
     for (const file of ['../../app/request/review.js', '../../app/request/submitted.js']) {
       const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
-      expect(source).toMatch(/apiUpload\(`\/requests\/me\/\$\{[\w.]+\}\/documents`, [\w.[\]]+, false, [^,)]+\)/);
+      expect(source).toMatch(/apiUpload\(`\/requests\/me\/\$\{[\w.]+\}\/documents`, [\w.[\]]+, false, [^,)]+, fieldsFor\(file\)\)/);
       expect(source).not.toMatch(/replacesDocumentId/);
     }
   });

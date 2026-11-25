@@ -1,17 +1,16 @@
 import { useCallback, useRef, useState } from 'react';
-import { Linking, Pressable, Share, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  ArrowRight, Ban, Check, ChevronLeft, CircleCheck, Download, Phone, Share2,
+  ArrowRight, Ban, Check, ChevronLeft, CircleCheck, Download, Phone,
 } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
+import { useNetwork } from '../state/NetworkContext';
 import { apiGet } from '../lib/api';
-import { downloadAndShare } from '../lib/download';
+import { downloadDocument, downloadErrorInfo } from '../lib/download';
 import { openDocumentPreview } from '../lib/documentPreview';
 import { goBack } from '../lib/nav';
-import { toUiStatus } from '../lib/requestShape';
-import { reviewPill } from '../lib/requestDocuments';
 import { detailsView } from '../lib/requestDetailsView';
 import { Screen, Body } from '../components/layout';
 import { AppRefreshControl } from '../components/AppRefreshControl';
@@ -22,6 +21,8 @@ import { RequestDetailsSkeleton } from '../components/skeleton/screens';
 import { useResource } from '../lib/useResource';
 import { ServiceIcon } from '../components/home/ServiceIcon';
 import AdditionalDocuments from '../components/request/AdditionalDocuments';
+import { PendingUploadsNoticeView, usePendingUploads } from '../components/request/PendingUploadsNotice';
+
 import { DocumentRow, Medical, PatientGrid, Trip } from '../components/request/DetailsBlocks';
 import DocumentHistory from '../components/request/DocumentHistory';
 import InvoicesSection from '../components/request/InvoicesSection';
@@ -30,12 +31,15 @@ import ReviewBanner from '../components/request/ReviewBanner';
 import { C, Card, FONT, Section, StatusLayout, WRAP } from '../components/request/DetailsParts';
 import { COLORS } from '../theme/colors';
 import { PressBox } from '../components/PressBox';
+import { ConnectionBanner } from '../components/network/ConnectionBanner';
+import { useOpenLink } from '../lib/useOpenLink';
 
 // Request Details, drawn to the design. Everything on it is worked out in lib/requestDetailsView.js; this file only
 // draws it. Every value wraps (nothing is cut off) except a file name, which is one line with an ellipsis.
 
 function Header({ title, backLabel, isRTL }) {
   return (
+    <>
     <View style={{ height: 76, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: C.line }}>
       <Pressable
         accessibilityRole="button" accessibilityLabel={backLabel} onPress={goBack}
@@ -45,14 +49,17 @@ function Header({ title, backLabel, isRTL }) {
       </Pressable>
       <Text accessibilityRole="header" numberOfLines={2} style={{ flex: 1, minWidth: 0, fontFamily: FONT[800], fontSize: 18, lineHeight: 24, color: C.navy }}>{title}</Text>
     </View>
+    <ConnectionBanner />
+    </>
   );
 }
 
-function Action({ Icon, label, onPress }) {
+// `disabled` (with `hint`, the reason): pale and not pressable, and a screen reader is told why.
+function Action({ Icon, label, onPress, disabled = false, hint }) {
   return (
     <PressBox
-      accessibilityRole="button" accessibilityLabel={label} onPress={onPress}
-      style={({ pressed }) => ({ flex: 1, minWidth: 0, minHeight: 66, borderRadius: 14, backgroundColor: '#F5F8FC', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 4, paddingVertical: 8, opacity: pressed ? 0.8 : 1 })}
+      accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} accessibilityHint={disabled ? hint : undefined} onPress={disabled ? undefined : onPress} disabled={disabled}
+      style={({ pressed }) => ({ flex: 1, minWidth: 0, minHeight: 66, borderRadius: 14, backgroundColor: '#F5F8FC', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 4, paddingVertical: 8, opacity: disabled ? 0.45 : pressed ? 0.8 : 1 })}
     >
       <Icon size={20} color={C.blueText} />
       <Text style={{ fontFamily: FONT[700], fontSize: 12.5, lineHeight: 16, color: C.ink, textAlign: 'center' }}>{label}</Text>
@@ -60,7 +67,7 @@ function Action({ Icon, label, onPress }) {
   );
 }
 
-function Summary({ view, t, onDownload, onShare, onContact }) {
+function Summary({ view, t, onDownload, onContact, offline = false }) {
   const h = view.header;
   return (
     <Card big>
@@ -80,8 +87,7 @@ function Summary({ view, t, onDownload, onShare, onContact }) {
         {h.requested ? <Text style={{ flexShrink: 1, fontFamily: FONT[400], fontSize: 13, lineHeight: 18, color: C.muted }}>{t('rd_requested', { date: h.requested })}</Text> : null}
       </View>
       <View style={{ marginTop: 16, flexDirection: 'row', gap: 8 }}>
-        <Action Icon={Download} label={t('rd_download')} onPress={onDownload} />
-        <Action Icon={Share2} label={t('rd_share')} onPress={onShare} />
+        <Action Icon={Download} label={t('rd_download')} onPress={onDownload} disabled={offline} hint={t('net_offline_text')} />
         <Action Icon={Phone} label={t('rd_contact_team')} onPress={onContact} />
       </View>
     </Card>
@@ -124,6 +130,8 @@ function StatusCard({ view, request, t }) {
 
 export default function RequestDetails() {
   const { t, toast, isRTL } = useApp();
+  const open = useOpenLink();
+  const { isOffline } = useNetwork();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
   // Loaded the way every data screen loads (lib/useResource.js): a shimmer skeleton on the first load only, what an earlier visit loaded
@@ -136,6 +144,8 @@ export default function RequestDetails() {
     onRefreshError: () => toast(t('sk_refresh_failed')),
   });
   const request = data ?? null;
+  // After a restart (lib/uploadJournal.js): uploads of this request whose outcome was never confirmed. The notice sits at the TOP of the page; adding files waits until the person has pressed Try again.
+  const pendingUploads = usePendingUploads(request ? request.id : null, { onChecked: reload });
   const gate = useSkeletonGate(loading && Boolean(id));
   // The height of the "Open live tracking" bar under the scroll area (0 when it is not drawn): the room the floating SOS button needs is measured from above it.
   const [barHeight, setBarHeight] = useState(0);
@@ -154,39 +164,22 @@ export default function RequestDetails() {
     return (
       <Screen style={page}>
         <Header title={t('request_details_title')} backLabel={t('home_back')} isRTL={isRTL} />
-        {!id || (error && !request) ? <LoadFailure message={t('rd_load_failed')} onRetry={id ? reload : undefined} /> : null}
+        {!id || (error && !request) ? <LoadFailure titleKey="lf_title_request" error={error} message={t('rd_load_failed')} onRetry={id ? reload : undefined} /> : null}
         {loading && id && gate.visible ? <RequestDetailsSkeleton label={t('sk_loading_request')} /> : null}
       </Screen>
     );
   }
 
   const view = detailsView(request, t);
-  // A workflow request's status is said the same way in the shared message as on the card.
-  const pill = reviewPill(request);
-
+  // Offline the button is switched off (pale, with the reason for a screen reader), so this guard is only the safety net for a state that changed since the screen drew: it says why nothing happened.
+  // The summary goes through the app's authenticated download (renews an expired session once, says in the person's language what went wrong, removes its temporary copy).
   const downloadSummary = async () => {
+    if (isOffline) { toast(t('net_offline_text')); return; }
     try {
-      toast('Downloading request summary…');
-      await downloadAndShare(`/requests/me/${request.id}/summary`, `${request.referenceNumber}-summary.pdf`);
+      toast(t('rd_downloading'));
+      await downloadDocument(`/requests/me/${request.id}/summary`, `${request.referenceNumber}-summary.pdf`);
     } catch (err) {
-      toast(err.message);
-    }
-  };
-
-  const shareRequest = async () => {
-    try {
-      await Share.share({
-        title: `HumanCare World Wide — ${request.referenceNumber}`,
-        message:
-          `HumanCare World Wide request ${request.referenceNumber}\n` +
-          `${request.serviceType} — ${request.origin} to ${request.destination}\n` +
-          `Status: ${pill ? pill.label : t('status_' + toUiStatus(request.status))}`,
-      });
-    } catch (err) {
-      // On web, browsers without the Web Share API reject here (desktop Firefox,
-      // older Chrome) — on native, cancelling the share sheet itself is not an
-      // error (it resolves normally), so this only fires for a real failure.
-      toast(err.message || 'Sharing is not supported on this browser.');
+      toast(t(downloadErrorInfo(err).key));
     }
   };
 
@@ -197,7 +190,8 @@ export default function RequestDetails() {
       <Header title={t('request_details_title')} backLabel={t('home_back')} isRTL={isRTL} />
       <Body contentClassName="" bottomEdge={view.showTrackingBar ? barHeight : 0} refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         <Reveal animate={gate.wasShown} style={{ paddingTop: 16, paddingHorizontal: 16, paddingBottom: 0, gap: 14 }}>
-          <Summary view={view} t={t} onDownload={downloadSummary} onShare={shareRequest} onContact={() => Linking.openURL('tel:+919699999065')} />
+          <PendingUploadsNoticeView state={pendingUploads} />
+          <Summary view={view} t={t} onDownload={downloadSummary} offline={isOffline} onContact={() => open('tel:+919699999065')} />
           <StatusCard view={view} request={request} t={t} />
 
           {view.patient.fields.length ? (
@@ -216,21 +210,25 @@ export default function RequestDetails() {
           {request.serviceKey === 'privatecharter' ? <QuotationSection request={request} onChanged={reload} className="" /> : null}
           <InvoicesSection request={request} onChanged={reload} className="" />
 
-          <Section title={t('rd_documents_n', { n: docs.length })}>
-            <Card padding={0} style={{ overflow: 'hidden' }}>
-              {docs.length === 0 ? (
-                <Text style={{ padding: 16, fontFamily: FONT[400], fontSize: 13.5, lineHeight: 19, color: C.muted }}>{t('rd_no_documents')}</Text>
-              ) : docs.map((doc, i) => (
-                <DocumentRow
-                  key={doc.id} doc={doc} first={i === 0} t={t}
-                  onOpen={() => openDocumentPreview(router.push, doc)}
-                />
-              ))}
-            </Card>
-          </Section>
+          {view.showDocuments ? (
+            <>
+              <Section title={t('rd_documents_n', { n: docs.length })}>
+                <Card padding={0} style={{ overflow: 'hidden' }}>
+                  {docs.length === 0 ? (
+                    <Text style={{ padding: 16, fontFamily: FONT[400], fontSize: 13.5, lineHeight: 19, color: C.muted }}>{t('rd_no_documents')}</Text>
+                  ) : docs.map((doc, i) => (
+                    <DocumentRow
+                      key={doc.id} doc={doc} first={i === 0} t={t} offline={isOffline}
+                      onOpen={() => { if (isOffline) return; openDocumentPreview(router.push, doc); }}
+                    />
+                  ))}
+                </Card>
+              </Section>
 
-          <DocumentHistory request={request} styled />
-          <AdditionalDocuments request={request} onUploaded={reload} />
+              <DocumentHistory request={request} styled />
+              <AdditionalDocuments request={request} onUploaded={reload} pendingUploads={pendingUploads} />
+            </>
+          ) : null}
         </Reveal>
       </Body>
       {view.showTrackingBar ? (
