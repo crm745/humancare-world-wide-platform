@@ -2,13 +2,15 @@
 // The inbound Deal-stage processor. No database and no network: an in-memory world (Case, link, stage events,
 // notifications, audit, inbox) behind a fake Prisma whose transaction serialises callers (standing in for the
 // Case row lock) and rolls back on a throw; a fake store applying the same lease/fence rules as the real SQL;
-// and a mocked Bitrix client. The real store's SQL is checked at the bottom.
+// and a mocked Bitrix client. The real store's SQL is checked at the bottom. A patient-visible stage queues the patient's PUSH DELIVERIES in the same
+// transaction (fake device / preference / delivery tables below); nothing here sends a push.
 jest.mock('../../src/db/prisma', () => ({ prisma: {} }));
-jest.mock('../../src/integrations/push/expo-push.service', () => ({ sendExpoPush: jest.fn() }));
+jest.mock('../../src/integrations/push/expo-push.service', () => ({ sendExpoPush: jest.fn() })); // the legacy sender: it must never be reached
 
 const service = require('../../src/modules/bitrix/deal-inbox.service');
 const realStore = require('../../src/modules/bitrix/deal-inbox.store');
 const { STAGES } = require('../../src/modules/bitrix/bitrix-deal-stages');
+const { suppressedEnqueuePush } = require('../../src/modules/notifications/push-delivery-enqueue');
 
 const { runInboxWorker, LEASE_SECONDS, MAX_ATTEMPTS, NOT_LINKED_RETRIES } = service;
 const ENV_ON = { BITRIX_DEAL_PROFILE: 'test', BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true' };
@@ -23,12 +25,16 @@ const dealBody = (over = {}) => ({
   ID: DEAL, CATEGORY_ID: '38', STAGE_ID: 'C38:EXECUTING', DATE_MODIFY: '2030-01-02T10:00:00+00:00', [REF_FIELD]: REF,
   COMMENTS: 'INTERNAL NOTE do not show', TITLE: REF, ...over,
 });
+const STAGE_TITLE = 'Your case has been updated'; // the catalogue's title for stage_update
+const STAGE_BODY = 'Your case status has been updated.'; // the core's fixed stage_update body
 const newInbox = (over = {}) => ({ id: 1, status: 'received', attempts: 0, nextAt: 0, lockedBy: null, lockedUntil: null, lastError: null, dealId: DEAL, ...over });
 const freshWorld = () => ({
   case: { id: 7, referenceNumber: REF, status: 'submitted', charter_stage: 'patient_details', stage_version: 0, closedAt: null },
   serviceRequest: { id: 3, userId: 55, serviceKey: 'privatecharter', reviewStatus: 'in_review', bitrixLeadId: null, status: 'submitted', patientName: 'Asha Rao', patientContact: '+971501234567' },
   link: { id: 1, caseId: 7, bitrixDealId: DEAL, stageId: 'C38:NEW', externalModifiedAt: null, syncStatus: 'synced' },
   stageEvents: [], notifications: [], audit: [],
+  devices: [{ id: 10, ownerType: 'patient', ownerId: 55, status: 'active', expoPushToken: 'ExponentPushToken[fake]', lastRegisteredAt: new Date('2030-01-02T09:00:00Z') }],
+  deliveries: [], prefs: {},
 });
 
 function makeStore() {
@@ -65,9 +71,12 @@ function makePrisma() {
     bitrixDealLink: { findUnique: jest.fn(async () => ({ ...w().link })), update: jest.fn(async ({ data }) => { order.push('link'); w().link = { ...w().link, ...data }; }) },
     caseStageEvent: {
       findFirst: jest.fn(async ({ where }) => w().stageEvents.find((e) => e.idempotencyKey === where.idempotencyKey) || null),
-      create: jest.fn(async ({ data }) => { order.push('stage-event'); w().stageEvents.push(data); }),
+      // Returns the created row (with its id), like Prisma: the notification's event reference is built from this id.
+      create: jest.fn(async ({ data }) => { order.push('stage-event'); const row = { id: w().stageEvents.length + 1, ...data }; w().stageEvents.push(row); return { ...row }; }),
     },
     case: {
+      // What the central notification core reads (through the same transaction client) to check ownership.
+      findUnique: jest.fn(async ({ where }) => (where.id === w().case.id ? { id: w().case.id, serviceRequestId: w().serviceRequest.id } : null)),
       updateMany: jest.fn(async ({ where, data }) => {
         if (w().case.stage_version !== where.stageVersion) return { count: 0 };
         order.push('case');
@@ -77,8 +86,43 @@ function makePrisma() {
         return { count: 1 };
       }),
     },
-    serviceRequest: { update: jest.fn(async ({ data }) => { w().serviceRequest.status = data.status; }) },
-    notification: { create: jest.fn(async ({ data }) => { order.push('notification'); w().notifications.push(data); }) },
+    serviceRequest: {
+      update: jest.fn(async ({ data }) => { w().serviceRequest.status = data.status; }),
+      findUnique: jest.fn(async ({ where }) => (where.id === w().serviceRequest.id ? { id: w().serviceRequest.id, userId: w().serviceRequest.userId } : null)),
+    },
+    user: { findUnique: jest.fn(async ({ where }) => (where.id === w().serviceRequest.userId ? { id: where.id } : null)) },
+    // Like the real table: the idempotency key is unique (a duplicate is a P2002) and findUnique reads by it.
+    notification: {
+      findUnique: jest.fn(async ({ where }) => {
+        const found = where.id !== undefined ? w().notifications.find((n) => n.id === where.id) : w().notifications.find((n) => n.idempotencyKey === where.idempotencyKey);
+        return found ? { ...found } : null;
+      }),
+      create: jest.fn(async ({ data }) => {
+        order.push('notification');
+        if (w().notifications.some((n) => n.idempotencyKey === data.idempotencyKey)) { const e = new Error('unique'); e.code = 'P2002'; e.meta = { target: 'notifications_idempotency_key_key' }; throw e; }
+        const row = { id: w().notifications.length + 1, readAt: null, deletedAt: null, createdAt: new Date('2030-01-02T10:00:00Z'), ...data };
+        w().notifications.push(row);
+        return { ...row };
+      }),
+    },
+    // The push tables, like the real ones: a query returns only what it selects; the destination index is unique (a duplicate is a P2002).
+    notificationPreference: { findUnique: jest.fn(async ({ where }) => { const p = w().prefs[where.ownerType_ownerId.ownerId]; return p ? { ...p } : null; }) },
+    notificationDevice: {
+      findMany: jest.fn(async ({ where, select }) => w().devices
+        .filter((d) => d.ownerType === where.ownerType && d.ownerId === where.ownerId && d.status === where.status && +d.lastRegisteredAt <= +where.lastRegisteredAt.lte)
+        .sort((a, b) => a.id - b.id).map((d) => Object.fromEntries(Object.keys(select).filter((k) => select[k]).map((k) => [k, d[k]])))),
+    },
+    notificationDelivery: {
+      findMany: jest.fn(async ({ where, select }) => w().deliveries
+        .filter((d) => d.notificationId === where.notificationId && d.channel === where.channel).map((d) => Object.fromEntries(Object.keys(select).filter((k) => select[k]).map((k) => [k, d[k]])))),
+      create: jest.fn(async ({ data, select }) => {
+        order.push('delivery');
+        if (w().deliveries.some((d) => d.notificationId === data.notificationId && d.channel === data.channel && d.destinationKey === data.destinationKey)) { const e = new Error('unique'); e.code = 'P2002'; e.meta = { target: 'notification_deliveries_dest_key' }; throw e; }
+        const row = { id: w().deliveries.length + 1, status: 'pending', attemptCount: 0, ...data };
+        w().deliveries.push(row);
+        return select ? Object.fromEntries(Object.keys(select).filter((k) => select[k]).map((k) => [k, row[k]])) : { ...row };
+      }),
+    },
     auditLog: { create: jest.fn(async ({ data }) => { w().audit.push(data); }) },
   };
   return {
@@ -100,8 +144,8 @@ function makePrisma() {
   };
 }
 
-let prisma; let store; let api; let log; let push;
-const run = (extra = {}) => runInboxWorker({ prisma, store, api, env: ENV_ON, log, push, lostReasonField: LOST_FIELD, workerId: 'worker-A', ...extra });
+let prisma; let store; let api; let log;
+const run = (extra = {}) => runInboxWorker({ prisma, store, api, env: ENV_ON, log, lostReasonField: LOST_FIELD, workerId: 'worker-A', ...extra });
 const logged = () => [...log.error.mock.calls, ...log.warn.mock.calls].map((c) => c[0]).join('\n');
 const auditActions = () => world.audit.map((a) => a.action);
 
@@ -109,7 +153,6 @@ beforeEach(() => {
   clock = 1000; inbox = [newInbox()]; world = freshWorld(); mutex = Promise.resolve(); order = [];
   prisma = makePrisma(); store = makeStore();
   log = { error: jest.fn(), warn: jest.fn() };
-  push = jest.fn(async () => {});
   api = { getDeal: jest.fn(async () => ({ status: 'ok', deal: dealBody() })) };
 });
 
@@ -141,11 +184,14 @@ describe('applying an approved stage', () => {
     expect(world.link).toMatchObject({ stageId, syncStatus: 'synced' });
     // Patient visibility: exactly the four approved stages notify, with the fixed message.
     expect(world.notifications).toHaveLength(entry.patientVisible ? 1 : 0);
-    expect(push).toHaveBeenCalledTimes(entry.patientVisible ? 1 : 0);
-    if (entry.patientVisible) expect(world.notifications[0]).toEqual({ recipientType: 'patient', recipientId: 55, kind: 'stage_update', title: `${REF} update`, body: entry.message });
+    expect(world.deliveries).toHaveLength(entry.patientVisible ? 1 : 0);
+    // Through the central core: catalogue title, the core's fixed stage_update body (the profile's `message` only decides whether to notify).
+    if (entry.patientVisible) expect(world.notifications[0]).toMatchObject({ recipientType: 'patient', recipientId: 55, kind: 'stage_update', title: STAGE_TITLE, body: STAGE_BODY, isMandatory: false });
+    // ... and one push delivery for the patient's active device, queued in the same transaction (the worker sends it later from the stored notification)
+    if (entry.patientVisible) expect(world.deliveries).toEqual([expect.objectContaining({ notificationId: world.notifications[0].id, recipientType: 'patient', recipientId: 55, channel: 'push', provider: 'expo', deviceId: 10, destinationKey: 'device:10', status: 'pending' })]);
   });
 
-  const CANCEL_MESSAGE = 'Your Private Charter request has been cancelled. Please contact our support team if you need assistance.';
+  const CANCEL_MESSAGE = 'Your Private Charter request has been cancelled. Please contact our support team if you need assistance.'; // the profile's message: now only the gate
   const cancelledDeal = (over = {}) => dealBody({ STAGE_ID: 'C38:LOSE', UF_CRM_1788858985323: '5914', UF_CRM_1788859072681: 'FREE TEXT lost reason, internal', ...over });
 
   test('Deal Lost with reason 5914 (the confirmed field, default configuration) -> cancelled, closed, ONE fixed notification', async () => {
@@ -155,28 +201,30 @@ describe('applying an approved stage', () => {
     expect(world.case.closedAt).toBeInstanceOf(Date);
     expect(world.serviceRequest.status).toBe('cancelled');
     expect(world.stageEvents[0]).toMatchObject({ stage: 'cancelled', note: null, reasonCode: 'bitrix:C38:LOSE' });
-    expect(world.notifications).toEqual([{ recipientType: 'patient', recipientId: 55, kind: 'stage_update', title: `${REF} update`, body: CANCEL_MESSAGE }]);
-    expect(order).toEqual(['inbox:processed', 'case', 'stage-event', 'link', 'notification']);
-    expect(push).toHaveBeenCalledTimes(1);
+    expect(world.notifications).toHaveLength(1);
+    expect(world.notifications[0]).toMatchObject({ recipientType: 'patient', recipientId: 55, kind: 'stage_update', title: STAGE_TITLE, body: STAGE_BODY });
+    expect(JSON.stringify(world.notifications)).not.toContain(CANCEL_MESSAGE);
+    expect(order).toEqual(['inbox:processed', 'case', 'stage-event', 'link', 'notification', 'delivery']);
+    expect(world.deliveries).toHaveLength(1);
     expect(inbox[0].status).toBe('processed');
   });
 
   test('the cancellation message never carries the lost-reason text, the companion field or any note', async () => {
     api.getDeal.mockResolvedValue({ status: 'ok', deal: cancelledDeal() });
     await run({ lostReasonField: undefined });
-    expect(JSON.stringify([world.notifications, push.mock.calls, world.audit, world.stageEvents])).not.toMatch(/FREE TEXT|INTERNAL NOTE|internal/);
+    expect(JSON.stringify([world.notifications, world.deliveries, world.audit, world.stageEvents])).not.toMatch(/FREE TEXT|INTERNAL NOTE|internal/);
   });
 
-  test('duplicate deliveries of the cancellation create no second notification, stage event or push', async () => {
+  test('duplicate deliveries of the cancellation create no second notification, stage event or push delivery', async () => {
     api.getDeal.mockResolvedValue({ status: 'ok', deal: cancelledDeal() });
     inbox.push(newInbox({ id: 2 }), newInbox({ id: 3 }));
     await run({ lostReasonField: undefined });
     expect(world.notifications).toHaveLength(1);
     expect(world.stageEvents).toHaveLength(1);
-    expect(push).toHaveBeenCalledTimes(1);
+    expect(world.deliveries).toHaveLength(1);
   });
 
-  test('cancellation is terminal: no later event reopens it, and nothing more is sent', async () => {
+  test('cancellation is terminal: no later event reopens it, and nothing more is queued', async () => {
     api.getDeal.mockResolvedValue({ status: 'ok', deal: cancelledDeal() });
     await run({ lostReasonField: undefined });
     for (const [i, stageId] of ['C38:EXECUTING', 'C38:NEW', 'C38:WON'].entries()) {
@@ -216,7 +264,7 @@ describe('applying an approved stage', () => {
       await run();
     }
     expect(world.notifications).toHaveLength(0);
-    expect(push).not.toHaveBeenCalled();
+    expect(world.deliveries).toHaveLength(0);
   });
 });
 
@@ -224,41 +272,199 @@ describe('applying an approved stage', () => {
 describe('patient notifications', () => {
   test('never carry the Deal\'s notes, comments, title or any personal data', async () => {
     await run();
-    const sent = JSON.stringify([world.notifications, push.mock.calls]);
+    const sent = JSON.stringify([world.notifications, world.deliveries]);
     expect(sent).not.toMatch(/INTERNAL NOTE|Asha|971501234567/);
-    expect(world.notifications[0].body).toBe('Your service is now in progress.');
+    expect(world.notifications[0].body).toBe(STAGE_BODY);
   });
-  test('the notification is written inside the same transaction as the stage change, and the push comes after it', async () => {
+  test('the notification and its push delivery are written inside the same transaction as the stage change, in that order', async () => {
     await run();
-    expect(order).toEqual(['inbox:processed', 'case', 'stage-event', 'link', 'notification']);
-    expect(push).toHaveBeenCalledWith('ExponentPushToken[fake]', { title: `${REF} update`, body: 'Your service is now in progress.' });
+    expect(order).toEqual(['inbox:processed', 'case', 'stage-event', 'link', 'notification', 'delivery']);
+    expect(world.deliveries).toEqual([expect.objectContaining({ deviceId: 10, destinationKey: 'device:10' })]);
+    // Only the transaction client has notification and delivery tables: both were handed `tx`, not the shared client.
+    expect(prisma.notification).toBeUndefined();
+    expect(prisma.notificationDelivery).toBeUndefined();
+    expect(prisma.tx.notification.create).toHaveBeenCalledTimes(1);
+    expect(prisma.tx.notificationDelivery.create).toHaveBeenCalledTimes(1);
   });
-  test('a failing push does not affect the result', async () => {
-    push.mockRejectedValue(new Error('expo down for ExponentPushToken[fake]'));
+  test('the references and the event reference come from the persisted stage event', async () => {
     await run();
-    expect(inbox[0].status).toBe('processed');
+    expect(world.stageEvents).toHaveLength(1);
+    expect(world.notifications[0]).toMatchObject({
+      recipientId: 55, caseId: 7, serviceRequestId: 3, quotationId: null,
+      idempotencyKey: `stage_update:patient:55:cse${world.stageEvents[0].id}`,
+      data: { screen: 'request', entityType: 'service_request', entityId: 3 },
+    });
+    expect(world.notifications[0].idempotencyKey).not.toMatch(/\d{4}-\d\d-\d\d|inbox|bitrix/i); // not time-, inbox- or Deal-based
+  });
+  test('a notification the core rejects (it cannot verify the patient\'s request) rolls the whole stage change back and queues no delivery', async () => {
+    prisma.tx.serviceRequest.findUnique.mockResolvedValueOnce(null);
+    await run();
+    expect(world.notifications).toHaveLength(0);
+    expect(world.stageEvents).toHaveLength(0);
+    expect(world.case).toMatchObject({ charter_stage: 'patient_details', status: 'submitted', stage_version: 0 });
+    expect(world.deliveries).toHaveLength(0);
+  });
+  test('no deliveries are queued when the notification already existed (created: false); the stage change still applies', async () => {
+    world.notifications.push({ id: 1, recipientType: 'patient', recipientId: 55, kind: 'stage_update', caseId: 7, serviceRequestId: 3, quotationId: null, idempotencyKey: 'stage_update:patient:55:cse1', deletedAt: new Date() });
+    await run();
     expect(world.case.charter_stage).toBe('in_progress');
-    expect(logged()).not.toContain('ExponentPushToken');
+    expect(world.stageEvents).toHaveLength(1);
+    expect(world.notifications).toHaveLength(1);
+    expect(world.deliveries).toHaveLength(0);
   });
-  test('a repeated delivery of the same state sends nothing more', async () => {
+  test('a delivery that cannot be queued rolls the WHOLE stage change back, notification included (one transaction); nothing is swallowed or sent', async () => {
+    prisma.tx.notificationDelivery.create.mockRejectedValueOnce(Object.assign(new Error('connection lost for ExponentPushToken[fake]'), { code: 'P1001' }));
+    await run();
+    expect(world.notifications).toHaveLength(0);
+    expect(world.deliveries).toHaveLength(0);
+    expect(world.stageEvents).toHaveLength(0);
+    expect(world.case).toMatchObject({ charter_stage: 'patient_details', status: 'submitted', stage_version: 0 });
+    expect(logged()).not.toContain('ExponentPushToken');
+    expect(require('../../src/integrations/push/expo-push.service').sendExpoPush).not.toHaveBeenCalled();
+  });
+  test('a repeated delivery of the same state queues nothing more', async () => {
     await run();
     inbox.push(newInbox({ id: 2 }));
     await run();
     expect(world.notifications).toHaveLength(1);
-    expect(push).toHaveBeenCalledTimes(1);
+    expect(world.deliveries).toHaveLength(1);
     expect(world.stageEvents).toHaveLength(1);
   });
-  test('a rolled-back transaction leaves no notification and sends no push', async () => {
+  test('a rolled-back transaction leaves no notification and no delivery', async () => {
     prisma.tx.notification.create.mockRejectedValueOnce(new Error('db error'));
     await run();
     expect(world.notifications).toHaveLength(0);
-    expect(push).not.toHaveBeenCalled();
+    expect(world.deliveries).toHaveLength(0);
   });
   test('quarantined and unresolved transitions never notify', async () => {
     api.getDeal.mockResolvedValue({ status: 'ok', deal: dealBody({ STAGE_ID: 'C38:WON', [REF_FIELD]: 'OTHER' }) });
     await run();
     expect(world.notifications).toHaveLength(0);
-    expect(push).not.toHaveBeenCalled();
+    expect(world.deliveries).toHaveLength(0);
+  });
+});
+
+// ---- push deliveries (Phase 4) -------------------------------------------------------------------------------------
+describe('push deliveries of the stage notification', () => {
+  const device = (over = {}) => { const d = { id: 11 + world.devices.length, ownerType: 'patient', ownerId: 55, status: 'active', expoPushToken: `ExponentPushToken[secret${world.devices.length}]`, lastRegisteredAt: new Date('2030-01-02T09:00:00Z'), ...over }; world.devices.push(d); return d; };
+
+  test('one delivery per ACTIVE device of the patient; inactive devices and other people\'s devices get none', async () => {
+    const b = device(); const c = device();
+    device({ status: 'inactive' }); device({ ownerId: 56 }); device({ ownerType: 'corporate_user' });
+    await run();
+    expect(world.notifications).toHaveLength(1);
+    expect(world.deliveries.map((d) => d.deviceId)).toEqual([10, b.id, c.id]);
+    expect(world.deliveries.every((d) => d.notificationId === world.notifications[0].id && d.recipientId === 55 && d.channel === 'push')).toBe(true);
+  });
+
+  test('a patient with no device still gets the in-app notification and no delivery', async () => {
+    world.devices = [];
+    await run();
+    expect(world.notifications).toHaveLength(1);
+    expect(world.deliveries).toHaveLength(0);
+  });
+
+  test('pushEnabled=false: the notification is created, no delivery is queued (stage_update is not mandatory)', async () => {
+    world.prefs[55] = { inAppEnabled: true, pushEnabled: false };
+    await run();
+    expect(world.notifications[0]).toMatchObject({ kind: 'stage_update', isMandatory: false });
+    expect(world.deliveries).toHaveLength(0);
+  });
+
+  test('inAppEnabled=false does not stop the push: the delivery is queued', async () => {
+    world.prefs[55] = { inAppEnabled: false, pushEnabled: true };
+    await run();
+    expect(world.deliveries).toHaveLength(1);
+  });
+
+  test('a device registered after the notification was created gets nothing', async () => {
+    device({ lastRegisteredAt: new Date('2030-01-02T11:00:00Z') });
+    await run();
+    expect(world.deliveries.map((d) => d.deviceId)).toEqual([10]);
+  });
+
+  test('a replay of the same stage (another delivery of the event) queues no second set', async () => {
+    device();
+    await run();
+    expect(world.deliveries).toHaveLength(2);
+    inbox.push(newInbox({ id: 2 }));
+    await run();
+    expect(world.notifications).toHaveLength(1);
+    expect(world.deliveries).toHaveLength(2);
+  });
+
+  test('the helper is handed the stage transaction\'s client and the persisted notification; it is not called for a replay or a hidden stage', async () => {
+    const calls = [];
+    const enqueuePush = jest.fn(async (tx, notification) => { calls.push([tx, notification]); return require('../../src/modules/notifications/push-delivery-enqueue').enqueuePushDeliveries(tx, notification); });
+    await run({ enqueuePush });
+    expect(enqueuePush).toHaveBeenCalledTimes(1);
+    expect(calls[0][0]).toBe(prisma.tx);
+    expect(calls[0][0].$transaction).toBeUndefined();
+    expect(calls[0][1]).toMatchObject({ id: world.notifications[0].id, recipientId: 55, kind: 'stage_update' });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1); // no second transaction for the deliveries
+    inbox.push(newInbox({ id: 2 })); // the same state again
+    await run({ enqueuePush });
+    expect(enqueuePush).toHaveBeenCalledTimes(1);
+    inbox.push(newInbox({ id: 3 }));
+    api.getDeal.mockResolvedValue({ status: 'ok', deal: dealBody({ STAGE_ID: 'C38:APOLOGY', DATE_MODIFY: '2030-01-02T13:00:00+00:00' }) }); // a stage the patient is not told about
+    await run({ enqueuePush });
+    expect(enqueuePush).toHaveBeenCalledTimes(1);
+    expect(world.deliveries).toHaveLength(1);
+  });
+
+  describe('scoped, synthetic and test runs queue nothing; the in-app notification and the stage change are unaffected', () => {
+    const queuesNone = () => {
+      expect(inbox[0].status).toBe('processed');
+      expect(world.case.charter_stage).toBe('in_progress');
+      expect(world.notifications).toHaveLength(1);
+      expect(world.deliveries).toHaveLength(0);
+    };
+
+    test('the explicit no-op (what single-deal-detect and "--no-push" pass) queues nothing, whatever the environment says', async () => {
+      await run({ enqueuePush: suppressedEnqueuePush });
+      queuesNone();
+      expect(await suppressedEnqueuePush({}, { id: 5 })).toEqual({ notificationId: 5, enqueued: 0, alreadyQueued: 0, skipped: 'suppressed' });
+    });
+
+    test.each([
+      ['a test run (NODE_ENV=test)', { NODE_ENV: 'test' }],
+      ['a scoped test run', { HUMANCARE_SCOPED_RUN: 'true' }],
+      ['an integration test run', { HUMANCARE_INTEGRATION_RUN: 'true' }],
+      ['a synthetic E2E run', { SYNTHETIC_E2E_AUTO_APPROVE: 'true' }],
+    ])('%s', async (_name, extra) => {
+      const enqueuePush = jest.fn();
+      await run({ env: { ...ENV_ON, ...extra }, enqueuePush });
+      queuesNone();
+      expect(enqueuePush).not.toHaveBeenCalled();
+    });
+
+    test('a synthetic E2E patient identity', async () => {
+      world.serviceRequest.patientName = 'ZZ-SYNTHETIC Patient';
+      await run();
+      queuesNone();
+    });
+
+    test('the old "push" option is refused loudly, not silently ignored (it meant "no push": ignoring it would queue deliveries)', async () => {
+      await expect(run({ push: async () => undefined })).rejects.toThrow(/replaced by "enqueuePush"/);
+      expect(world.deliveries).toHaveLength(0);
+      expect(inbox[0].status).toBe('received');
+    });
+
+    test('an undefined enqueuePush means the default, never "nothing"', async () => {
+      await run({ enqueuePush: undefined });
+      expect(world.deliveries).toHaveLength(1);
+    });
+  });
+
+  test('the Bitrix sender has no direct Expo call, no User.pushToken lookup and no network code', async () => {
+    const fs = require('fs');
+    const path = require('path');
+    const code = fs.readFileSync(path.join(__dirname, '../../src/modules/bitrix/deal-inbox.service.js'), 'utf8').replace(/\/\/.*$/gm, '');
+    expect(code).not.toMatch(/sendExpoPush|expo-push\.service|expo-push\.client|pushToken|push_token|\bfetch\b/);
+    expect(code).not.toMatch(/ctx\.push\b|\bpush:\s/);
+    await run();
+    expect(prisma.user.findUnique).not.toHaveBeenCalled(); // the shared client's user lookup (the old token read) is never made
+    expect(require('../../src/integrations/push/expo-push.service').sendExpoPush).not.toHaveBeenCalled();
   });
 });
 
@@ -271,7 +477,7 @@ describe('quarantine', () => {
     expect(world.case).toMatchObject({ charter_stage: 'patient_details', status: 'submitted', stage_version: 0 });
     expect(world.stageEvents).toHaveLength(0);
     expect(world.notifications).toHaveLength(0);
-    expect(push).not.toHaveBeenCalled();
+    expect(world.deliveries).toHaveLength(0);
   };
 
   test.each([
@@ -432,7 +638,7 @@ describe('duplicates, ordering and concurrency', () => {
     expect(world.case.stage_version).toBe(1);
     expect(inbox.filter((e) => e.status === 'processed')).toHaveLength(1);
     expect(inbox.filter((e) => e.status === 'ignored')).toHaveLength(2);
-    expect(push).toHaveBeenCalledTimes(1);
+    expect(world.deliveries).toHaveLength(1);
   });
 
   test('an event is claimed by only one worker at a time', async () => {
@@ -457,7 +663,7 @@ describe('rollback and lease', () => {
     expect(world.audit).toHaveLength(0);
     expect(world.link.stageId).toBe('C38:NEW');
     expect(inbox[0].status).toBe('processing'); // unchanged: the lease expires and the event is retried
-    expect(push).not.toHaveBeenCalled();
+    expect(world.deliveries).toHaveLength(0);
     expect(logged()).not.toContain('simulated write failure'); // only the error name is logged
   });
 
@@ -486,7 +692,7 @@ describe('rollback and lease', () => {
     expect(world.stageEvents).toHaveLength(0);
     expect(world.notifications).toHaveLength(0);
     expect(inbox[0].status).toBe('processing');
-    expect(push).not.toHaveBeenCalled();
+    expect(world.deliveries).toHaveLength(0);
   });
 
   test('Bitrix is read outside any database transaction', async () => {

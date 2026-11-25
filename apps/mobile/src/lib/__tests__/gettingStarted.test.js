@@ -24,7 +24,8 @@ describe('Getting Started: one page', () => {
 describe('sign out', () => {
   test('a patient goes straight to Login (a corporate account to the corporate login), not to Getting Started', () => {
     const profile = read('app/profile.js');
-    expect(profile).toContain("navReplace(isCorporate ? '/corporate-login' : '/login'); await clearTokens();");
+    // The destination is still shown before the tokens are cleared; a patient's device is unregistered first (deviceRegistry.test.js).
+    expect(profile).toMatch(/navReplace\(isCorporate \? '\/corporate-login' : '\/login'\);\s+await clearTokens\(\);/);
     expect(profile).not.toMatch(/signOut = async \(\) => \{ navReplace\([^)]*welcome/);
   });
 });

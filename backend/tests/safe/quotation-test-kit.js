@@ -27,6 +27,8 @@ function makeWorld(over = {}) {
     clock: new Date('2030-01-02T10:00:00Z').getTime(),
     caseRecord: { id: 3037, referenceNumber: REF, status: 'in_progress', serviceRequestId: 4672 },
     request: { id: 4672, userId: 55, serviceKey: 'privatecharter', reviewStatus: 'approved', bitrixLeadId: null },
+    // Push device registry and delivery rows (what enqueuePushDeliveries reads and writes), and the patient's notification preferences by user id.
+    devices: [], deliveries: [], prefs: {},
     notifications: [], admins: [{ id: 7, name: 'Asha Admin', status: 'active', role: 'admin' }, { id: 8, name: 'Ravi Super', status: 'active', role: 'superadmin' }, { id: 9, name: 'Old Admin', status: 'disabled', role: 'admin' }], pushes: [],
     link: { id: 1173, caseId: 3037, bitrixDealId: DEAL },
     quotations: [], invoices: [], nextInvoiceId: 1, audit: [], events: [], nextQuotationId: 1, nextEventId: 464, logs: [],
@@ -125,7 +127,9 @@ function makePrisma(world) {
         return event;
       }),
     },
-    case: { findFirst: jest.fn(async ({ where }) => {
+    // What the central notification core reads to check ownership (it is called with the same client as the publication).
+    serviceRequest: { findUnique: jest.fn(async ({ where }) => (where.id === world.request.id ? { id: world.request.id, userId: world.request.userId } : null)) },
+    case: { findUnique: jest.fn(async ({ where }) => (where.id === world.caseRecord.id ? { id: world.caseRecord.id, serviceRequestId: world.caseRecord.serviceRequestId } : null)), findFirst: jest.fn(async ({ where }) => {
       const c = world.caseRecord;
       const keyed = where.id !== undefined || where.referenceNumber !== undefined || where.serviceRequestId !== undefined;
       const match = keyed
@@ -137,13 +141,46 @@ function makePrisma(world) {
     }) },
     adminUser: { findMany: jest.fn(async ({ where }) => world.admins.filter((a) => where.id.in.includes(a.id)).map((a) => ({ ...a }))) },
     user: { findUnique: jest.fn(async () => ({ pushToken: 'ExponentPushToken[test]' })) },
-    notification: { create: jest.fn(async ({ data }) => { const row = { id: world.notifications.length + 1, readAt: null, ...data }; world.notifications.push(row); return row; }) },
+    // Like the real table: the idempotency key is unique (a duplicate is a P2002), and findUnique reads by it.
+    notification: {
+      findUnique: jest.fn(async ({ where }) => {
+        const found = where.id !== undefined ? world.notifications.find((n) => n.id === where.id) : world.notifications.find((n) => n.idempotencyKey === where.idempotencyKey);
+        return found ? { ...found } : null;
+      }),
+      create: jest.fn(async ({ data }) => {
+        if (data.idempotencyKey && world.notifications.some((n) => n.idempotencyKey === data.idempotencyKey)) { const e = new Error('unique'); e.code = 'P2002'; e.meta = { target: 'notifications_idempotency_key_key' }; throw e; }
+        const row = { id: world.notifications.length + 1, readAt: null, deletedAt: null, createdAt: new Date(world.clock), ...data }; world.notifications.push(row); return { ...row };
+      }),
+    },
+    // The push delivery tables, like the real ones: the destination index is unique (a duplicate is a P2002) and a query returns only what it selects.
+    notificationPreference: {
+      findUnique: jest.fn(async ({ where }) => { const p = world.prefs[where.ownerType_ownerId.ownerId]; return p ? { ...p } : null; }),
+    },
+    notificationDevice: {
+      findMany: jest.fn(async ({ where, select }) => world.devices
+        .filter((d) => d.ownerType === where.ownerType && d.ownerId === where.ownerId && d.status === where.status && +d.lastRegisteredAt <= +where.lastRegisteredAt.lte)
+        .sort((a, b) => a.id - b.id).map((d) => Object.fromEntries(Object.keys(select).filter((k) => select[k]).map((k) => [k, d[k]])))),
+    },
+    notificationDelivery: {
+      findMany: jest.fn(async ({ where, select }) => world.deliveries
+        .filter((d) => d.notificationId === where.notificationId && d.channel === where.channel).map((d) => Object.fromEntries(Object.keys(select).filter((k) => select[k]).map((k) => [k, d[k]])))),
+      create: jest.fn(async ({ data, select }) => {
+        if (world.deliveries.some((d) => d.notificationId === data.notificationId && d.channel === data.channel && d.destinationKey === data.destinationKey)) {
+          const e = new Error('unique'); e.code = 'P2002'; e.meta = { target: 'notification_deliveries_dest_key' }; throw e;
+        }
+        const row = { id: world.deliveries.length + 1, status: 'pending', attemptCount: 0, ...data }; world.deliveries.push(row);
+        return select ? Object.fromEntries(Object.keys(select).filter((k) => select[k]).map((k) => [k, row[k]])) : { ...row };
+      }),
+    },
     $queryRaw: jest.fn(async () => [{ id: world.caseRecord.id }]),
     $transaction: jest.fn((fn) => {
       const run = chain.then(async () => {
-        const snapshot = deepClone({ i: world.invoices, ni: world.nextInvoiceId, q: world.quotations, a: world.audit, e: world.events, n: world.nextQuotationId, nt: world.notifications });
-        try { return await fn(db); } catch (err) {
-          world.invoices = snapshot.i; world.nextInvoiceId = snapshot.ni; world.quotations = snapshot.q; world.audit = snapshot.a; world.events = snapshot.e; world.nextQuotationId = snapshot.n; world.notifications = snapshot.nt;
+        const snapshot = deepClone({ i: world.invoices, ni: world.nextInvoiceId, q: world.quotations, a: world.audit, e: world.events, n: world.nextQuotationId, nt: world.notifications, dl: world.deliveries });
+        // A real transaction client has no $transaction (only the shared client opens one): the service gets the same.
+        const tx = { ...db };
+        delete tx.$transaction;
+        try { return await fn(tx); } catch (err) {
+          world.invoices = snapshot.i; world.nextInvoiceId = snapshot.ni; world.quotations = snapshot.q; world.audit = snapshot.a; world.events = snapshot.e; world.nextQuotationId = snapshot.n; world.notifications = snapshot.nt; world.deliveries = snapshot.dl;
           throw err;
         }
       });

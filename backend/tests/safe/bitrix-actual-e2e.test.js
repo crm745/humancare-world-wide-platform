@@ -191,10 +191,18 @@ function inboxWorld({ env = ENV_ACTUAL, linkProfile = 'actual', deal = {}, caseS
   const tx = {
     $queryRaw: jest.fn(async () => [{ id: 7, status: caseStatus, charter_stage: caseStage, stage_version: 3 }]),
     bitrixDealLink: { findUnique: jest.fn(async () => link), update: jest.fn(async ({ data }) => { state.linkUpdates.push(data); }) },
-    caseStageEvent: { findFirst: jest.fn(async () => null), create: jest.fn(async ({ data }) => { state.stageEvents.push(data); }) },
-    case: { updateMany: jest.fn(async ({ data }) => { state.caseUpdates.push(data); return { count: 1 }; }) },
-    serviceRequest: { update: jest.fn(async ({ data }) => { state.requestUpdates.push(data); }) },
-    notification: { create: jest.fn(async ({ data }) => { state.notifications.push(data); }) },
+    caseStageEvent: { findFirst: jest.fn(async () => null), create: jest.fn(async ({ data }) => { const row = { id: state.stageEvents.length + 1, ...data }; state.stageEvents.push(row); return { ...row }; }) },
+    // findUnique / user / notification.findUnique: what the central notification core reads through the same transaction client.
+    case: { updateMany: jest.fn(async ({ data }) => { state.caseUpdates.push(data); return { count: 1 }; }), findUnique: jest.fn(async ({ where }) => (where.id === caseRecord.id ? { id: caseRecord.id, serviceRequestId: caseRecord.serviceRequestId } : null)) },
+    serviceRequest: {
+      update: jest.fn(async ({ data }) => { state.requestUpdates.push(data); }),
+      findUnique: jest.fn(async ({ where }) => (where.id === caseRecord.serviceRequest.id ? { id: caseRecord.serviceRequest.id, userId: caseRecord.serviceRequest.userId } : null)),
+    },
+    user: { findUnique: jest.fn(async ({ where }) => (where.id === caseRecord.serviceRequest.userId ? { id: where.id } : null)) },
+    notification: {
+      findUnique: jest.fn(async ({ where }) => state.notifications.find((n) => n.idempotencyKey === where.idempotencyKey) || null),
+      create: jest.fn(async ({ data }) => { const row = { id: state.notifications.length + 1, ...data }; state.notifications.push(row); return { ...row }; }),
+    },
     auditLog: { create: jest.fn(async ({ data }) => { state.audit.push(data); }) },
   };
   const prisma = {
@@ -207,7 +215,7 @@ function inboxWorld({ env = ENV_ACTUAL, linkProfile = 'actual', deal = {}, caseS
       status: 'ok', deal: { ID: '555', CATEGORY_ID: '0', UF_CRM_1795176618: REF, STAGE_ID: 'UC_R55CKV', DATE_MODIFY: '2030-01-10T10:00:00+05:30', ...deal },
     })),
   };
-  const ctx = { prisma, store, api: bitrix, env, log: quiet(), push: jest.fn(), lostReasonField: 'UF_CRM_1788858985323', workerId: 'w' };
+  const ctx = { prisma, store, api: bitrix, env, log: quiet(), enqueuePush: jest.fn(async () => ({ enqueued: 0, alreadyQueued: 0, skipped: 'no_active_devices' })), lostReasonField: 'UF_CRM_1788858985323', workerId: 'w' };
   return { ctx, tx, state, bitrix, store };
 }
 const claim = { id: 1, dealId: '555', attempts: 1, occurredAt: null, workerId: 'w' };
@@ -229,7 +237,7 @@ describe('inbound stage processing: the five actual stages', () => {
     expect(world.state.requestUpdates.map((u) => u.status)).toEqual(requestStatus ? [requestStatus] : []);
     expect(world.state.linkUpdates[0]).toMatchObject({ stageId });
     expect(world.tx.notification.create).not.toHaveBeenCalled(); // no patient notification until approved
-    expect(world.ctx.push).not.toHaveBeenCalled();
+    expect(world.ctx.enqueuePush).not.toHaveBeenCalled();
   });
   test('Case Completed closes the Case (closedAt is set)', async () => {
     const world = inboxWorld({ deal: { STAGE_ID: 'WON' }, caseStage: 'in_progress', caseStatus: 'in_progress' });
@@ -289,7 +297,9 @@ describe('inbound stage processing: cross-profile', () => {
   test('the test pipeline still maps its own stages (regression)', async () => {
     const world = inboxWorld({ env: ENV_TEST, linkProfile: 'test', deal: { CATEGORY_ID: '38', UF_CRM_1795176618: undefined, UF_CRM_1794548440549: REF, STAGE_ID: 'C38:EXECUTING' }, caseStage: 'documentation', caseStatus: 'in_progress' });
     expect(await processInboxEvent(world.ctx, claim)).toMatchObject({ result: 'applied', stage: 'in_progress' });
-    expect(world.tx.notification.create).toHaveBeenCalledTimes(1); // the test profile's fixed message is unchanged
+    expect(world.tx.notification.create).toHaveBeenCalledTimes(1); // the test profile still notifies; the text is the catalogue's, created through the core
+    expect(world.ctx.enqueuePush).toHaveBeenCalledWith(world.tx, expect.objectContaining({ recipientId: 9, kind: 'stage_update' })); // its push deliveries are queued through the same transaction client
+    expect(world.state.notifications[0]).toMatchObject({ recipientId: 9, kind: 'stage_update', title: 'Your case has been updated', body: 'Your case status has been updated.', caseId: 7, serviceRequestId: 3, idempotencyKey: 'stage_update:patient:9:cse1' });
   });
   test('the inbox store offers only the active profile\'s events', async () => {
     const queried = [];

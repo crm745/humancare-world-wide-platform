@@ -14,7 +14,9 @@
 //      Case already closed / apply), write the fenced inbox result FIRST (0 rows = lease lost, everything rolls back),
 //      then the Case change (compare-and-swap on stage_version), the stage event, the link, the fixed-message patient
 //      Notification and the AuditLog entry. A failure anywhere rolls the whole transaction back: no partial Case.
-//   5. After commit only: a best-effort push. It never affects the result.
+//      For a patient-visible stage the notification's PUSH DELIVERIES are queued in the same transaction (notifications/push-delivery-enqueue.js), only for a
+//      newly created notification. This service sends nothing and reads no push token: the push delivery worker (off unless PUSH_DELIVERY_ENABLED=true) sends them later.
+//   5. Nothing happens after commit.
 //
 // QUARANTINE = the inbox row ends 'ignored' with last_error "quarantined:<code>" plus an AuditLog entry
 // (bitrix.deal.inbound_quarantined). The Case is not touched and the patient is not notified. A transient problem
@@ -34,7 +36,9 @@ const bitrixDealApi = require('./bitrix-deal.api');
 const defaultStore = require('./deal-inbox.store');
 const { LOST_REASON_FIELD } = require('./bitrix-deal-stages');
 const { appendAuditLog } = require('../../common/audit/business-audit');
-const { sendExpoPush } = require('../../integrations/push/expo-push.service');
+const { createPatientNotification } = require('../notifications/notification-core');
+const { enqueuePushDeliveries } = require('../notifications/push-delivery-enqueue');
+const { suppressionReason, SYNTHETIC_IDENTITY_PREFIX } = require('../notifications/push-delivery.config');
 
 const LEASE_SECONDS = 120;
 const MAX_ATTEMPTS = 8;
@@ -53,11 +57,28 @@ class ConcurrentChangeError extends Error {
 
 const makeWorkerId = () => `${os.hostname()}:${process.pid}:${crypto.randomBytes(4).toString('hex')}`.slice(0, 64);
 
+// `enqueuePush(tx, notification)` queues the patient's push deliveries inside the stage transaction. A run that must never queue them (a scoped or synthetic
+// detection, an operator script with --no-push) passes `suppressedEnqueuePush` explicitly. The old `push` option (a direct sender) is gone: a caller that still
+// passes it meant "no push", and silently ignoring it would queue deliveries, so it is refused loudly instead.
 function buildContext(overrides = {}) {
-  return {
+  if (Object.prototype.hasOwnProperty.call(overrides, 'push')) {
+    throw new Error('deal-inbox: the "push" option was replaced by "enqueuePush"; pass suppressedEnqueuePush to queue no push deliveries.');
+  }
+  const ctx = {
     prisma: defaultPrisma, store: defaultStore, api: bitrixDealApi, env: process.env, log: console,
-    push: sendExpoPush, lostReasonField: LOST_REASON_FIELD, workerId: makeWorkerId(), ...overrides,
+    enqueuePush: enqueuePushDeliveries, lostReasonField: LOST_REASON_FIELD, workerId: makeWorkerId(), ...overrides,
   };
+  if (typeof ctx.enqueuePush !== 'function') ctx.enqueuePush = enqueuePushDeliveries; // undefined = the default, never "nothing"
+  return ctx;
+}
+
+// A test, scoped, integration or synthetic run, or a synthetic E2E patient identity, never gets push deliveries queued (the in-app notification is
+// unaffected). The same rules the delivery worker applies when it sends (push-delivery.config.js). This is the ENVIRONMENT guard; a caller that must
+// suppress for another reason (a scoped detection) passes suppressedEnqueuePush, which does not depend on the environment at all.
+function pushMayBeQueued(ctx, serviceRequest) {
+  if (suppressionReason(ctx.env)) return false;
+  const name = serviceRequest && typeof serviceRequest.patientName === 'string' ? serviceRequest.patientName : '';
+  return !name.startsWith(SYNTHETIC_IDENTITY_PREFIX);
 }
 
 const requestStatusFor = (status) => (status === 'completed' ? 'completed' : status === 'cancelled' ? 'cancelled' : status === 'submitted' ? 'submitted' : 'in_progress');
@@ -170,7 +191,7 @@ async function applyStage(ctx, claim, caseRecord, deal, entry, modifiedAt) {
       data: { charterStage: entry.key, status: nextStatus, stageVersion: { increment: 1 }, ...(CLOSED_STATUSES.has(nextStatus) ? { closedAt: new Date() } : {}) },
     });
     if (changed.count !== 1) throw new ConcurrentChangeError();
-    await tx.caseStageEvent.create({
+    const stageEvent = await tx.caseStageEvent.create({
       data: {
         caseId: caseRecord.id, stage: entry.key, note: null, previousStage, actorType: 'bitrix', actorId: null, source: 'bitrix_webhook',
         reasonCode: `bitrix:${stageId}`, idempotencyKey: idemKey, externalModifiedAt: modifiedAt,
@@ -180,10 +201,21 @@ async function applyStage(ctx, claim, caseRecord, deal, entry, modifiedAt) {
       await tx.serviceRequest.update({ where: { id: caseRecord.serviceRequest.id }, data: { status: requestStatusFor(nextStatus) } });
     }
     await tx.bitrixDealLink.update({ where: { caseId: caseRecord.id }, data: { stageId, externalModifiedAt: modifiedAt, lastSyncedAt: new Date(), syncStatus: 'synced', lastError: null } });
-    let notice = null;
     if (entry.patientVisible && entry.message) {
-      notice = { userId: caseRecord.serviceRequest.userId, title: `${caseRecord.referenceNumber} update`, body: entry.message };
-      await tx.notification.create({ data: { recipientType: 'patient', recipientId: notice.userId, kind: 'stage_update', title: notice.title, body: notice.body } });
+      // Through the central core, inside this transaction: a failure rolls the whole stage change back. The profile's
+      // `message` only decides WHETHER to notify; the title and body are the catalogue's fixed text. The stage event just
+      // written is the stable event reference. The push deliveries are queued right after it, in the SAME transaction, only for a newly
+      // created notification: a replay (created: false) queues nothing, and a failure to queue rolls the whole stage change back too.
+      const serviceRequest = caseRecord.serviceRequest;
+      const created = await createPatientNotification({
+        recipientId: serviceRequest.userId,
+        kind: 'stage_update',
+        caseId: caseRecord.id,
+        serviceRequestId: serviceRequest.id,
+        eventRef: `cse${stageEvent.id}`,
+        data: { screen: 'request', entityType: 'service_request', entityId: serviceRequest.id },
+      }, { tx });
+      if (created.created && pushMayBeQueued(ctx, serviceRequest)) await ctx.enqueuePush(tx, created.notification);
     }
     await appendAuditLog(tx, {
       caseId: caseRecord.id, entityType: 'case', entityId: caseRecord.id, action: 'bitrix.deal.stage_synced',
@@ -195,19 +227,9 @@ async function applyStage(ctx, claim, caseRecord, deal, entry, modifiedAt) {
       },
       correlationId: `inbox:${claim.id}`, idempotencyKey: idemKey,
     });
-    outcome = { result: 'applied', stage: entry.key, notice };
+    outcome = { result: 'applied', stage: entry.key };
     return undefined;
   });
-
-  // After commit only: a best-effort push for the notification written above. A failure here changes nothing.
-  if (outcome && outcome.notice) {
-    try {
-      const user = await ctx.prisma.user.findUnique({ where: { id: outcome.notice.userId }, select: { pushToken: true } });
-      await ctx.push(user && user.pushToken, { title: outcome.notice.title, body: outcome.notice.body });
-    } catch (err) {
-      ctx.log.warn(`[deal-inbox] event ${claim.id}: push not sent (${err && err.name ? err.name : 'error'}).`);
-    }
-  }
   return outcome;
 }
 

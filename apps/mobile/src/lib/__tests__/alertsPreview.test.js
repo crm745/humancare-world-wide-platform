@@ -1,6 +1,6 @@
 /* global describe, test, expect, __dirname */
-// The Alerts (Notifications) screen preview: six fictional alerts, grouped Today / Yesterday, with local read state only,
-// behind a development-only switch; the API-based behaviour is untouched when the switch is off.
+// The six fictional alerts (lib/alertsPreview.js) are kept as data with their own tests, but the Notifications screen no longer
+// uses them: it always loads the real notifications. The screen's wiring is covered here and in notificationsScreen.test.js.
 const fs = require('fs');
 const path = require('path');
 const { ALERTS_PREVIEW_ITEMS: ITEMS, groupAlerts, markAlertRead, markAllAlertsRead, unreadAlertCount } = require('../alertsPreview');
@@ -49,56 +49,44 @@ describe('the six fictional alerts', () => {
 });
 
 describe('the screen', () => {
-  test('the preview switch is development-only, and false when __DEV__ is false (a production build)', () => {
-    expect(screen).toContain('const ALERTS_PREVIEW = __DEV__ && true;');
-    const evaluate = (dev) => new Function('__DEV__', 'return __DEV__ && true;')(dev);
-    expect(evaluate(true)).toBe(true);
-    expect(evaluate(false)).toBe(false);
+  test('the development preview is gone from the screen: it always loads the real notifications', () => {
+    expect(screen).not.toContain('ALERTS_PREVIEW');
+    expect(screen).not.toContain('alertsPreview');
+    expect(screen).not.toContain('ALERTS_PREVIEW_ITEMS');
+    expect(screen).not.toContain('__DEV__');
   });
-  test('preview mode makes no notification API call and writes nothing', () => {
-    // the only apiGet is inside the resource fetcher, which useResource does not run in preview mode (enabled: false)...
-    expect(screen.match(/apiGet\(/g)).toHaveLength(1);
-    expect(screen).toContain('enabled: !ALERTS_PREVIEW,');
-    // ...and there is no write at all: the "Mark read" button is gone, so nothing calls apiPost
-    expect(screen).not.toContain('apiPost');
-    expect(screen).not.toContain('markAllRead');
-    // the preview rows read and clear local state only
-    expect(screen).toContain('onRead={(id) => setPreview((rows) => markAlertRead(rows, id))}');
-  });
-  test('there is no "Mark read" button on the notifications page, in either mode', () => {
-    expect(screen).not.toContain('btn_mark_read');
-    expect(screen).not.toContain('Mark read');
-    expect(screen).not.toContain('/notifications/read-all');
-    expect(screen).toContain("<TopBar title={t('notifications_title')} />");
-    expect(screen).not.toMatch(/<TopBar[^>]*right=/);
-  });
-  test('the existing API-based behaviour is unchanged when the preview is off', () => {
+  test('the real list is loaded through the API client, and nothing is shown as done before the server says so', () => {
     expect(screen).toContain("apiGet('/notifications')");
+    expect(screen).toContain("from '../lib/notificationsApi'");
+    expect(screen).toContain("{ notifications }) => notifications");
+  });
+  test('the existing API-based behaviour is unchanged', () => {
     expect(screen).toContain('No notifications yet.');
     expect(screen).toContain("{loading && gate.visible && <RowsSkeleton label={t('sk_loading_notifications')} count={5} lines={2} />}");
     expect(screen).toContain('{error && !data && <LoadFailure onRetry={reload} />}');
     expect(screen).toContain('${read ? \'opacity-55\' : \'\'}');
     expect(screen).toContain('timeAgo(n.createdAt)');
-    expect(screen).toContain("title={t('notifications_title')}");
+    expect(screen).toContain("<TopBar title={t('notifications_title')} />");
     expect(screen).toContain("<Button title={t('btn_return_home')} onPress={goBack} />");
-  });
-  test('the skeleton shows only when the API is used', () => {
-    expect(screen).toContain('useSkeletonGate(loading && !ALERTS_PREVIEW)');
+    expect(screen).toContain('useSkeletonGate(loading)');
   });
   test('it is still the one existing screen, with the shared Screen, TopBar, Body and Card', () => {
     expect(screen).toContain("import { Body, Screen, TopBar } from '../components/layout'");
     expect(screen).toContain("import { Button, Card, Spacer, Text } from '../components/ui'");
     expect(fs.existsSync(path.join(__dirname, '../../app/alerts.js'))).toBe(false);
   });
-  test('official brand blue, the approved icons, unread dot and a separator between rows', () => {
+  test('official brand blue, an unread dot and the approved icons for every kind', () => {
     expect(screen).toContain("from '../lib/tracking/palette'");
     expect(screen).toContain('backgroundColor: P.brand'); // the unread dot
-    for (const icon of ['Plane', 'FileText', 'MessageSquare', 'Hospital', 'FileWarning', 'CircleCheck']) expect(screen).toContain(icon);
-    expect(screen).toContain("i > 0 ? 'border-t border-divider' : ''");
+    for (const kind of ['stage_update', 'quotation_ready', 'document', 'system', 'security_password_changed', 'security_new_login', 'payment_received', 'payment_failed', 'payment_refunded']) {
+      expect(screen).toMatch(new RegExp('\\b' + kind + ': \\{ bg:'));
+    }
+    expect(screen).toContain('KIND[n.kind] || KIND.system'); // an unknown kind still falls back
   });
-  test('the Home bell\'s real unread count is not touched', () => {
+  test('the Home bell\'s real unread count is not touched by the preview any more', () => {
     expect(read('../../components/home/HomeHeader.js')).not.toMatch(/alertsPreview|ALERTS_PREVIEW/);
     expect(read('../../app/home.js')).not.toMatch(/alertsPreview|ALERTS_PREVIEW/);
+    expect(read('../../app/home.js')).toContain("apiGet('/notifications?unreadOnly=true')");
   });
 });
 

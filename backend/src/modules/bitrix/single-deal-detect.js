@@ -15,7 +15,7 @@
 //     and can call nothing else (any other Deal id answers "out_of_scope"), so the stage that was verified is the stage that is applied.
 //   * the inbox processor gets a store that offers only the 'received' rows of THIS Deal, will not claim any other row, and performs no lease recovery: every other
 //     inbox row, outbox event and deal link is neither claimed, retried, failed nor recovered. Before and after digests of all of them must be identical.
-//   * push notifications are suppressed. Quotation synchronization must be ON (it is what queues the quotation event); nothing is sent to Bitrix24 (one crm.deal.get).
+//   * no push delivery is queued (the inbox gets suppressedEnqueuePush, an explicit no-op, whatever the environment says; the in-app notification is still written). Quotation synchronization must be ON (it is what queues the quotation event); nothing is sent to Bitrix24 (one crm.deal.get).
 // Dry run (the default) performs the one read-only Bitrix lookup and database reads and writes NOTHING. Nothing here starts a job runner or a timer.
 const crypto = require('crypto');
 const { PRIVATE_CHARTER_KEY } = require('../../common/constants/request.constants');
@@ -25,6 +25,7 @@ const { quotationFieldsForProfile } = require('./quotation-outbox');
 const { linkProfileProblem, dealProblem, lookupProfileStage } = require('./bitrix-profile-runtime');
 const { assertDealEligible } = require('./deal-outbox');
 const { developmentDatabaseProblem, confirmDatabase } = require('../../common/safety/single-stage-runner');
+const { suppressedEnqueuePush } = require('../notifications/push-delivery-enqueue');
 
 const SOURCE = 'bitrix24';
 // The ONLY stages the operator may confirm with --expect-stage: "Quoted" (UC_R55CKV), "Confirmed" (UC_9E9NRI), "Activate" (UC_HS6O2F) and "Case Completed" (WON). Anything else is refused.
@@ -188,7 +189,7 @@ async function runSingleDealDetect(options, deps) {
 
   const before = await snapshotOthers(prisma, target);
   const reconciled = await reconcile({ prisma, api: pinned, env, log, scope: { dealId: target.dealId, ignoreRecheck: true } });
-  const processed = await runInbox({ prisma, api: pinned, env, log, store: scopedStore(baseStore, target.dealId), push: async () => undefined });
+  const processed = await runInbox({ prisma, api: pinned, env, log, store: scopedStore(baseStore, target.dealId), enqueuePush: suppressedEnqueuePush });
   const after = await snapshotOthers(prisma, target);
   const othersUnchanged = before.digest === after.digest && before.inbox === after.inbox && before.outbox === after.outbox && before.links === after.links;
   const quotationEvents = await prisma.integrationOutbox.count({ where: { caseId: target.caseId, eventType: 'bitrix.quotation.sync', status: 'pending' } });

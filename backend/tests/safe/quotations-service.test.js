@@ -1,18 +1,23 @@
 /* global describe, test, expect, jest, beforeEach, afterEach */
 // Operations quotation management, rule by rule. In-memory world (fake Prisma whose transaction serialises callers like the Case row lock and rolls
-// back on a throw), REAL stored files in a temp folder, a fake push. No database, no network, no Bitrix.
+// back on a throw), REAL stored files in a temp folder, fake push-device and delivery tables. No database, no network, no Bitrix, no Expo.
 jest.mock('../../src/db/prisma', () => ({ prisma: {} }));
 
 const kit = require('./quotation-test-kit');
 const svc = require('../../src/modules/quotations/quotations.service');
 
 const { pdf, sha } = kit;
-let rig; let push; let seq;
+let rig; let seq;
 
-beforeEach(() => { rig = kit.makeRig(); push = jest.fn(async () => undefined); seq = 0; });
+beforeEach(() => { rig = kit.makeRig(); seq = 0; });
 afterEach(() => rig.cleanup());
 
-const deps = (extra = {}) => ({ prisma: rig.prisma, storage: rig.storage, now: () => new Date(rig.world.clock), push, log: rig.log, ...extra });
+// A run that may queue push deliveries (a test run, with NODE_ENV=test, deliberately may not: see the "test and synthetic runs" tests below).
+const LIVE_ENV = { NODE_ENV: 'development' };
+const deps = (extra = {}) => ({ prisma: rig.prisma, storage: rig.storage, now: () => new Date(rig.world.clock), env: LIVE_ENV, log: rig.log, ...extra });
+// An active push device of patient 55, registered an hour before the clock (so before any notification this test creates).
+let deviceSeq = 0;
+const addDevice = (over = {}) => { deviceSeq += 1; const d = { id: 100 + deviceSeq, ownerType: 'patient', ownerId: 55, status: 'active', expoPushToken: `ExponentPushToken[device${deviceSeq}secretsecretsecret]`, lastRegisteredAt: new Date(rig.world.clock - 3600 * 1000), ...over }; rig.world.devices.push(d); return d; };
 const ADMIN = { adminId: 7, adminRole: 'admin' };
 const SUPER = { adminId: 8, adminRole: 'superadmin' };
 const rows = () => rig.world.quotations;
@@ -64,7 +69,7 @@ describe('confirm', () => {
       reasonCode: 'admin_confirmed', beforeData: { status: 'draft' }, idempotencyKey: `quotation.confirmed:${q.id}:r3`,
     });
     expect(rig.world.notifications).toEqual([]);
-    expect(push).not.toHaveBeenCalled();
+    expect(rig.world.deliveries).toEqual([]);
     for (const model of ['invoice', 'payment']) expect(rig.prisma[model]).toBeUndefined();
   });
 
@@ -159,16 +164,45 @@ describe('confirm', () => {
 describe('publish', () => {
   test('a confirmed version is published: publisher and time recorded, it becomes the live version, the patient is notified exactly once', async () => {
     const q = await confirmed();
+    const device = addDevice();
     const result = await publishCall(q);
     expect(result.alreadyPublished).toBe(false);
     expect(row(q.id)).toMatchObject({ status: 'published', publishedByAdminId: 7, workingSlot: null, liveSlot: 1, revision: 4, validUntil: null });
     expect(+row(q.id).publishedAt).toBe(rig.world.clock);
     expect(actions()).toEqual(['quotation.published']);
     expect(rig.world.audit[0]).toMatchObject({ actorType: 'admin', actorId: '7', source: 'admin_portal', reasonCode: 'admin_published', beforeData: { status: 'confirmed' }, idempotencyKey: `quotation.published:${q.id}:r3` });
-    expect(rig.world.notifications).toEqual([{ id: 1, readAt: null, recipientType: 'patient', recipientId: 55, kind: 'quotation_ready', title: 'CASE-4037 quotation', body: svc.NOTICE_BODY }]);
+    // Created through the central notification core: catalogue title, NOTICE_BODY, the patient's service request / case / quotation, a stable key.
+    expect(rig.world.notifications).toHaveLength(1);
+    expect(rig.world.notifications[0]).toMatchObject({
+      recipientType: 'patient', recipientId: 55, kind: 'quotation_ready', title: 'Your quotation is ready', body: svc.NOTICE_BODY, isMandatory: false,
+      caseId: 3037, serviceRequestId: 4672, quotationId: q.id, idempotencyKey: `quotation_ready:patient:55:q${q.id}`,
+      data: { screen: 'quotation', entityType: 'quotation', entityId: q.id },
+    });
     expect(svc.NOTICE_BODY).not.toMatch(/\d|INR|amount/i); // fixed text: never an amount or anything from Bitrix
-    expect(push).toHaveBeenCalledTimes(1);
-    expect(push).toHaveBeenCalledWith('ExponentPushToken[test]', { title: 'CASE-4037 quotation', body: svc.NOTICE_BODY });
+    expect(JSON.stringify(rig.world.notifications)).not.toContain('CASE-4037'); // no reference number in the notification any more
+    // ... and ONE push delivery for the patient's active device, queued in the same transaction (the worker sends it later, from the stored notification).
+    expect(rig.world.deliveries).toEqual([expect.objectContaining({
+      notificationId: rig.world.notifications[0].id, recipientType: 'patient', recipientId: 55, channel: 'push', provider: 'expo', deviceId: device.id, destinationKey: `device:${device.id}`, status: 'pending',
+    })]);
+  });
+
+  test('the notification is created inside the publication transaction: a rejected core call (an inconsistent reference) rolls the publication back', async () => {
+    const q = await confirmed();
+    rig.prisma.serviceRequest.findUnique.mockResolvedValueOnce(null); // the core cannot verify the patient's service request
+    await expect(publishCall(q)).rejects.toMatchObject({ code: 'invalid_reference', statusCode: 422 });
+    expect(row(q.id)).toMatchObject({ status: 'confirmed', publishedAt: null, liveSlot: null, revision: 3 });
+    expect(rig.world.audit).toEqual([]);
+    expect(rig.world.notifications).toEqual([]);
+    expect(rig.world.deliveries).toEqual([]);
+  });
+
+  test('no deliveries are queued when the notification already existed (created: false); the publication itself still succeeds', async () => {
+    const q = await confirmed();
+    addDevice();
+    rig.world.notifications.push({ id: 1, recipientType: 'patient', recipientId: 55, kind: 'quotation_ready', caseId: 3037, serviceRequestId: 4672, quotationId: q.id, idempotencyKey: `quotation_ready:patient:55:q${q.id}`, deletedAt: new Date() });
+    await expect(publishCall(q)).resolves.toMatchObject({ alreadyPublished: false });
+    expect(rig.world.notifications).toHaveLength(1); // the soft-deleted one still blocks a second
+    expect(rig.world.deliveries).toEqual([]);
   });
 
   test('an unconfirmed version cannot be published, and nothing is notified', async () => {
@@ -192,38 +226,56 @@ describe('publish', () => {
     expect(rig.world.notifications).toEqual([]);
   });
 
-  test('a repeated publication is a no-op: one audit row, ONE notification, one push', async () => {
+  test('a repeated publication is a no-op: one audit row, ONE notification, one delivery per device', async () => {
     const q = await confirmed();
+    addDevice();
     await publishCall(q);
     const again = await svc.publishQuotation({ quotationId: q.id, revision: 3, ...SUPER }, deps());
     expect(again.alreadyPublished).toBe(true);
     expect(row(q.id)).toMatchObject({ status: 'published', publishedByAdminId: 7, revision: 4 });
     expect(rig.world.notifications).toHaveLength(1);
-    expect(push).toHaveBeenCalledTimes(1);
+    expect(rig.world.deliveries).toHaveLength(1);
     expect(actions()).toEqual(['quotation.published']);
   });
 
   test('two publications at the same time give ONE notification (the compare-and-set has a single winner)', async () => {
     const q = await confirmed();
+    addDevice();
     const results = await Promise.all([publishCall(q), svc.publishQuotation({ quotationId: q.id, revision: 3, ...SUPER }, deps())]);
     expect(results.map((r) => r.alreadyPublished).sort()).toEqual([false, true]);
     expect(rig.world.notifications).toHaveLength(1);
     expect(rig.world.audit.filter((a) => a.action === 'quotation.published')).toHaveLength(1);
-    expect(push).toHaveBeenCalledTimes(1);
+    expect(rig.world.deliveries).toHaveLength(1);
   });
 
-  test('a notification that cannot be written rolls the whole publication back; a push that fails never fails the publication', async () => {
+  test('a notification that cannot be written rolls the whole publication back, and a retry then succeeds', async () => {
     const q = await confirmed();
+    addDevice();
     rig.prisma.notification.create.mockRejectedValueOnce(new Error('database down'));
     await expect(publishCall(q)).rejects.toThrow('database down');
     expect(row(q.id)).toMatchObject({ status: 'confirmed', publishedAt: null, liveSlot: null, revision: 3 });
     expect(rig.world.audit).toEqual([]);
     expect(rig.world.notifications).toEqual([]);
+    expect(rig.world.deliveries).toEqual([]);
 
-    push.mockRejectedValueOnce(new Error('expo down'));
     await expect(publishCall(q)).resolves.toMatchObject({ alreadyPublished: false });
     expect(rig.world.notifications).toHaveLength(1);
-    expect(rig.log.warn).toHaveBeenCalled();
+    expect(rig.world.deliveries).toHaveLength(1);
+  });
+
+  test('a delivery that cannot be queued rolls back the publication AND the notification (one transaction); a retry then succeeds with one of each', async () => {
+    const q = await confirmed();
+    addDevice();
+    rig.prisma.notificationDelivery.create.mockRejectedValueOnce(Object.assign(new Error('connection lost'), { code: 'P1001' }));
+    await expect(publishCall(q)).rejects.toThrow('connection lost');
+    expect(row(q.id)).toMatchObject({ status: 'confirmed', publishedAt: null, liveSlot: null, revision: 3 });
+    expect(rig.world.audit).toEqual([]);
+    expect(rig.world.notifications).toEqual([]); // the notification written just before it is gone too
+    expect(rig.world.deliveries).toEqual([]);
+
+    await expect(publishCall(q)).resolves.toMatchObject({ alreadyPublished: false });
+    expect(rig.world.notifications).toHaveLength(1);
+    expect(rig.world.deliveries).toHaveLength(1);
   });
 
   test('publishing re-checks everything: scan, money, file and Case', async () => {
@@ -472,5 +524,123 @@ describe('what this module must never do', () => {
     expect(source).not.toMatch(/bitrix-deal\.api|crm\.|createDeal|updateDealFiles|fetch\(/);
     expect(source).not.toMatch(/\.(invoice|payment)\b/);
     expect(source).not.toMatch(/aws|S3Client/i);
+  });
+});
+
+
+// ---- Phase 3: the quotation sender queues push deliveries instead of pushing ----------------------------------------------------------------
+describe('push deliveries of the quotation notification', () => {
+  const publishNow = async () => { const q = await confirmed(); return { q, result: await publishCall(q) }; };
+
+  test('one delivery per ACTIVE device of the patient; inactive devices and other patients\' devices get none', async () => {
+    const a = addDevice();
+    const b = addDevice();
+    const c = addDevice();
+    addDevice({ status: 'inactive' });
+    addDevice({ ownerId: 56 });
+    addDevice({ ownerType: 'corporate_user' });
+    await publishNow();
+    expect(rig.world.notifications).toHaveLength(1);
+    expect(rig.world.deliveries.map((d) => d.deviceId)).toEqual([a.id, b.id, c.id]);
+    expect(new Set(rig.world.deliveries.map((d) => d.destinationKey)).size).toBe(3);
+  });
+
+  test('a patient with no device still gets the in-app notification and no delivery', async () => {
+    await publishNow();
+    expect(rig.world.notifications).toHaveLength(1);
+    expect(rig.world.deliveries).toEqual([]);
+  });
+
+  test('pushEnabled=false: the notification is created, no delivery is queued (quotation_ready is not mandatory)', async () => {
+    addDevice();
+    rig.world.prefs[55] = { inAppEnabled: true, pushEnabled: false };
+    await publishNow();
+    expect(rig.world.notifications[0]).toMatchObject({ kind: 'quotation_ready', isMandatory: false });
+    expect(rig.world.deliveries).toEqual([]);
+  });
+
+  test('inAppEnabled=false does not stop the push: the delivery is queued', async () => {
+    addDevice();
+    rig.world.prefs[55] = { inAppEnabled: false, pushEnabled: true };
+    await publishNow();
+    expect(rig.world.deliveries).toHaveLength(1);
+  });
+
+  test('a device registered after the notification was created gets nothing', async () => {
+    const early = addDevice();
+    addDevice({ lastRegisteredAt: new Date(rig.world.clock + 60 * 1000) });
+    await publishNow();
+    expect(rig.world.deliveries.map((d) => d.deviceId)).toEqual([early.id]);
+  });
+
+  test('the deliveries are queued through the transaction client of the publication, for the persisted notification', async () => {
+    addDevice();
+    const { enqueuePushDeliveries } = require('../../src/modules/notifications/push-delivery-enqueue');
+    const enqueuePush = jest.fn((tx, notification) => enqueuePushDeliveries(tx, notification));
+    const q = await confirmed();
+    await svc.publishQuotation({ quotationId: q.id, revision: 3, ...ADMIN }, deps({ enqueuePush }));
+    expect(enqueuePush).toHaveBeenCalledTimes(1);
+    const [tx, notification] = enqueuePush.mock.calls[0];
+    expect(tx).not.toBe(rig.prisma); // the transaction's client, not the shared one
+    expect(tx.$transaction).toBeUndefined();
+    expect(notification).toMatchObject({ id: rig.world.notifications[0].id, recipientId: 55, kind: 'quotation_ready' });
+    expect(rig.prisma.$transaction).toHaveBeenCalledTimes(1); // no second transaction was opened for the deliveries
+  });
+
+  test('a replay (the notification already exists) does not even call the enqueue helper', async () => {
+    addDevice();
+    const q = await confirmed();
+    await publishCall(q);
+    const enqueuePush = jest.fn();
+    const again = await svc.publishQuotation({ quotationId: q.id, revision: 3, ...SUPER }, deps({ enqueuePush }));
+    expect(again.alreadyPublished).toBe(true);
+    expect(enqueuePush).not.toHaveBeenCalled();
+    expect(rig.world.deliveries).toHaveLength(1);
+  });
+
+  describe('test and synthetic runs queue nothing (the in-app notification is unaffected)', () => {
+    test.each([
+      ['a test run (NODE_ENV=test)', { NODE_ENV: 'test' }],
+      ['a scoped test run', { NODE_ENV: 'development', HUMANCARE_SCOPED_RUN: 'true' }],
+      ['an integration test run', { NODE_ENV: 'development', HUMANCARE_INTEGRATION_RUN: 'true' }],
+      ['a synthetic E2E run', { NODE_ENV: 'development', SYNTHETIC_E2E_AUTO_APPROVE: 'true' }],
+    ])('%s', async (_name, env) => {
+      addDevice();
+      const enqueuePush = jest.fn();
+      const q = await confirmed();
+      await svc.publishQuotation({ quotationId: q.id, revision: 3, ...ADMIN }, deps({ env, enqueuePush }));
+      expect(rig.world.notifications).toHaveLength(1);
+      expect(enqueuePush).not.toHaveBeenCalled();
+      expect(rig.world.deliveries).toEqual([]);
+    });
+
+    test('by default (no env given) a jest run queues nothing', async () => {
+      addDevice();
+      const q = await confirmed();
+      await svc.publishQuotation({ quotationId: q.id, revision: 3, ...ADMIN }, { prisma: rig.prisma, storage: rig.storage, now: () => new Date(rig.world.clock), log: rig.log });
+      expect(rig.world.notifications).toHaveLength(1);
+      expect(rig.world.deliveries).toEqual([]);
+    });
+
+    test('a synthetic E2E patient identity queues nothing', async () => {
+      addDevice();
+      rig.world.request.patientName = 'ZZ-SYNTHETIC Patient';
+      await publishNow();
+      expect(rig.world.notifications).toHaveLength(1);
+      expect(rig.world.deliveries).toEqual([]);
+    });
+  });
+
+  test('the quotation sender has no direct Expo call and no User.pushToken lookup', async () => {
+    const fs = require('fs');
+    const path = require('path');
+    for (const file of ['quotations.service.js', 'quotation-auto-publish.service.js']) {
+      const code = fs.readFileSync(path.join(__dirname, '../../src/modules/quotations', file), 'utf8').replace(/\/\/.*$/gm, '');
+      expect(code).not.toMatch(/sendExpoPush|expo-push\.service|expo-push\.client|pushToken|push_token|\bfetch\b/);
+      expect(code).not.toMatch(/ctx\.push\b|deps\.push\b|\bpush:\s/);
+    }
+    addDevice();
+    await publishNow();
+    for (const [args] of rig.prisma.user.findUnique.mock.calls) expect(JSON.stringify(args)).not.toMatch(/pushToken/); // only the core's ownership check reads the user
   });
 });

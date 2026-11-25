@@ -2,7 +2,8 @@
 // WHETHER an Admin action may be taken for a person, and then calls the EXISTING confirmQuotation and publishQuotation (quotations.service.js), unchanged
 // except for their optional `automation` marker, which only changes who the audit row says acted (actor type "system", source "quotation_auto"; the
 // designated Admin's id and role are still recorded). So the clean-scan gate, the amount / currency / validation rules, the file-hash check, the Case lock,
-// the revision compare-and-set, the idempotent audit rows, the single "quotation_ready" notification and the push all come from the one existing code.
+// the revision compare-and-set, the idempotent audit rows, the single "quotation_ready" notification and the queuing of its push deliveries all come from the one existing code (publishQuotation): this
+// sweep sends and queues nothing of its own.
 //
 // A version is acted on ONLY when EVERY rule passes; anything else is left exactly as it is for a person (or the next sweep):
 //   switch      QUOTATION_AUTO_PUBLISH=true, an explicit cutoff, the designated Admin, local humancare_dev only, never production (quotation-auto-publish.config.js)
@@ -22,7 +23,7 @@ const { isQuotationSyncActive } = require('../bitrix/bitrix-config');
 const { assertDealEligible } = require('../bitrix/deal-outbox');
 const { linkProfileProblem, dealProblem } = require('../bitrix/bitrix-profile-runtime');
 const { quotationFieldsForProfile, readQuotationSignature, sameAsHead, NO_FILE } = require('../bitrix/quotation-outbox');
-const { sendExpoPush } = require('../../integrations/push/expo-push.service');
+const { enqueuePushDeliveries } = require('../notifications/push-delivery-enqueue');
 const quotations = require('./quotations.service');
 const { readSettings, REQUIRED_STAGE_ID, REQUIRED_DATABASE } = require('./quotation-auto-publish.config');
 
@@ -31,7 +32,7 @@ const CLOSED_CASE_STATUSES = new Set(['completed', 'cancelled']);
 const SAFE_TOKEN = /[^A-Za-z0-9_.,:-]/g;
 
 function buildContext(overrides = {}) {
-  return { prisma: defaultPrisma, api: bitrixDealApi, push: sendExpoPush, storage: null, env: process.env, now: () => new Date(), log: console, ...overrides };
+  return { prisma: defaultPrisma, api: bitrixDealApi, enqueuePush: enqueuePushDeliveries, storage: null, env: process.env, now: () => new Date(), log: console, ...overrides };
 }
 
 // What a log line may say about an error: its name and code. Never the message (it can quote values) or any query.
@@ -103,7 +104,9 @@ async function processOne(ctx, settings, id) {
   if (signature.fileId === NO_FILE || signature.fileId === 'invalid' || !sameAsHead(signature, q)) return done('bitrix_content_differs');
 
   const act = { adminId: settings.adminId, adminRole: 'admin', automation: true };
-  const deps = { prisma: ctx.prisma, storage: ctx.storage || undefined, now: ctx.now, push: ctx.push, log: ctx.log };
+  // The same publication path as an Admin's click, with the same injection points: how push deliveries are queued (`enqueuePush`) and the environment that
+  // decides whether a run may queue them at all (a test, scoped or synthetic run never does).
+  const deps = { prisma: ctx.prisma, storage: ctx.storage || undefined, now: ctx.now, enqueuePush: ctx.enqueuePush, env: ctx.env, log: ctx.log };
   let revision = q.revision;
   let confirmedNow = false;
   try {

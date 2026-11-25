@@ -78,4 +78,16 @@ const geoSearchLimiter = rateLimit({
   message: { error: 'Too many searches. Please wait a moment and try again.' },
 });
 
-module.exports = { loginLimiter, otpRequestLimiter, otpSendIpLimiter, patientLoginLimiter, otpVerifyLimiter, geoSearchLimiter };
+// Patient device registration (POST /notifications/devices): per signed-in account. A registration can move a device
+// between owners, so it is capped; a normal app registers a few times a day at most. Mount it AFTER requireAuth.
+const deviceRegistrationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user ? `device-reg:${req.user.id}` : ipKeyGenerator(req.ip)),
+  skip: skipInTest,
+  message: { error: 'Too many device registrations. Please try again later.' },
+});
+
+module.exports = { loginLimiter, otpRequestLimiter, otpSendIpLimiter, patientLoginLimiter, otpVerifyLimiter, geoSearchLimiter, deviceRegistrationLimiter };

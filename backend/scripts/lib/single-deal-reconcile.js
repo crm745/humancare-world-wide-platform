@@ -18,6 +18,7 @@ const crypto = require('crypto');
 const { lookupStage } = require('../../src/modules/bitrix/bitrix-deal-stages');
 const { DEAL, FIELD } = require('../../src/modules/bitrix/bitrix-deal');
 const { PRIVATE_CHARTER_KEY } = require('../../src/common/constants/request.constants');
+const { suppressedEnqueuePush } = require('../../src/modules/notifications/push-delivery-enqueue');
 
 const TARGET = Object.freeze({ dealId: '21802', caseId: 3037, caseReference: 'CASE-4037', categoryId: '38' });
 const STAGE_ID_PATTERN = /^C38:[A-Z0-9_]{1,40}$/;
@@ -122,7 +123,7 @@ const describeFacts = ({ link, caseRecord, deal, modified, stage }) => ({
 });
 
 /**
- * Dry run unless options.execute. `deps`: { prisma, api, env, log, store, push, reconcile, runInbox } (the last four default to the real ones).
+ * Dry run unless options.execute. `deps`: { prisma, api, env, log, store, reconcile, runInbox } (the last three default to the real ones). Without --no-push the inbox queues push deliveries the normal way; with it, it gets suppressedEnqueuePush and queues none.
  * Resolves { executed, facts, ... }. Throws SingleDealRefused. Nothing is written unless it returns executed: true.
  */
 async function runSingleDeal(options, deps) {
@@ -143,7 +144,7 @@ async function runSingleDeal(options, deps) {
 
   const before = await snapshotOthers(prisma);
   const reconciled = await reconcile({ prisma, api: pinned, env, log, scope: { dealId: TARGET.dealId, ignoreRecheck: true } });
-  const processed = await runInbox({ prisma, api: pinned, env, log, store: scopedStore(baseStore), ...(options.push ? {} : { push: async () => undefined }) });
+  const processed = await runInbox({ prisma, api: pinned, env, log, store: scopedStore(baseStore), ...(options.push ? {} : { enqueuePush: suppressedEnqueuePush }) });
   const after = await snapshotOthers(prisma);
   const othersUnchanged = before.digest === after.digest && before.inbox === after.inbox && before.links === after.links;
   return { executed: true, facts, reconciled, processed, othersUnchanged, others: { inbox: after.inbox, links: after.links } };

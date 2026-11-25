@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -67,6 +67,14 @@ export default function Home() {
   useEffect(() => {
     if (!isCorporate) registerForPushNotifications();
   }, [isCorporate]);
+
+  // Coming back to Home (from Notifications, from a pushed screen) re-reads the bell: reading, deleting or switching a preference
+  // there changes whether anything is unread. The first focus is the load above, so it is skipped.
+  const firstFocus = useRef(true);
+  useFocusEffect(useCallback(() => {
+    if (firstFocus.current) { firstFocus.current = false; return; }
+    if (!isCorporate) reload();
+  }, [isCorporate, reload]));
 
   // The newest request that is still being worked on (the list comes newest first).
   const current = requests.find((r) => r.status === 'submitted' || r.status === 'in_progress');

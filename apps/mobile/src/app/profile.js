@@ -8,6 +8,7 @@ import { initialsOf, useApp } from '../state/AppContext';
 import { LANGUAGES } from '../data/mock';
 import { navReplace } from '../lib/nav';
 import { clearTokens } from '../lib/session';
+import { unregisterThisDevice } from '../lib/pushNotifications';
 import { BottomNav, Screen, TopBar, useScrollToTopOnTabTap } from '../components/layout';
 import { useFabScrollPad } from '../components/sos/hooks';
 import { SectionLabel, Text } from '../components/ui';
@@ -91,7 +92,22 @@ export default function Profile() {
   // Signed-out people already have an account, so they land on their login screen.
   // The destination is shown first, then the tokens are cleared: clearing them while this screen is still open
   // would let the auth gate send the person to Login before Getting Started opens.
-  const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/login'); await clearTokens(); };
+  // A patient's phone is removed from their notifications FIRST (that call needs the tokens, so it comes before clearTokens). It is
+  // bounded (a few seconds) and never blocks signing out: if the server did not confirm it, the person is signed out anyway and told.
+  // Corporate sign-out is unchanged.
+  const signingOut = useRef(false);
+  const signOut = async () => {
+    if (signingOut.current) return;
+    signingOut.current = true;
+    try {
+      const push = isCorporate ? { ok: true } : await unregisterThisDevice();
+      navReplace(isCorporate ? '/corporate-login' : '/login');
+      await clearTokens();
+      if (!push.ok) toast(t('prof_logout_push_failed'));
+    } finally {
+      signingOut.current = false;
+    }
+  };
   const soon = () => toast(t('prof_soon'));
 
   // Pull-to-refresh: the account details come from the server (GET /auth/me). The profile stays on screen while it loads (no skeleton: it

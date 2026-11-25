@@ -1,9 +1,9 @@
 /* global describe, test, expect, jest, beforeEach, afterEach */
 // Quotation auto-confirmation and auto-publication, rule by rule. In-memory world (the quotation test kit: a fake Prisma whose transaction serialises callers
-// like the Case row lock and rolls back on a throw), REAL stored files in a temp folder, a fake read-only Bitrix, a fake push. No database, no network, no
+// like the Case row lock and rolls back on a throw), REAL stored files in a temp folder, a fake read-only Bitrix, fake push-device and delivery tables. No database, no network, no
 // worker, no live Bitrix.
 jest.mock('../../src/db/prisma', () => ({ prisma: {} }));
-jest.mock('../../src/integrations/push/expo-push.service', () => ({ sendExpoPush: jest.fn() }));
+jest.mock('../../src/integrations/push/expo-push.service', () => ({ sendExpoPush: jest.fn() })); // the legacy sender: must never be reached from here
 
 const fs = require('fs');
 const path = require('path');
@@ -20,13 +20,13 @@ const ENV = {
   BITRIX_DEAL_PROFILE: 'actual', BITRIX_SYNC_ENABLED: 'true', BITRIX_PRIVATE_CHARTER_DEAL_ENABLED: 'true', PRIVATE_CHARTER_REVIEW_WORKFLOW: 'true', BITRIX_QUOTATION_SYNC_ENABLED: 'true',
   DATABASE_URL: 'mysql://u:p@localhost:3306/humancare_dev', NODE_ENV: 'development',
 };
-let rig; let push; let seq; let dealState; let api; let databaseName;
+let rig; let seq; let dealState; let api; let databaseName;
 
 const read = (rel) => fs.readFileSync(path.join(__dirname, '../..', rel), 'utf8');
 
 beforeEach(() => {
   rig = kit.makeRig();
-  push = jest.fn(async () => undefined);
+  rig.world.devices.push({ id: 101, ownerType: 'patient', ownerId: 55, status: 'active', expoPushToken: 'ExponentPushToken[autopublishsecretsecret]', lastRegisteredAt: new Date(rig.world.clock - 3600 * 1000) });
   seq = 0;
   databaseName = 'humancare_dev';
   rig.world.link = { ...rig.world.link, profile: 'actual' };
@@ -53,7 +53,7 @@ function setDeal(over = {}) {
   };
 }
 const ago = (seconds) => new Date(rig.world.clock - seconds * 1000);
-const ctx = (extra = {}) => ({ prisma: rig.prisma, api, storage: rig.storage, env: ENV, now: () => new Date(rig.world.clock), push, log: rig.log, ...extra });
+const ctx = (extra = {}) => ({ prisma: rig.prisma, api, storage: rig.storage, env: ENV, now: () => new Date(rig.world.clock), log: rig.log, ...extra });
 const sweep = (extra = {}) => auto.sweepQuotationAutoPublish(ctx(extra));
 const row = (id) => rig.world.quotations.find((q) => q.id === id);
 const audits = () => rig.world.audit.filter((a) => a.entityType === 'case_quotation');
@@ -88,7 +88,9 @@ describe('the happy path', () => {
     expect(row(q.id)).toMatchObject({ status: 'published', liveSlot: 1, workingSlot: null, confirmedByAdminId: 2, publishedByAdminId: 2 });
     expect(rig.world.notifications).toHaveLength(1);
     expect(rig.world.notifications[0]).toMatchObject({ recipientType: 'patient', recipientId: 55, kind: 'quotation_ready', body: quotations.NOTICE_BODY });
-    expect(push).toHaveBeenCalledTimes(1);
+    // the SAME migrated publication path: one push delivery queued for the patient's device, no direct push
+    expect(rig.world.deliveries).toEqual([expect.objectContaining({ notificationId: rig.world.notifications[0].id, recipientId: 55, channel: 'push', deviceId: 101, destinationKey: 'device:101' })]);
+    expect(require('../../src/integrations/push/expo-push.service').sendExpoPush).not.toHaveBeenCalled();
     const rows = audits();
     expect(rows.map((a) => a.action)).toEqual(['quotation.confirmed', 'quotation.published']);
     for (const a of rows) expect(a).toMatchObject({ actorType: 'system', source: 'quotation_auto', actorId: '2', actorRole: 'admin' });
@@ -301,7 +303,7 @@ describe('races, revisions and idempotency', () => {
     expect(JSON.stringify(rig.world.audit)).toBe(snapshot);
     expect((await auto.processOne(ctx(), config.readSettings(ENV).settings, q.id)).outcome).toBe('not_working_version');
     expect(rig.world.notifications).toHaveLength(1);
-    expect(push).toHaveBeenCalledTimes(1);
+    expect(rig.world.deliveries).toHaveLength(1);
   });
   test('two processes at once: exactly one notification, one audit row per action', async () => {
     const q = await seed();
@@ -369,7 +371,7 @@ describe('configuration: everything OFF by default, fail closed, development dat
 });
 
 describe('manual confirmation and publication are unchanged', () => {
-  const deps = () => ({ prisma: rig.prisma, storage: rig.storage, now: () => new Date(rig.world.clock), push, log: rig.log });
+  const deps = () => ({ prisma: rig.prisma, storage: rig.storage, now: () => new Date(rig.world.clock), env: ENV, log: rig.log });
   test('an Admin action is still recorded as that Admin from the Admin Portal', async () => {
     const q = await seed({ scannedAt: ago(5) });
     const confirmed = await quotations.confirmQuotation({ quotationId: q.id, revision: q.revision, adminId: 7, adminRole: 'admin' }, deps());

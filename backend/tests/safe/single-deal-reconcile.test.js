@@ -141,12 +141,15 @@ describe('what is applied, and how narrowly', () => {
     expect(base.recoverExpiredLeases).not.toHaveBeenCalled();
     expect(store.claim).toBe(base.claim);
   });
-  test('--no-push replaces only the push; the notification row is the processor\'s, unchanged', async () => {
+  test('--no-push replaces only the push deliveries; the notification row is the processor\'s, unchanged', async () => {
+    const { suppressedEnqueuePush } = require('../../src/modules/notifications/push-delivery-enqueue');
     await lib.runSingleDeal({ execute: true, expectStage: 'C38:EXECUTING', push: false }, deps());
-    const pushed = await runInbox.mock.calls[0][0].push('token', { title: 't', body: 'b' });
-    expect(pushed).toBeUndefined();
+    expect(runInbox.mock.calls[0][0].enqueuePush).toBe(suppressedEnqueuePush); // an explicit no-op: no delivery row is queued
+    expect(await runInbox.mock.calls[0][0].enqueuePush({}, { id: 4 })).toMatchObject({ enqueued: 0, skipped: 'suppressed' });
+    expect('push' in runInbox.mock.calls[0][0]).toBe(false); // the legacy option no longer exists
     await lib.runSingleDeal({ execute: true, expectStage: 'C38:EXECUTING', push: true }, deps());
-    expect('push' in runInbox.mock.calls[1][0]).toBe(false); // default: the processor's own best-effort push
+    expect('enqueuePush' in runInbox.mock.calls[1][0]).toBe(false); // default: the processor's own queuing of push deliveries
+    expect('push' in runInbox.mock.calls[1][0]).toBe(false);
   });
   test('it reports when something else changed (other inbox rows or links): othersUnchanged false', async () => {
     runInbox = jest.fn(async () => { othersDigest = [{ id: 5, status: 'processing', attempts: 1 }]; return { claimed: 1 }; });

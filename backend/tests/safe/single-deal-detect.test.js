@@ -295,7 +295,11 @@ describe('--once: one pinned Bitrix read and a scope that reaches only this Deal
     expect(reconcile).toHaveBeenCalledTimes(1);
     expect(runInbox).toHaveBeenCalledTimes(1);
     expect(reconcile.mock.calls[0][0].scope).toEqual({ dealId: '5001', ignoreRecheck: true });
-    expect(await runInbox.mock.calls[0][0].push()).toBeUndefined();
+    // push deliveries: the inbox gets the explicit no-op enqueue (and no legacy "push" option), so the detection queues no delivery row
+    const given = runInbox.mock.calls[0][0];
+    expect(given.enqueuePush).toBe(require('../../src/modules/notifications/push-delivery-enqueue').suppressedEnqueuePush);
+    expect(given).not.toHaveProperty('push');
+    expect(await given.enqueuePush({}, { id: 9 })).toMatchObject({ enqueued: 0, alreadyQueued: 0, skipped: 'suppressed' });
     expect(out()).toContain('"othersUnchanged":true');
     expect(out()).toContain('"quotationEventsPending":1');
   });

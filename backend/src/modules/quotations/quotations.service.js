@@ -24,7 +24,9 @@ const { appendAuditLog } = require('../../common/audit/business-audit');
 const { assertDealEligible } = require('../bitrix/deal-outbox');
 const { createQuotationStorage, sha256Of } = require('../bitrix/quotation-storage');
 const { WORKING_STATUSES } = require('../bitrix/quotation-versioning');
-const { sendExpoPush } = require('../../integrations/push/expo-push.service');
+const { createPatientNotification } = require('../notifications/notification-core');
+const { enqueuePushDeliveries } = require('../notifications/push-delivery-enqueue');
+const { suppressionReason, SYNTHETIC_IDENTITY_PREFIX } = require('../notifications/push-delivery.config');
 
 const REASON_MIN = 3;
 const REASON_MAX = 1000;
@@ -44,8 +46,23 @@ function httpError(statusCode, message, publicCode, extra) {
 }
 const conflict = (code, message, extra) => httpError(409, message, code, extra);
 
+// `enqueuePush(tx, notification)` queues the patient's push deliveries inside the publication's own transaction (notifications/push-delivery-enqueue.js). This
+// service sends nothing and reads no push token: the push delivery worker (off unless PUSH_DELIVERY_ENABLED=true) does the sending, later. `env` is what
+// decides whether this run may queue deliveries at all (see pushMayBeQueued).
 function buildContext(overrides = {}) {
-  return { prisma: defaultPrisma, storage: null, now: () => new Date(), push: sendExpoPush, log: console, ...overrides };
+  const ctx = { prisma: defaultPrisma, storage: null, now: () => new Date(), enqueuePush: enqueuePushDeliveries, env: process.env, log: console, ...overrides };
+  // An injection point passed as undefined (a caller that has nothing to say) means "the default", never "nothing": the real queuing and the real environment.
+  if (typeof ctx.enqueuePush !== 'function') ctx.enqueuePush = enqueuePushDeliveries;
+  if (!ctx.env || typeof ctx.env !== 'object') ctx.env = process.env;
+  return ctx;
+}
+
+// A test, scoped, integration or synthetic run, or a synthetic E2E patient identity, never gets push deliveries queued (the in-app notification is
+// unaffected). The same rules the delivery worker applies when it sends (push-delivery.config.js), so a run that must not send does not even queue.
+function pushMayBeQueued(ctx, serviceRequest) {
+  if (suppressionReason(ctx.env)) return false;
+  const name = serviceRequest && typeof serviceRequest.patientName === 'string' ? serviceRequest.patientName : '';
+  return !name.startsWith(SYNTHETIC_IDENTITY_PREFIX);
 }
 const storageOf = (ctx) => ctx.storage || (ctx.storage = createQuotationStorage());
 
@@ -254,7 +271,6 @@ async function publishQuotation({ quotationId, adminId, adminRole, revision, val
     until = new Date(validUntil);
     if (Number.isNaN(until.getTime()) || until <= ctx.now()) throw httpError(400, 'The validity date must be in the future.', 'valid_until_invalid');
   }
-  let notice = null;
   const result = await inTransaction(ctx, id, async ({ tx, q, caseRecord }) => {
     if (q.status === 'published') return { already: true };
     if (q.status === 'draft') throw conflict('quotation_not_confirmed', 'The quotation must be confirmed before it can be published.');
@@ -279,21 +295,23 @@ async function publishQuotation({ quotationId, adminId, adminRole, revision, val
       reasonCode: admin.automation ? 'auto_published' : 'admin_published', before: { status: 'confirmed' }, after: { status: 'published' },
     }));
     // The patient's notification: written in THIS transaction, only on the winning compare-and-set, so a repeated or concurrent publish can never add a second one.
-    const userId = caseRecord.serviceRequest.userId;
-    await tx.notification.create({ data: { recipientType: 'patient', recipientId: userId, kind: 'quotation_ready', title: `${caseRecord.referenceNumber} quotation`, body: NOTICE_BODY } });
-    notice = { userId, title: `${caseRecord.referenceNumber} quotation`, body: NOTICE_BODY };
+    // Through the central core, in this transaction (a failure rolls the publication back). Title: the catalogue's; body: NOTICE_BODY.
+    // The patient's push deliveries are queued right after it, in the SAME transaction and only for a newly created notification (created: true), so the
+    // publication, the notification and its deliveries commit or roll back together, and a replay can never queue a second set.
+    const serviceRequest = caseRecord.serviceRequest;
+    const created = await createPatientNotification({
+      recipientId: serviceRequest.userId,
+      kind: 'quotation_ready',
+      body: NOTICE_BODY,
+      caseId: caseRecord.id,
+      serviceRequestId: serviceRequest.id,
+      quotationId: q.id,
+      eventRef: `q${q.id}`,
+      data: { screen: 'quotation', entityType: 'quotation', entityId: q.id },
+    }, { tx });
+    if (created.created && pushMayBeQueued(ctx, serviceRequest)) await ctx.enqueuePush(tx, created.notification);
     return { already: false };
   });
-
-  // After commit only: a best-effort push for the notification above. It never affects the result.
-  if (notice) {
-    try {
-      const user = await ctx.prisma.user.findUnique({ where: { id: notice.userId }, select: { pushToken: true } });
-      await ctx.push(user && user.pushToken, { title: notice.title, body: notice.body });
-    } catch (err) {
-      ctx.log.warn(`[quotations] push not sent (${err && err.name ? err.name : 'error'}).`);
-    }
-  }
   return { alreadyPublished: result.already, quotation: await getQuotation({ quotationId: id }, ctx) };
 }
 
