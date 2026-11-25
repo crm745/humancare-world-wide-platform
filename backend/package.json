@@ -7,6 +7,7 @@
     "dev": "node --watch-path=src src/server.js",
     "start": "node src/server.js",
     "start:worker": "node src/worker.js",
+    "start:worker:push": "node src/push-delivery-worker.js",
     "start:worker:synthetic-e2e": "node src/synthetic-e2e-worker.js",
     "e2e:synthetic": "node scripts/synthetic-e2e-orchestrator/run.js",
     "e2e:fixture-pdf": "node scripts/e2e-fixture-pdf.js",

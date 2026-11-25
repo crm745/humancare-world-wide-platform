@@ -209,6 +209,12 @@ export function apiPatch(path, body) {
   return apiFetch(path, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
+// A delete the server answers with 204 and no body: apiFetch reads that as {} (the same path as every other call), and an error
+// status throws exactly as for the other verbs.
+export function apiDelete(path) {
+  return apiFetch(path, { method: 'DELETE' });
+}
+
 // File uploads go through FormData, which needs its own multipart boundary in the
 // Content-Type header — fetch sets that automatically, but only if we don't also set
 // 'Content-Type': 'application/json' like apiFetch does for everything else.

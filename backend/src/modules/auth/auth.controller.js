@@ -21,6 +21,7 @@ const {
   SocialNoAccountError,
 } = require("./auth.service");
 const { EVENTS, recordSecurityEvent } = require("./security-events");
+const { revokePatientDevices } = require("../notifications/notification-devices.service");
 const { PASSWORD_CHANGE_REQUIRED } = require("../../common/constants/auth.constants");
 const { isFirebasePhoneEnabled, verifyPhoneProof } = require("../../integrations/firebase/firebase");
 const { readNameFields } = require("../../common/utils/person-name");
@@ -458,14 +459,22 @@ async function setPassword(req, res) {
   const passwordError = passwordProblem(password);
   if (passwordError) return res.status(400).json({ error: passwordError });
 
-  const updated = await prisma.user.updateMany({
-    where: { id: step.sub, isVerified: true, tokenVersion: step.tv },
-    data: {
-      passwordHash: await hashPassword(password),
-      tokenVersion: { increment: 1 },
-      failedLoginCount: 0,
-      lockedUntil: null,
-    },
+  const passwordHash = await hashPassword(password);
+  // ONE transaction: the new password and the sign-out of every session (tokenVersion) AND the end of this patient's push devices (the phone must not keep
+  // receiving pushes after the account's sessions were revoked). If the device step fails the password is NOT changed (the ticket stays valid for a retry):
+  // a revoked session with a live push device is the worse outcome. A ticket that no longer matches (count 0) changes and revokes nothing.
+  const updated = await prisma.$transaction(async (tx) => {
+    const result = await tx.user.updateMany({
+      where: { id: step.sub, isVerified: true, tokenVersion: step.tv },
+      data: {
+        passwordHash,
+        tokenVersion: { increment: 1 },
+        failedLoginCount: 0,
+        lockedUntil: null,
+      },
+    });
+    if (result.count > 0) await revokePatientDevices(tx, step.sub);
+    return result;
   });
   if (updated.count === 0) return ticketFailure(res);
 

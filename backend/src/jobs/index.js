@@ -1,4 +1,7 @@
 // Every scheduled background job. To add one, create <name>.job.js and list it here.
+// Not listed on purpose: push-delivery.job.js and case-stage-notification-reconcile.job.js. Patient push delivery and the recovery of missed patient stage
+// notifications run in their OWN process (src/push-delivery-worker.js, `npm run start:worker:push`), which is their only scheduler, so they keep running
+// when the Bitrix settings stop this worker from starting. Do not add them here.
 const bitrixRetryJob = require('./bitrix-retry.job');
 const bitrixDealJob = require('./bitrix-deal.job');
 const bitrixDealInboxJob = require('./bitrix-deal-inbox.job');

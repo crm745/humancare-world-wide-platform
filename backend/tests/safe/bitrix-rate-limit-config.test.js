@@ -175,7 +175,9 @@ describe('one limiter and one breaker for every worker', () => {
     expect(text).toMatch(/BITRIX_RATE_LIMIT_PER_SECOND=2\b/);
     expect(text).toMatch(/BITRIX_RATE_LIMIT_BURST=10\b/);
     expect(text).toMatch(/BITRIX_MAX_CONCURRENT_REQUESTS=1\b/);
-    const assignments = text.split(/\r?\n/).filter((line) => /^[A-Z0-9_]+=/.test(line));
+    // The two push-delivery settings share the file; they are documented and checked (empty token, switch OFF) in push-delivery-monitor.test.js.
+    const PUSH_VARIABLES = ['PUSH_DELIVERY_ENABLED', 'EXPO_PUSH_ACCESS_TOKEN'];
+    const assignments = text.split(/\r?\n/).filter((line) => /^[A-Z0-9_]+=/.test(line) && !PUSH_VARIABLES.includes(line.split('=')[0]));
     expect(assignments.map((line) => line.split('=')[0]).sort()).toEqual([...NAMES].sort()); // exactly these three, nothing else
     for (const line of assignments) expect(line).toMatch(/^[A-Z0-9_]+=\d+$/); // numbers only: no secret, URL or token can be in here
   });

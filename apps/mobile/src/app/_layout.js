@@ -15,6 +15,8 @@ import { Inter_800ExtraBold } from '@expo-google-fonts/inter/800ExtraBold';
 import { AppProvider, useApp } from '../state/AppContext';
 import { Toast } from '../components/widgets';
 import { AuthGate } from '../components/AuthGate';
+import { NotificationTapHandler } from '../components/NotificationTapHandler';
+import { DeviceRegistrationHandler } from '../components/DeviceRegistrationHandler';
 import { SosFab } from '../components/sos/SosFab';
 import { RecaptchaBadgeGate } from '../components/RecaptchaBadgeGate';
 import { KeyboardRoot } from '../components/keyboard';
@@ -31,6 +33,8 @@ function Shell() {
       <SosFab />
       <RecaptchaBadgeGate />
       <AuthGate />
+      <NotificationTapHandler />
+      <DeviceRegistrationHandler />
       <Toast />
       <SystemBack />
     </View>
