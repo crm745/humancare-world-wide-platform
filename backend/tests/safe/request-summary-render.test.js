@@ -29,7 +29,7 @@ describe('a real PDF for each of the eight services', () => {
     expect(buffer.length).toBeLessThan(400000);
     expect(pagesOf(buffer)).toBeGreaterThanOrEqual(1);
     const text = await lines(all[key]);
-    for (const expected of ['HumanCare Worldwide', 'Global Medical Assistance Company', 'Request Summary', 'Request ID:', 'REQ-1042', 'Status:', 'In progress', 'Generated:', 'Submitted:', 'Patient Information', 'Service Information', 'Service:', canonical(all[key].serviceType)]) {
+    for (const expected of ['Humancare World Wide', 'Global Medical Assistance Company', 'Request Summary', 'Request ID:', 'REQ-1042', 'Status:', 'In progress', 'Generated:', 'Submitted:', 'Patient Information', 'Service Information', 'Service:', canonical(all[key].serviceType)]) {
       expect({ key, expected, found: text.includes(expected) }).toEqual({ key, expected, found: true });
     }
     expect(text.some((l) => /^\d{2} [A-Z][a-z]{2} 20\d\d, \d\d:\d\d UTC$/.test(l))).toBe(true); // the generated date
@@ -196,7 +196,7 @@ describe('authorized data only: nothing internal is inside the file', () => {
       return object[1].replace(/[^\x20-\x7e]/g, '');
     };
     expect(infoText('Title')).toContain('Request Summary REQ-1042');
-    expect(infoText('Author')).toContain('HumanCare Worldwide');
+    expect(infoText('Author')).toContain('Humancare World Wide');
     expect(infoText('Subject')).toContain('Request Summary');
     for (const name of ['Title', 'Author', 'Subject']) expect(infoText(name)).not.toContain('Ravi');
     expect(text).not.toContain('Ravi Kumar');

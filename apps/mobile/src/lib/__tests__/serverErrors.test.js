@@ -156,7 +156,7 @@ describe('the code list the app translates', () => {
     expect(localizedServerError(refusal({ code: 'file_infected' }), EN)).toBe('This file was blocked because it may contain a virus. It was not saved.');
     expect(localizedServerError(refusal({ code: 'scan_unavailable' }), EN)).toBe('We could not scan this file for viruses right now, so it was not saved. Please try again in a moment.');
     expect(localizedServerError(refusal({ code: 'app_update_required' }), EN)).toBe('This version of the app can no longer send this request. Please update the app and try again.');
-    expect(localizedServerError(refusal({ code: 'request_approved' }), EN)).toBe('This request has been approved. Please contact HumanCare to add more documents.');
+    expect(localizedServerError(refusal({ code: 'request_approved' }), EN)).toBe('This request has been approved. Please contact Humancare World Wide to add more documents.');
   });
 });
 

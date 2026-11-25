@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigation } from 'expo-router';
 import { AccessibilityInfo, FlatList, Image, Pressable, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowRight } from 'lucide-react-native';
@@ -16,6 +17,7 @@ const SLIDES = [
   { key: 'homecare', image: require('../../../assets/images/banner-homecare.jpg'), size: [1000, 667], focus: [0.85, 0.2], service: 'homecare', title: 'home_banner_3_title', body: 'home_banner_3_body', alt: 'home_banner_3_alt' },
 ];
 const ADVANCE_MS = 3500;
+const TOUCH_PAUSE_MS = 2000; // after a finger leaves the banner (or a swipe ends) it does not move on by itself for this long
 
 // The photo on the right 66% of the slide, filling it ("cover") but lined up on the part
 // that matters. React Native's Image can't do that on its own, so the size is worked out here.
@@ -47,9 +49,14 @@ function BannerPhoto({ source, size, focus, label }) {
 export function BannerCarousel({ width, tablet, onRequest }) {
   const { t } = useApp();
   const listRef = useRef(null);
+  const navigation = useNavigation(); // Home stays mounted behind the other tabs: the banner only moves while Home is in front
   const indexRef = useRef(0);
   const [index, setIndex] = useState(0);
-  const [touching, setTouching] = useState(false);
+  // A finger on the banner is kept in refs, not state: a touch must not re-render the banner or restart its timer, and the timer reads the ref at the moment it fires,
+  // so a slide never starts moving under a finger that has just landed (that would cancel the tap on "Request now").
+  const touchingRef = useRef(false);
+  const lastTouchAt = useRef(0);
+  const setTouching = useCallback((on) => { touchingRef.current = on; if (!on) lastTouchAt.current = Date.now(); }, []);
   const [reduceMotion, setReduceMotion] = useState(false);
 
   useEffect(() => {
@@ -65,10 +72,14 @@ export function BannerCarousel({ width, tablet, onRequest }) {
   }, []);
 
   useEffect(() => {
-    if (reduceMotion || touching) return undefined;
-    const timer = setInterval(() => goTo((indexRef.current + 1) % SLIDES.length), ADVANCE_MS);
+    if (reduceMotion) return undefined;
+    const timer = setInterval(() => {
+      if (!navigation.isFocused()) return; // Home is behind another tab
+      if (touchingRef.current || Date.now() - lastTouchAt.current < TOUCH_PAUSE_MS) return; // someone is touching or just touched the banner: not this time
+      goTo((indexRef.current + 1) % SLIDES.length);
+    }, ADVANCE_MS);
     return () => clearInterval(timer);
-  }, [reduceMotion, touching, goTo]);
+  }, [reduceMotion, goTo, navigation]);
 
   // "Request now" opens the list of all services on every slide (a slide's own `service`
   // is kept in the data but not used here). A second tap within a second is ignored.

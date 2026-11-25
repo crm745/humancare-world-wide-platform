@@ -269,7 +269,7 @@ describe('P1: screens with their own fetch read again once when the connection r
       'app/service/[key].js': 'useRetryOnRestore({ failed: liveFailed, retry: loadLive });',
       'components/request/CityField.js': "useRetryOnRestore({ failed: state === 'error'",
       'app/document-preview.js': "useRetryOnRestore({ failed: file.status === 'error'",
-      'app/home.js': 'useRetryOnRestore({ failed: pushFailed, retry: registerPush, enabled: !isCorporate });',
+      'app/(tabs)/home.js': 'useRetryOnRestore({ failed: pushFailed, retry: registerPush, enabled: !isCorporate });',
     };
     for (const [file, text] of Object.entries(uses)) expect({ file, ok: read(file).includes(text) }).toEqual({ file, ok: true });
   });
@@ -289,7 +289,7 @@ describe('P2: push registration is tried once more when the connection returns',
     const push = read('lib/pushNotifications.js');
     expect(push).toContain("return 'registered';");
     expect(push).toContain("return isRetryablePushFailure(err) ? 'retry' : 'skipped';");
-    expect(read('app/home.js')).toContain("setPushFailed(result === 'retry')");
+    expect(read('app/(tabs)/home.js')).toContain("setPushFailed(result === 'retry')");
   });
 });
 

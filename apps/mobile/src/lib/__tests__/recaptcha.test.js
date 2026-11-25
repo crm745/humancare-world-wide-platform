@@ -13,7 +13,7 @@ function allRoutes() {
   (function walk(dir, base) {
     for (const name of fs.readdirSync(dir)) {
       const full = path.join(dir, name);
-      if (fs.statSync(full).isDirectory()) walk(full, `${base}/${name}`);
+      if (fs.statSync(full).isDirectory()) walk(full, name.startsWith('(') ? base : `${base}/${name}`); // a (group) folder is not part of an address
       else if (name.endsWith('.js') && name !== '_layout.js') files.push(name === 'index.js' ? (base || '/') : `${base}/${name.replace(/\.js$/, '')}`);
     }
   })(path.join(__dirname, '../../app'), '');

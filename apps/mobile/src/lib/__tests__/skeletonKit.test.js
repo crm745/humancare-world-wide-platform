@@ -10,7 +10,8 @@ const { getCached, setCached, clearCache } = require('../screenCache');
 const { SKELETON, COLORS } = require('../../theme/colors');
 
 const read = (rel) => fs.readFileSync(path.join(__dirname, rel), 'utf8');
-const app = (name) => read(`../../app/${name}.js`);
+const TABS = ['home', 'all-services', 'my-requests', 'profile', 'corporate-dashboard']; // the bottom-tab screens live in app/(tabs)
+const app = (name) => read(`../../app/${TABS.includes(name) ? '(tabs)/' : ''}${name}.js`);
 const comp = (rel) => read(`../../components/${rel}`);
 const i18n = JSON.parse(read('../../data/i18n.json'));
 
@@ -190,7 +191,7 @@ describe('useResource (the one way a data screen loads)', () => {
     expect(hook).toContain('HIGHLIGHT_MS + 200');
   });
   test('the cache is written with every answer', () => {
-    expect(hook).toContain('setCached(forKey, next);');
+    expect(hook).toContain('if (!setCached(forKey, next, { epoch })) return undefined;'); // written with the session counter (lib/screenCache.js)
   });
 });
 
@@ -228,7 +229,6 @@ describe('the words, in all six languages', () => {
 describe('every data screen: skeleton while the first load runs, then content', () => {
   const screens = {
     'my-requests': [/gate\.visible && <RequestsSkeleton label=\{t\('sk_loading_requests'\)\}/, 'AppRefreshControl'],
-    home: [/gate\.visible && <ActiveRequestSkeleton label=\{t\('sk_loading_active'\)\}/, 'AppRefreshControl'],
     'request-details': [/<RequestDetailsSkeleton label=\{t\('sk_loading_request'\)\}/, 'AppRefreshControl'],
     'request-tracking': [/<TrackingSkeleton label=\{t\('sk_loading_tracking'\)\}/, 'AppRefreshControl'],
     tracking: [/<TrackingSkeleton label=\{t\('sk_loading_tracking'\)\}/, 'AppRefreshControl'],
@@ -263,9 +263,12 @@ describe('every data screen: skeleton while the first load runs, then content', 
     expect(app('profile')).toContain("toast(t('sk_refresh_failed'))");
   });
   test('the content fades in only after a skeleton was shown', () => {
-    ['my-requests', 'home', 'request-details', 'request-tracking', 'my-documents', 'notifications', 'corporate-dashboard'].forEach((name) => {
+    ['my-requests', 'request-details', 'request-tracking', 'my-documents', 'notifications', 'corporate-dashboard'].forEach((name) => {
       expect(app(name)).toContain('<Reveal animate={gate.wasShown}');
     });
+  });
+  test('Home fades its one card in only when the list arrives after a cold start (no skeleton before it)', () => {
+    expect(app('home')).toContain('<Reveal animate={arrivesLater}>');
   });
 });
 
@@ -277,11 +280,11 @@ describe('Home', () => {
     expect(home).toContain('key: \'home\',');
     expect(home).toContain('enabled: !isCorporate,');
   });
-  test('the page, header, tab bar and SOS stay: only the active-request area is a skeleton', () => {
+  test('the page, header, tab bar and SOS stay: the active-request area has no skeleton (a card shows only for exactly one active request)', () => {
     expect(home).toContain('<HomeHeader');
     expect(home).toContain('<SosBar');
     expect(home).toContain('<BottomNav />');
-    expect(home.indexOf('<ActiveRequestSkeleton')).toBeGreaterThan(home.indexOf('<BannerCarousel'));
+    expect(home).not.toContain('<ActiveRequestSkeleton');
     expect(fs.existsSync(path.join(__dirname, '../../components/home/HomeSkeleton.js'))).toBe(false);
   });
   test('a corporate account (nothing to load here) has no pull-to-refresh', () => {

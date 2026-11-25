@@ -18,7 +18,8 @@ const SRC = path.join(__dirname, '..', '..');
 
 // The script each language is written in: every value of it holds at least one letter of that script (the brand-neutral "SOS" is the one international sign).
 const SCRIPT = { HI: /[ऀ-ॿ]/, MR: /[ऀ-ॿ]/, GU: /[઀-૿]/, TE: /[ఀ-౿]/, AR: /[؀-ۿ]/ };
-const INTERNATIONAL = new Set(['sos_btn']);
+// Values that are the same in every language: the SOS label, and the company name, which is always written in Latin script as `Humancare World Wide`.
+const INTERNATIONAL = new Set(['sos_btn', 'gs_logo_label']);
 const placeholders = (text) => [...String(text).matchAll(/\{\{\s*([\w.]+)\s*\}\}|\{(\w+)\}/g)].map((m) => m[1] || m[2]).sort().join('|');
 
 function walk(dir, out = []) {
@@ -55,7 +56,7 @@ describe('every value is real text, translated, in the right script', () => {
     }
   });
   test.each(OTHERS)('%s: no value is the English text left in place', (lang) => {
-    const same = EN_KEYS.filter((k) => I18N[lang][k] === I18N.EN[k] && /[A-Za-z]{4,}/.test(I18N.EN[k]));
+    const same = EN_KEYS.filter((k) => !INTERNATIONAL.has(k) && I18N[lang][k] === I18N.EN[k] && /[A-Za-z]{4,}/.test(I18N.EN[k]));
     expect(same).toEqual([]);
   });
   test.each(OTHERS)('%s: every value is written in the language\'s own script', (lang) => {

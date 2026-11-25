@@ -25,6 +25,7 @@ const HIDDEN_ROUTES = new Set([
   '/register', '/register-otp', '/complete-profile',
   '/forgot-password', '/forgot-password-otp', '/reset-password', '/set-password',
   '/cant-connect', // the offline startup screen has its own emergency button
+  '/help-support', // this screen has its own "Call Alarm Desk" card: no floating button on it
 ]);
 
 export function isHiddenRoute(pathname) {

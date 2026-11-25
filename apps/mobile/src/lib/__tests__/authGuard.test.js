@@ -216,7 +216,7 @@ describe('wiring', () => {
     for (const target of [guard.PATIENT_LOGIN, guard.CORPORATE_LOGIN]) expect(guard.isPublicRoute(target)).toBe(true);
   });
   test('sign out shows the destination before clearing tokens, so the gate cannot override it', () => {
-    const profile = read('../../app/profile.js');
+    const profile = read('../../app/(tabs)/profile.js');
     expect(profile).toMatch(/navReplace\(isCorporate \? '\/corporate-login' : '\/login'\); await signOutSession\(\{ isCorporate, beforeClear: clearDraftEverywhere \}\);/);
   });
 });

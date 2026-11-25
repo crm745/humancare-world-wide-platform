@@ -7,7 +7,7 @@ import { isActiveRequest, cardView, serviceKeyOf, badgeFor } from './myRequestsV
 import { buildTrackingDetails } from './trackingDetailsView';
 import { baseServiceName, transferTypeKey } from './requestDetailsView';
 
-export const HOME_ACTIVE_MAX = 1; // cards on Home: ONE (the first by the ordering below); with more active requests, "All Active Requests" follows it
+export const HOME_ACTIVE_MAX = 1; // Home shows its card only when there is exactly this many active requests; with more, the Tracking tab lists them
 
 // A request that needs something from the person (the review workflow asks for documents or changes) comes first; then the most recently updated.
 const NEEDS_ACTION = new Set(['awaiting_documents', 'changes_requested']);
@@ -24,10 +24,11 @@ export function activeRequestsOf(items) {
   return active.map((entry) => entry.item);
 }
 
-// What Home shows: nothing for 0; for 1 or more exactly ONE card (the first by the ordering above), and with 2 or more the "All Active Requests" button after it. `count` is every active request.
+// What Home shows: nothing for 0; the one card for exactly 1; and nothing at all for 2 or more (they are all on the Tracking tab). `count` is every active request, `visible` whether the section is drawn.
 export function homeActiveSection(items) {
   const active = activeRequestsOf(items);
-  return { active, count: active.length, shown: active.slice(0, HOME_ACTIVE_MAX), hasMore: active.length > HOME_ACTIVE_MAX };
+  const visible = active.length > 0 && active.length <= HOME_ACTIVE_MAX;
+  return { active, count: active.length, visible, shown: visible ? active : [] };
 }
 
 const norm = (text) => String(text || '').trim().toLowerCase();

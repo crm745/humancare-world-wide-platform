@@ -17,7 +17,7 @@ describe('the brand blue', () => {
     const pdf = fs.readFileSync(path.join(dir, 'pdf/summary-render.js'), 'utf8');
     expect(pdf).toContain("const { BRAND_PRIMARY } = require('../../../common/constants/brand');");
     expect(pdf).toContain('brand: BRAND_PRIMARY');
-    expect(pdf).toContain(".text('HumanCare Worldwide'");
+    expect(pdf).toContain(".text('Humancare World Wide'");
     for (const file of ['request-summary.pdf.js', 'pdf/summary-render.js', 'pdf/summary-model.js']) expect(fs.readFileSync(path.join(dir, file), 'utf8')).not.toMatch(/#1A73E8/i);
   });
 });

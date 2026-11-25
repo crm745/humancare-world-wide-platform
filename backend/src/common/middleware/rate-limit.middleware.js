@@ -111,13 +111,13 @@ const patientWriteLimiter = ({ windowMs, limit, message }) => rateLimit({
 // POST /requests: 20 in 15 minutes (a burst) and 100 in 24 hours.
 const requestSubmitLimiters = [
   patientWriteLimiter({ windowMs: 15 * 60 * 1000, limit: 20, message: 'You are sending requests too quickly. Please wait a few minutes and try again.' }),
-  patientWriteLimiter({ windowMs: 24 * 60 * 60 * 1000, limit: 100, message: 'You have reached the daily limit for requests. Please try again tomorrow or contact HumanCare.' }),
+  patientWriteLimiter({ windowMs: 24 * 60 * 60 * 1000, limit: 100, message: 'You have reached the daily limit for requests. Please try again tomorrow or contact Humancare World Wide.' }),
 ];
 
 // POST /requests/me/:id/documents: 60 in 15 minutes (several requests with a full set of files, retries included) and 300 in 24 hours.
 const requestUploadLimiters = [
   patientWriteLimiter({ windowMs: 15 * 60 * 1000, limit: 60, message: 'You are uploading files too quickly. Please wait a few minutes and try again.' }),
-  patientWriteLimiter({ windowMs: 24 * 60 * 60 * 1000, limit: 300, message: 'You have reached the daily limit for uploads. Please try again tomorrow or contact HumanCare.' }),
+  patientWriteLimiter({ windowMs: 24 * 60 * 60 * 1000, limit: 300, message: 'You have reached the daily limit for uploads. Please try again tomorrow or contact Humancare World Wide.' }),
 ];
 
 module.exports = {

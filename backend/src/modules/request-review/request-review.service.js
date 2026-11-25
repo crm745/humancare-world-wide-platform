@@ -179,7 +179,7 @@ async function addPatientDocument({ userId, requestId, file, replacesDocumentId,
         }
       }
       if (request.reviewStatus === REQUEST_STATUS.APPROVED) {
-        throw httpError(409, 'This request has been approved. Please contact HumanCare to add more documents.', 'request_approved');
+        throw httpError(409, 'This request has been approved. Please contact Humancare World Wide to add more documents.', 'request_approved');
       }
 
       const existing = await tx.requestDocument.findMany({ where: { serviceRequestId: id }, select: { id: true, supersededAt: true } });

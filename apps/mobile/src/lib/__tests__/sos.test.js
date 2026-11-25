@@ -10,12 +10,13 @@ const ctx = { authStatus: 'authed', isCorporate: false };
 const shows = (pathname, extra = {}) => S.sosFabVisible({ pathname, ...ctx, ...extra });
 
 // Every route in app/, grouped as in the brief.
-const TAB_SCREENS = ['/all-services', '/my-requests', '/profile'];
+const TAB_SCREENS = ['/all-services', '/active-tracking', '/my-requests', '/profile']; // (All Services is no longer a tab, but it is still a signed-in screen)
 const OTHER_SIGNED_IN = [
   '/my-documents', '/notifications', '/personal-details', '/edit-profile', '/change-contact', '/change-contact-otp', '/about', '/delete-account', '/delete-account-otp',
   '/request-details', '/request-tracking', '/tracking', '/select-service', '/service/air', '/service/marine', '/air-ambulance',
-  '/help-support', '/terms', '/privacy',
+  '/terms', '/privacy',
 ];
+const HELP_SUPPORT = ['/help-support']; // its own "Call Alarm Desk" card: no floating button on this screen only
 const REQUEST_FLOW = ['/request/step1', '/request/step2', '/request/review', '/request/submitted'];
 const AUTH_ONBOARDING = [
   '/', '/welcome', '/login', '/login-otp', '/choose-login', '/register', '/register-otp', '/complete-profile',
@@ -27,18 +28,18 @@ const CORPORATE = ['/corporate-dashboard', '/corporate-new-case', '/corporate-lo
 
 describe('where the floating SOS button shows', () => {
   test.each([...TAB_SCREENS, ...OTHER_SIGNED_IN])('%s: shown', (route) => expect(shows(route)).toBe(true));
-  test.each(['/home', ...REQUEST_FLOW, ...AUTH_ONBOARDING, ...CORPORATE, ...PREVIEW])('%s: hidden', (route) => expect(shows(route)).toBe(false));
+  test.each(['/home', ...REQUEST_FLOW, ...AUTH_ONBOARDING, ...CORPORATE, ...PREVIEW, ...HELP_SUPPORT])('%s: hidden', (route) => expect(shows(route)).toBe(false));
 
   test('every route of the app is covered by one of the groups', () => {
     const files = [];
     (function walk(dir, base) {
       for (const name of fs.readdirSync(dir)) {
         const full = path.join(dir, name);
-        if (fs.statSync(full).isDirectory()) walk(full, `${base}/${name}`);
+        if (fs.statSync(full).isDirectory()) walk(full, name.startsWith('(') ? base : `${base}/${name}`); // a (group) folder is not part of an address
         else if (name.endsWith('.js') && name !== '_layout.js') files.push(name === 'index.js' ? (base || '/') : `${base}/${name.replace(/\.js$/, '')}`);
       }
     })(path.join(__dirname, '../../app'), '');
-    const known = new Set(['/home', ...TAB_SCREENS, ...OTHER_SIGNED_IN, ...REQUEST_FLOW, ...AUTH_ONBOARDING, ...CORPORATE, ...PREVIEW]);
+    const known = new Set(['/home', ...TAB_SCREENS, ...OTHER_SIGNED_IN, ...REQUEST_FLOW, ...AUTH_ONBOARDING, ...CORPORATE, ...PREVIEW, ...HELP_SUPPORT]);
     const dynamic = (route) => route.replace(/\/\[[^\]]+\]$/, '/air');
     const missing = files.map(dynamic).filter((route) => !known.has(route));
     expect(missing).toEqual([]);
@@ -213,14 +214,17 @@ describe('the same flow as the Home banner', () => {
   });
   test('Services has no red banner of its own any more; Home keeps it', () => {
     expect(read('../../app/all-services.js')).not.toContain('SosBar');
-    expect(read('../../app/home.js')).toContain('<SosBar bottom={TAB_BAR + insets.bottom}');
+    expect(read('../../app/(tabs)/home.js')).toContain('<SosBar bottom={TAB_BAR + insets.bottom}');
   });
   test('every scrolling screen uses the one rule (useFabScrollPad), and the scroll area of a tab screen ends above the tab bar', () => {
     expect(read('../../components/layout.js')).toContain('const own = (withNav ? 64 : 0) + BOTTOM_GAP + insets.bottom;');
     expect(read('../../components/layout.js')).toContain('useFabScrollPad({ ownPad: own, edge: bottomEdge })');
     expect(read('../../components/layout.js')).toContain('contentContainerStyle={{ paddingBottom }}');
-    for (const [file, own] of [['all-services', '16'], ['profile', '24'], ['my-requests', 'L.listPadBottom']]) {
-      const source = read('../../app/' + file + '.js');
+    // All Services is not a tab any more: no tab bar under it, so its scroll area runs to the bottom of the screen.
+    expect(read('../../app/all-services.js')).toContain('useFabScrollPad({ ownPad: 16 + insets.bottom, edge: insets.bottom })');
+    expect(read('../../app/all-services.js')).not.toContain('TAB_BAR');
+    for (const [file, own] of [['profile', '24'], ['my-requests', 'L.listPadBottom']]) {
+      const source = read('../../app/(tabs)/' + file + '.js');
       expect(source).toMatch(/useFabScrollPad\(\{ ownPad: (16|24|L\.listPadBottom), edge: TAB_BAR \+ insets\.bottom \}\)/);
       expect(source).toContain(`ownPad: ${own.split('|')[0]},`);
       expect(source).toContain('marginBottom: TAB_BAR + insets.bottom');

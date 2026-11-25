@@ -3,7 +3,7 @@
 // the screen's development-only preview switch is on (see app/notifications.js).
 export const ALERTS_PREVIEW_ITEMS = [
   { id: 'p1', group: 'today', category: 'flight', title: 'Air Ambulance, handover at 02:40', body: 'Case HC-2026-4821 left Dubai at 21:28. Patient handover confirmed.', time: '21:28', unread: true },
-  { id: 'p2', group: 'today', category: 'quote', title: 'Quote ready to approve', body: 'Commercial stretcher, Sharjah – Kochi. Quote is ready for review.', time: '19:55', unread: true },
+  { id: 'p2', group: 'today', category: 'quote', title: 'Quote ready to approve', body: 'Commercial stretcher, Sharjah to Kochi. Quote is ready for review.', time: '19:55', unread: true },
   { id: 'p3', group: 'today', category: 'message', title: 'New message from Dr. Rahman', body: 'Uploaded the fitness-to-fly certificate to your case.', time: '19:34', unread: false },
   { id: 'p4', group: 'today', category: 'hospital', title: 'Bed confirmed', body: 'Cardiac ICU bed held at Lilavati Hospital, Mumbai.', time: '19:02', unread: false },
   { id: 'p5', group: 'yesterday', category: 'documents', title: 'Battery of documents expires soon', body: 'Patient passport copy is 11 months old. Airlines may refuse it.', time: '16:10', unread: false },

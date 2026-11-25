@@ -174,12 +174,10 @@ describe('Notifications', () => {
 
 describe('About HumanCare', () => {
   test('the English dictionary text is exactly the approved text (including its wording)', () => {
-    expect(I18N.EN.about_name).toBe(ABOUT_INTRO.name);
     ABOUT_INTRO.paragraphs.forEach((p, i) => expect(I18N.EN[`about_p${i + 1}`]).toBe(p));
     expect(Object.keys(I18N.EN).filter((k) => /^about_p\d+$/.test(k))).toHaveLength(ABOUT_INTRO.paragraphs.length);
   });
-  test.each(OTHERS)('%s: the name and every paragraph are translated and keep the figures (2004, 24×7, 3,500, 11,000+, 150)', (lang) => {
-    expect(I18N[lang].about_name).not.toBe(I18N.EN.about_name);
+  test.each(OTHERS)('%s: every paragraph is translated and keep the figures (2004, 24×7, 3,500, 11,000+, 150)', (lang) => {
     ABOUT_INTRO.paragraphs.forEach((_, i) => {
       const text = I18N[lang][`about_p${i + 1}`];
       expect(text).not.toBe(I18N.EN[`about_p${i + 1}`]);
@@ -188,7 +186,7 @@ describe('About HumanCare', () => {
   });
   test('the page draws the translated text', () => {
     const screen = read('app/about.js');
-    expect(screen).toContain("{t('about_name')}");
+    expect(screen).not.toContain('about_name'); // no company name heading on the page
     expect(screen).toContain('{t(`about_p${i + 1}`)}');
   });
 });
@@ -203,7 +201,7 @@ describe('Privacy Policy and Terms & Conditions', () => {
     }
   });
   test('the English text is the approved original', () => {
-    expect(I18N.EN.terms_s1_b).toBe('By creating an account or using the HumanCare World Wide app, you agree to be bound by these Terms & Conditions. If you do not agree, please do not use the platform.');
+    expect(I18N.EN.terms_s1_b).toBe('By creating an account or using the Humancare World Wide app, you agree to be bound by these Terms & Conditions. If you do not agree, please do not use the platform.');
     expect(I18N.EN.terms_s3_b).toBe('This app is not a replacement for local emergency services. In a life-threatening emergency, contact your local emergency number immediately in addition to using this app.');
     expect(I18N.EN.privacy_s2_b).toContain('We do not sell your personal data to third parties.');
     expect(I18N.EN.legal_last_updated).toBe('Last updated: 1 January 2026');
@@ -217,7 +215,8 @@ describe('Privacy Policy and Terms & Conditions', () => {
     const legal = read('components/LegalScreen.js');
     expect(legal).toContain('{`${i + 1}. ${t(headingKey)}\\n`}');
     expect(legal).toContain('{t(bodyKey)}</Text>');
-    expect(legal).toContain("{t('legal_last_updated')}");
+    expect(legal).toContain("{t('legal_last_updated')}"); // Terms still shows it; Privacy turns it off (showUpdated={false})
+    expect(read('app/privacy.js')).toContain('showUpdated={false}');
     expect(legal).toContain('ops@humancareworldwide.com.');
   });
   test('the contact line ends with a space, so the address follows it in every language', () => {

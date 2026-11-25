@@ -98,7 +98,7 @@ describe('the screen', () => {
   });
   test('the Home bell\'s real unread count is not touched', () => {
     expect(read('../../components/home/HomeHeader.js')).not.toMatch(/alertsPreview|ALERTS_PREVIEW/);
-    expect(read('../../app/home.js')).not.toMatch(/alertsPreview|ALERTS_PREVIEW/);
+    expect(read('../../app/(tabs)/home.js')).not.toMatch(/alertsPreview|ALERTS_PREVIEW/);
   });
 });
 

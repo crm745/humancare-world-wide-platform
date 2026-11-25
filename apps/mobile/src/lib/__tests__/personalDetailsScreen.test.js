@@ -34,7 +34,7 @@ describe('the screen uses what already exists', () => {
     expect(isPublicRoute('/personal-details')).toBe(false);
   });
   test('Profile opens it for a patient', () => {
-    expect(read('../../app/profile.js')).toContain("router.push('/personal-details')");
+    expect(read('../../app/(tabs)/profile.js')).toContain("router.push('/personal-details')");
   });
 });
 

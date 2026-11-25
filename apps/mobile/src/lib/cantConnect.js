@@ -31,7 +31,7 @@ export const CANT_CONNECT_TEXT = Object.freeze({
   cc_connecting_body: 'Checking your saved session.',
   cc_title: "Can't connect",
   cc_body_offline: 'No internet connection. Connect to the internet and we will continue automatically.',
-  cc_body_server: "We can't reach HumanCare servers right now. We will continue automatically when they are back.",
+  cc_body_server: "We can't reach Humancare World Wide servers right now. We will continue automatically when they are back.",
   cc_body_generic: 'We could not check your saved session. We will continue automatically when the connection is back.',
   cc_storage_title: "We couldn't open your saved session",
   cc_storage_body: 'This is a problem with the phone, not the connection. Try again, or log in again.',

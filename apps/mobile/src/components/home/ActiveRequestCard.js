@@ -98,23 +98,15 @@ export function ActiveRequestCard({ item, onOpen, onTrack, isNew }) {
   );
 }
 
-// The "Active Requests" section of Home: the header (no number), then 0 / 1 / 2 cards (never combined), and for 3 or more the first two and "All Active Requests".
-// `section` is lib/activeRequests.js homeActiveSection; nothing at all is drawn when there are no active requests.
-export function ActiveRequestsSection({ section, onOpen, onTrack, onViewAll }) {
+// The "Active Requests" section of Home: the header and the ONE card, when there is exactly one active request.
+// `section` is lib/activeRequests.js homeActiveSection; nothing at all is drawn for none, or for two or more (the Tracking tab lists those).
+export function ActiveRequestsSection({ section, onOpen, onTrack }) {
   const { t } = useApp();
-  if (!section || section.count === 0) return null;
+  if (!section || !section.visible) return null;
   return (
     <View style={{ marginBottom: 18, gap: 12 }}>
       <Text accessibilityRole="header" style={{ fontFamily: FONT[800], fontSize: 18, lineHeight: 24, color: NAVY }}>{t('home_active_requests')}</Text>
       {section.shown.map((item) => <ActiveRequestCard key={item.rawId} item={item} onOpen={() => onOpen(item)} onTrack={() => onTrack(item)} />)}
-      {section.hasMore ? (
-        <PressBox
-          accessibilityRole="button" accessibilityLabel={t('home_all_active_requests')} onPress={onViewAll}
-          style={({ pressed }) => ({ minHeight: 48, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DCE1F2', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 14, opacity: pressed ? 0.85 : 1 })}
-        >
-          <Text style={{ fontFamily: FONT[800], fontSize: 15, textAlign: 'center', color: COLORS.primary }}>{t('home_all_active_requests')}</Text>
-        </PressBox>
-      ) : null}
     </View>
   );
 }

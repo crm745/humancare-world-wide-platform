@@ -1,37 +1,33 @@
-import { useRef } from 'react';
 import { ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import { ChevronRight } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../state/AppContext';
 import { HOME_SERVICES } from '../data/mock';
-import { BottomNav, Screen, TopBar, useScrollToTopOnTabTap } from '../components/layout';
+import { Screen, TopBar } from '../components/layout';
 import { Text } from '../components/ui';
 import { openService } from '../components/ServiceGrid';
 import { ServiceIcon } from '../components/home/ServiceIcon';
 import { useFabScrollPad } from '../components/sos/hooks';
 import { PressBox } from '../components/PressBox';
 
-const TAB_BAR = 64;
 const MAX_WIDTH = 720;
 const NAVY = '#0D2340';
 
 // Every service as its own full-width card with its subtitle, in one scrolling column. The same eight services, in
 // the same order and with the same destinations as the tiles on Home (HOME_SERVICES in data/mock.js): Air Ambulance is
 // one card that opens the choice between its two services, and a placeholder is drawn as a card that does nothing.
+// Not a bottom tab: it is opened from Home (the "More" tile and the banner) and from the request form, so it is an ordinary screen with its own back button (back returns to where it was opened from, else Home).
 export default function AllServices() {
   const { t, isRTL } = useApp();
   const insets = useSafeAreaInsets();
-  // The scroll area ends above the tab bar; its bottom padding is its own (16) or the room the floating SOS button needs, whichever is more.
-  const { paddingBottom, scrollProps } = useFabScrollPad({ ownPad: 16, edge: TAB_BAR + insets.bottom });
-  const scrollRef = useRef(null);
-  useScrollToTopOnTabTap(scrollRef);
+  const { paddingBottom, scrollProps } = useFabScrollPad({ ownPad: 16 + insets.bottom, edge: insets.bottom });
 
   return (
     <Screen>
       <TopBar title={t('filter_svc_all')} />
 
-      <ScrollView ref={scrollRef} style={{ flex: 1, marginBottom: TAB_BAR + insets.bottom }} contentContainerStyle={{ paddingBottom }} {...scrollProps} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom }} {...scrollProps} showsVerticalScrollIndicator={false}>
         <View style={{ width: '100%', maxWidth: MAX_WIDTH, alignSelf: 'center', padding: 14, gap: 12 }}>
           {HOME_SERVICES.map((s) => {
             const card = (pressed) => ({ minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 14, backgroundColor: pressed ? '#F5F8FC' : '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#D6E2F2' });
@@ -67,8 +63,6 @@ export default function AllServices() {
           })}
         </View>
       </ScrollView>
-
-      <BottomNav />
     </Screen>
   );
 }

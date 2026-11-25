@@ -131,7 +131,7 @@ describe('one canonical name on every other screen: no variant, no "Medical Esco
     expect(storedServiceName('  Ground Ambulance  ')).toBe('Ground Ambulance');
   });
   test('Home\'s active-request card and the older tracking header use that one mapping (not the raw stored name)', () => {
-    const home = read('app/home.js');
+    const home = read('app/(tabs)/home.js');
     expect(home).toContain('homeActiveSection(requests.map(toListItem))'); // the card's name comes from lib/activeRequests.js nameAndVariant (one name, once)
     expect(home).not.toMatch(/serviceName:[^\n]*current\.serviceType/);
     const tracking = read('app/tracking.js');

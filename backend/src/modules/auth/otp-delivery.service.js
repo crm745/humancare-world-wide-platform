@@ -7,13 +7,13 @@
 const { sendMail } = require('../../lib/mailer');
 
 const PURPOSE_LABEL = {
-  patient_register: 'HumanCare registration',
-  patient_login: 'HumanCare login',
-  patient_change_mobile: 'HumanCare mobile number change',
-  patient_change_email: 'HumanCare email change',
-  patient_password_reset: 'HumanCare password reset',
-  corporate_login: 'HumanCare login',
-  corporate_password_reset: 'HumanCare password reset',
+  patient_register: 'Humancare World Wide registration',
+  patient_login: 'Humancare World Wide login',
+  patient_change_mobile: 'Humancare World Wide mobile number change',
+  patient_change_email: 'Humancare World Wide email change',
+  patient_password_reset: 'Humancare World Wide password reset',
+  corporate_login: 'Humancare World Wide login',
+  corporate_password_reset: 'Humancare World Wide password reset',
 };
 
 function isEmail(identifier) {
@@ -41,7 +41,7 @@ async function logSmsForDevelopment(mobile, code, label) {
 // immediately (they'd just be stuck waiting for a code that never arrives), so this
 // throws on failure rather than swallowing the error.
 async function deliverOtp(identifier, code, purpose) {
-  const label = PURPOSE_LABEL[purpose] || 'HumanCare';
+  const label = PURPOSE_LABEL[purpose] || 'Humancare World Wide';
   if (isEmail(identifier)) {
     await sendOtpEmail(identifier, code, label);
   } else {

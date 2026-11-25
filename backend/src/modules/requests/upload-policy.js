@@ -25,7 +25,7 @@ const maxFilesFor = (serviceKey) => (isMortalRequestKey(serviceKey) ? MORTAL_MAX
 function closedRequestProblem(request) {
   const status = request && (request.status || (request.case && request.case.status));
   if (!CLOSED_STATUSES.includes(status)) return null;
-  return { status: 409, body: { error: `This request is ${status}, so documents can no longer be added to it. Please contact HumanCare if you need to share something.`, code: 'request_closed' } };
+  return { status: 409, body: { error: `This request is ${status}, so documents can no longer be added to it. Please contact Humancare World Wide if you need to share something.`, code: 'request_closed' } };
 }
 
 // { status, body } when `count` documents already fill the request, else null. (Mortal Remains keeps its original wording.)

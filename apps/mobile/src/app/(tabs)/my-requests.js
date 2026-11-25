@@ -2,28 +2,28 @@ import { useRef, useState } from 'react';
 import { ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useApp } from '../state/AppContext';
-import { SERVICE_LABELS } from '../data/mock';
-import { DEFAULT_FILTERS, applyFilters } from '../lib/filters';
-import { apiGet } from '../lib/api';
-import { goBack } from '../lib/nav';
-import { toListItem } from '../lib/requestShape';
-import { cardView, isActiveRequest, statusCounts } from '../lib/myRequestsView';
-import { cardSpec, scaleFor } from '../lib/myRequestsLayout';
-import { BottomNav, Screen, useScrollToTopOnTabTap } from '../components/layout';
-import { useFabScrollPad } from '../components/sos/hooks';
-import { FilterSheet } from '../components/FilterSheet';
-import { AppRefreshControl } from '../components/AppRefreshControl';
-import { LoadFailure } from '../components/LoadFailure';
-import { CachedNote } from '../components/network/CachedNote';
-import { Reveal } from '../components/skeleton/Reveal';
-import { useSkeletonGate } from '../components/skeleton/hooks';
-import { RequestsSkeleton } from '../components/skeleton/screens';
-import { useResource } from '../lib/useResource';
-import { useFitScroll } from '../lib/useFitScroll';
-import { RequestCard } from '../components/requests/RequestCard';
-import { ActiveRequestCard } from '../components/home/ActiveRequestCard';
-import { RequestsHeader } from '../components/requests/RequestsHeader';
+import { useApp } from '../../state/AppContext';
+import { SERVICE_LABELS } from '../../data/mock';
+import { DEFAULT_FILTERS, applyFilters } from '../../lib/filters';
+import { goBack } from '../../lib/nav';
+import { MY_REQUESTS_FRESH_MS, MY_REQUESTS_KEY, fetchMyRequests, idsOfRequests } from '../../lib/myRequestsResource';
+import { cardView, isActiveRequest, statusCounts } from '../../lib/myRequestsView';
+import { cardSpec, scaleFor } from '../../lib/myRequestsLayout';
+import { BottomNav, Screen, useScrollToTopOnTabTap } from '../../components/layout';
+import { useFabScrollPad } from '../../components/sos/hooks';
+import { FilterSheet } from '../../components/FilterSheet';
+import { AppRefreshControl } from '../../components/AppRefreshControl';
+import { LoadFailure } from '../../components/LoadFailure';
+import { CachedNote } from '../../components/network/CachedNote';
+import { Reveal } from '../../components/skeleton/Reveal';
+import { useSkeletonGate } from '../../components/skeleton/hooks';
+import { RequestsSkeleton } from '../../components/skeleton/screens';
+import { useResource } from '../../lib/useResource';
+import { useRefreshOnFocus } from '../../lib/useTabRefresh';
+import { useFitScroll } from '../../lib/useFitScroll';
+import { RequestCard } from '../../components/requests/RequestCard';
+import { ActiveRequestCard } from '../../components/home/ActiveRequestCard';
+import { RequestsHeader } from '../../components/requests/RequestsHeader';
 
 const TAB_BAR = 64;
 const STATUSES = ['all', 'active', 'submitted', 'progress', 'completed', 'cancelled'];
@@ -40,6 +40,10 @@ export default function MyRequests() {
   const { paddingBottom, scrollProps } = useFabScrollPad({ ownPad: L.listPadBottom, edge: TAB_BAR + insets.bottom });
   const params = useLocalSearchParams();
   const [status, setStatus] = useState(params.status || 'all');
+  // The tab stays mounted, so a link that opens it with a status ("All Active Requests" on Home) reaches a screen that already exists: the status follows it (`at` makes every such link new).
+  const linkKey = `${params.status || ''}|${params.at || ''}`;
+  const [seenLink, setSeenLink] = useState(linkKey);
+  if (seenLink !== linkKey) { setSeenLink(linkKey); if (params.status) setStatus(params.status); }
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [sheet, setSheet] = useState(false);
@@ -50,11 +54,13 @@ export default function MyRequests() {
   // (what an earlier visit loaded shows at once and refreshes quietly), "Try again" if the first load fails, and pull-to-refresh with the
   // list staying on screen. A request that was not in the list before the pull is highlighted for a moment.
   const { data: rows, loading, error, reload, onRefresh, refreshing, highlight } = useResource({
-    key: 'my-requests',
-    fetcher: () => apiGet('/requests/me').then(({ requests: list }) => list.map(toListItem)),
-    idsOf: (list) => list.map((r) => r.rawId),
+    key: MY_REQUESTS_KEY,
+    fetcher: fetchMyRequests,
+    freshMs: MY_REQUESTS_FRESH_MS,
+    idsOf: idsOfRequests,
     onRefreshError: () => toast(t('sk_refresh_failed')),
   });
+  useRefreshOnFocus(reload); // brought up to date quietly when the tab comes back into front (lib/useTabRefresh.js)
   const requests = rows || [];
   const fit = useFitScroll(!!error && !rows); // the "Couldn't load" view does not scroll when it fits
   const gate = useSkeletonGate(loading);

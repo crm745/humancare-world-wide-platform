@@ -68,7 +68,7 @@ describe('screen wiring', () => {
     for (const k of ['trk_title', 'trk_load_failed', 'trk_cancelled_sub', 'trk_chip_cancelled', 'timeline_pending']) expect(i18n.EN[k]).toBeTruthy();
   });
   test('Track request on Home opens this page, and only that button', () => {
-    const home = read('../../app/home.js');
+    const home = read('../../app/(tabs)/home.js');
     expect(home).toMatch(/onTrack=\{\(item\) => router\.push\(\{ pathname: '\/request-tracking', params: \{ id: item\.rawId \} \}\)\}/); // each card opens ITS OWN request
   });
 });

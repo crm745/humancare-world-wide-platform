@@ -126,8 +126,8 @@ describe('the actions that need the internet', () => {
 describe('what stays available offline (nothing here may be blocked)', () => {
   const MUST_NOT_REFERENCE = [
     'app/help-support.js', // Help & Support, with its call button
-    'app/welcome.js', 'app/privacy.js', 'app/terms.js', 'app/about.js', 'app/all-services.js', 'app/select-service.js', 'app/air-ambulance.js',
-    'app/profile.js', // includes the local language switch
+    'app/welcome.js', 'app/privacy.js', 'app/terms.js', 'app/about.js', 'app/(tabs)/all-services.js', 'app/select-service.js', 'app/air-ambulance.js',
+    'app/(tabs)/profile.js', // includes the local language switch
     'components/sos/SosModal.js', 'components/sos/SosFab.js', 'components/sos/hooks.js', 'lib/sos.js', // emergency calling (placement is Phase 3)
     'components/layout.js', 'components/SystemBack.js', 'lib/nav.js', 'data/languages.js', 'lib/languagePreference.js',
   ];
@@ -171,7 +171,7 @@ describe('reads are retried once; writes are never replayed', () => {
   test('the loading skeleton, the cache and the failed-refresh behaviour are unchanged', () => {
     const source = read('lib/useResource.js');
     expect(source).toMatch(/useState\(\(\) => getCached\(key\)\)/);
-    expect(source).toMatch(/setCached\(forKey, next\)/);
+    expect(source).toContain('setCached(forKey, next, { epoch })');
     expect(source).toMatch(/loading: data === undefined && !error/);
     expect(source).toMatch(/failRef\.current\(err\)/); // onRefreshError (the "Couldn't refresh" toast) still runs
     expect(source).toMatch(/return \{ data, loading: data === undefined && !error, error, reload, refresh: onRefresh, onRefresh, refreshing, highlight \}/);
@@ -188,10 +188,10 @@ describe('the shared failure view', () => {
     expect(code).not.toMatch(/Network request failed/);
   });
   test.each([
-    ['app/home.js', /<LoadFailure titleKey="lf_title_home" error=\{error\} onRetry=\{reload\} \/>/],
-    ['app/my-requests.js', /<LoadFailure titleKey="lf_title_requests" error=\{error\} onRetry=\{reload\} \/>/],
+    ['app/(tabs)/home.js', /<LoadFailure titleKey="lf_title_home" error=\{error\} onRetry=\{reload\} \/>/],
+    ['app/(tabs)/my-requests.js', /<LoadFailure titleKey="lf_title_requests" error=\{error\} onRetry=\{reload\} \/>/],
     ['app/notifications.js', /<LoadFailure titleKey="lf_title_notifications" error=\{error\} onRetry=\{reload\} \/>/],
-    ['app/corporate-dashboard.js', /<LoadFailure titleKey="lf_title_cases" error=\{error\} onRetry=\{reload\} \/>/],
+    ['app/(tabs)/corporate-dashboard.js', /<LoadFailure titleKey="lf_title_cases" error=\{error\} onRetry=\{reload\} \/>/],
     ['app/request-details.js', /<LoadFailure titleKey="lf_title_request" error=\{error\} message=\{t\('rd_load_failed'\)\}/],
     ['app/request-tracking.js', /<LoadFailure titleKey="lf_title_tracking" error=\{error\} message=\{t\('trk_load_failed'\)\}/],
   ])('%s passes the error so the message can say what happened', (file, pattern) => {
@@ -219,7 +219,7 @@ describe('translations', () => {
   test('the English texts are exactly the wording that was requested', () => {
     expect(I18N.EN.net_offline).toBe('No internet connection');
     expect(I18N.EN.net_slow).toBe('Slow internet connection');
-    expect(I18N.EN.net_server_down).toBe("We can't reach HumanCare servers");
+    expect(I18N.EN.net_server_down).toBe("We can't reach Humancare World Wide servers");
     expect(I18N.EN.net_restored).toBe('Back online');
   });
   test('the other languages are translated, not copies of English', () => {
@@ -229,7 +229,7 @@ describe('translations', () => {
   });
   test('the brand name stays as it is, and no placeholder is left half-written', () => {
     for (const lang of LANGS) {
-      expect(I18N[lang].net_server_down).toMatch(/HumanCare/);
+      expect(I18N[lang].net_server_down).toMatch(/Humancare World Wide/);
       for (const key of NET_KEYS) expect(I18N[lang][key]).not.toMatch(/\{\{|\}\}|undefined/);
     }
   });

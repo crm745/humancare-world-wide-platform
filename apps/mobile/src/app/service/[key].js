@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -27,6 +27,8 @@ export default function ServiceDetail() {
   // admin can actually edit (name/description/provides) comes live, merged on top.
   const [live, setLive] = useState(null);
   const [asking, setAsking] = useState(false); // the "Saved draft found" sheet is open
+  const [busy, setBusy] = useState(null); // null | 'resume' | 'new': the sheet's choice is being carried out (the draft is read, or deleted): shown at once on the button, and a second tap does nothing
+  const busyRef = useRef(false);
 
   const [liveFailed, setLiveFailed] = useState(false);
   const loadLive = useCallback(() => apiGet(`/services/${liveSlugFor(key)}`)
@@ -57,13 +59,28 @@ export default function ServiceDetail() {
     if (swapping) router.dismissTo('/request/step1');
     else router.push('/request/step1');
   };
-  const openSaved = async () => {
+  // Resume and Start new keep the sheet up with a spinner on the tapped button while the saved draft is read or deleted, then close it as the form opens: the tap is answered at once,
+  // and nothing happens twice. The data steps and their order are exactly as before.
+  const runChoice = async (kind, work) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(kind);
+    try { await work(); } finally { busyRef.current = false; setBusy(null); }
+  };
+  const openSaved = () => runChoice('resume', async () => {
     const opened = await resumeDraft();
+    setAsking(false);
     if (!opened) { toast(t('draft_unusable')); return; }
     router.push('/request/step1');
     if (opened.step >= 2) router.push('/request/step2');
     if (opened.step >= 3) router.push('/request/review');
-  };
+  });
+  const startNew = () => runChoice('new', async () => {
+    await discardDraft();
+    resetDraft(key);
+    setAsking(false);
+    router.push('/request/step1');
+  });
 
   return (
     <Screen>
@@ -100,9 +117,10 @@ export default function ServiceDetail() {
       </View>
       <DraftSheet
         visible={asking}
-        onResume={() => { setAsking(false); openSaved(); }}
-        onStartNew={async () => { setAsking(false); await discardDraft(); resetDraft(key); router.push('/request/step1'); }}
-        onCancel={() => setAsking(false)}
+        busy={busy}
+        onResume={openSaved}
+        onStartNew={startNew}
+        onCancel={() => { if (!busyRef.current) setAsking(false); }}
       />
     </Screen>
   );

@@ -1,10 +1,10 @@
 import { forwardRef, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Pressable, View } from 'react-native';
-import { usePathname } from 'expo-router';
+import { useNavigation, usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, FileText, House, LayoutGrid, User } from 'lucide-react-native';
+import { ChevronLeft, FileText, House, MapPin, User } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
-import { emitTabReselect, goBack, navReplace, onTabReselect } from '../lib/nav';
+import { emitTabReselect, goBack, onTabReselect, switchTab } from '../lib/nav';
 import { Text, cx } from './ui';
 import { useFabScrollPad, useSosFabVisible } from './sos/hooks';
 import { fabClearance, scrollPadFor } from '../lib/sos';
@@ -45,8 +45,9 @@ export const Body = forwardRef(function Body({ children, className = '', content
   const paddingBottom = clearSos
     ? scrollPadFor({ ownPad: Math.max(ownPadding, SOS_MIN_PAD), visible: sosVisible, clearance: fabClearance({ edge: bottomEdge, insetBottom: insets.bottom }) })
     : ownPadding;
-  // Tapping the active tab again scrolls this screen back to the top.
-  useEffect(() => (withNav ? onTabReselect(() => inner.current?.scrollTo({ y: 0, animated: true })) : undefined), [withNav]);
+  // Tapping the active tab again scrolls this screen back to the top. The tabs stay mounted, so only the tab in front answers (the others are asleep behind it).
+  const navigation = useNavigation();
+  useEffect(() => (withNav ? onTabReselect(() => { if (navigation.isFocused()) inner.current?.scrollTo({ y: 0, animated: true }); }) : undefined), [withNav, navigation]);
   return (
     <KeyboardScroll
       ref={(node) => { inner.current = node; if (typeof ref === 'function') ref(node); else if (ref) ref.current = node; }}
@@ -114,14 +115,16 @@ export function TopBar({ title, onBack, right, left, banner = true }) {
 
 const TABS = [
   { id: '/home', key: 'nav_home', Icon: House },
-  { id: '/all-services', key: 'nav_services', Icon: LayoutGrid },
+  { id: '/active-tracking', key: 'nav_tracking', Icon: MapPin },
   { id: '/my-requests', key: 'nav_requests', Icon: FileText },
   { id: '/profile', key: 'nav_profile', Icon: User },
 ];
 
 // Scrolls a ScrollView back to the top when the tab you are on is tapped again.
+// The tabs stay mounted, so every one of them is listening: only the tab in front answers.
 export function useScrollToTopOnTabTap(ref) {
-  useEffect(() => onTabReselect(() => ref.current?.scrollTo({ y: 0, animated: true })), [ref]);
+  const navigation = useNavigation();
+  useEffect(() => onTabReselect(() => { if (navigation.isFocused()) ref.current?.scrollTo({ y: 0, animated: true }); }), [ref, navigation]);
 }
 
 function Tab({ on, label, Icon, reduceMotion, onPress }) {
@@ -150,9 +153,9 @@ function Tab({ on, label, Icon, reduceMotion, onPress }) {
   );
 }
 
-// Bottom tab bar: Home, Services, Requests, Profile. Corporates see "Cases" (corporate
-// dashboard) in place of "Requests". The white bar is full width; the tabs sit centred in
-// at most 560. Tapping the tab you are on scrolls it to the top, and the bar hides while the keyboard is up. (The Android back button is
+// Bottom tab bar: Home, Tracking, Requests, Profile. Corporates see "Cases" (corporate
+// dashboard) in place of "Requests" and have no Tracking tab (the request list API is for patients). The white bar is full width; the tabs sit centred in
+// at most 560. Tapping another tab SWITCHES to it (the tab screens stay mounted: app/(tabs)/_layout.js); tapping the tab you are on scrolls it to the top, and the bar hides while the keyboard is up. (The Android back button is
 // handled once for the whole app: components/SystemBack.js.)
 export function BottomNav() {
   const { t, isCorporate } = useApp();
@@ -171,7 +174,7 @@ export function BottomNav() {
   return (
     <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 64 + insets.bottom, paddingBottom: insets.bottom, backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E4E9F2' }}>
       <View accessibilityRole="tablist" style={{ flex: 1, flexDirection: 'row', width: '100%', maxWidth: 560, alignSelf: 'center' }}>
-        {TABS.map(({ id, key, Icon }) => {
+        {TABS.filter(({ id }) => !(isCorporate && id === '/active-tracking')).map(({ id, key, Icon }) => {
           const corporateCases = id === '/my-requests' && isCorporate;
           const target = corporateCases ? '/corporate-dashboard' : id;
           const on = pathname === target;
@@ -182,7 +185,7 @@ export function BottomNav() {
               Icon={Icon}
               label={corporateCases ? t('nav_cases') : t(key)}
               reduceMotion={reduceMotion}
-              onPress={() => (on ? emitTabReselect() : navReplace(target))}
+              onPress={() => (on ? emitTabReselect() : switchTab(target))}
             />
           );
         })}

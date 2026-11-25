@@ -212,7 +212,7 @@ function buildSummaryModel(request, { now = new Date() } = {}) {
   ].filter((section) => section.rows.length > 0);
   return {
     reference: clean(request.referenceNumber) || 'Request',
-    serviceName: clean(baseServiceName(request)) || 'HumanCare service request',
+    serviceName: clean(baseServiceName(request)) || 'Humancare World Wide service request',
     statusKey: request.status || 'submitted',
     statusLabel: statusLabelOf(request.status),
     generatedAt: formatMoment(now),

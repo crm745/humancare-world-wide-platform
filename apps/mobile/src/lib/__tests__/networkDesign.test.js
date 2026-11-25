@@ -39,7 +39,7 @@ describe('the banner: which one shows', () => {
     expect(BANNER.restored).toMatchObject({ titleKey: 'net_restored', textKey: null, icon: 'wifi', tone: 'success' });
     expect(I18N.EN.net_offline).toBe('No internet connection');
     expect(I18N.EN.net_offline_text).toBe('Connect to the internet to continue.');
-    expect(I18N.EN.net_server_down).toBe("We can't reach HumanCare servers");
+    expect(I18N.EN.net_server_down).toBe("We can't reach Humancare World Wide servers");
     expect(I18N.EN.net_server_down_text).toBe('Please try again in a moment.');
     expect(I18N.EN.net_slow_text).toBe('Things may take a little longer to load.');
   });
@@ -121,7 +121,7 @@ describe('offline buttons and lists', () => {
   });
   test('lists that show saved data offline say so once, under the list, and only offline', () => {
     expect(read('components/network/CachedNote.js')).toMatch(/if \(!isOffline\) return null;/);
-    for (const file of ['app/my-requests.js', 'app/notifications.js', 'app/my-documents.js']) expect(read(file)).toContain('<CachedNote />');
+    for (const file of ['app/(tabs)/my-requests.js', 'app/notifications.js', 'app/my-documents.js']) expect(read(file)).toContain('<CachedNote />');
     expect(I18N.EN.net_cached_note).toBe('Showing what was saved on this phone.');
   });
   test('a toast that only repeats the banner is not drawn while the banner is up', () => {
@@ -153,9 +153,9 @@ describe('a screen that could not load', () => {
   test('one title per screen, in English', () => {
     expect(I18N.EN).toMatchObject({
       lf_title_requests: "Couldn't load your requests", lf_title_request: "Couldn't load this request", lf_title_tracking: "Couldn't load tracking", lf_title_documents: "Couldn't load your documents",
-      lf_title_server: "Can't reach HumanCare", lf_title_slow: 'This is taking too long',
+      lf_title_server: "Can't reach Humancare World Wide", lf_title_slow: 'This is taking too long',
     });
-    const screens = { 'app/my-requests.js': 'lf_title_requests', 'app/request-details.js': 'lf_title_request', 'app/request-tracking.js': 'lf_title_tracking', 'app/tracking.js': 'lf_title_tracking', 'app/my-documents.js': 'lf_title_documents', 'app/home.js': 'lf_title_home', 'app/notifications.js': 'lf_title_notifications', 'app/corporate-dashboard.js': 'lf_title_cases' };
+    const screens = { 'app/(tabs)/my-requests.js': 'lf_title_requests', 'app/request-details.js': 'lf_title_request', 'app/request-tracking.js': 'lf_title_tracking', 'app/tracking.js': 'lf_title_tracking', 'app/my-documents.js': 'lf_title_documents', 'app/(tabs)/home.js': 'lf_title_home', 'app/notifications.js': 'lf_title_notifications', 'app/(tabs)/corporate-dashboard.js': 'lf_title_cases' };
     for (const [file, key] of Object.entries(screens)) expect(read(file)).toContain(`<LoadFailure titleKey="${key}"`);
   });
   test('the layout is shared with Can\'t Connect: circles, a "!" badge, a filled Try again with a refresh icon', () => {
@@ -184,7 +184,7 @@ describe("Can't Connect", () => {
   });
   test('the wording: the "safe" sentence moved out of the bodies into its own pill', () => {
     expect(I18N.EN.cc_body_offline).toBe('No internet connection. Connect to the internet and we will continue automatically.');
-    expect(I18N.EN.cc_body_server).toBe("We can't reach HumanCare servers right now. We will continue automatically when they are back.");
+    expect(I18N.EN.cc_body_server).toBe("We can't reach Humancare World Wide servers right now. We will continue automatically when they are back.");
     expect(I18N.EN.cc_body_generic).toBe('We could not check your saved session. We will continue automatically when the connection is back.');
     expect(I18N.EN.cc_safe).toBe('Your saved session is safe');
     for (const key of ['cc_body_offline', 'cc_body_server', 'cc_body_generic']) for (const lang of LANGS) expect(I18N[lang][key].split(/[.।]/).filter(Boolean)).toHaveLength(2);
@@ -314,9 +314,10 @@ describe('saved drafts', () => {
     const service = read('app/service/[key].js');
     expect(service).not.toMatch(/Alert\.alert|\bAlert\b/);
     expect(service).toContain("if (!swapping && savedDraft) { setAsking(true); return; }");
-    expect(service).toMatch(/onResume=\{\(\) => \{ setAsking\(false\); openSaved\(\); \}\}/); // Resume: open the saved draft
-    expect(service).toMatch(/onStartNew=\{async \(\) => \{ setAsking\(false\); await discardDraft\(\); resetDraft\(key\); router\.push\('\/request\/step1'\); \}\}/); // Start new: discard, then a new request
-    expect(service).toMatch(/onCancel=\{\(\) => setAsking\(false\)\}/); // Cancel: nothing
+    expect(service).toContain('onResume={openSaved}'); // Resume: open the saved draft (the sheet stays up with a spinner while it is read, then closes as the form opens)
+    expect(service).toMatch(/const startNew = \(\) => runChoice\('new', async \(\) => \{\s+await discardDraft\(\);\s+resetDraft\(key\);\s+setAsking\(false\);\s+router\.push\('\/request\/step1'\);/); // Start new: discard, then a new request
+    expect(service).toContain('onStartNew={startNew}');
+    expect(service).toContain('onCancel={() => { if (!busyRef.current) setAsking(false); }}'); // Cancel: nothing (and nothing while a choice is being carried out)
     const sheet = read('components/home/DraftSheet.js');
     expect(sheet).toContain('<Modal visible={visible} transparent animationType="slide"');
     expect(sheet).toMatch(/width: 40, height: 4/); // the drag handle

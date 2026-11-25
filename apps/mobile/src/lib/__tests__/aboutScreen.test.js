@@ -13,9 +13,9 @@ const code = (rel) => read(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:
 
 // The approved text, as supplied (an independent copy). Every character matters: the em dashes, the "24×7", the figures, "across the India".
 const APPROVED = [
-  'Since 2004, Humancare World Wide has stood by one promise: no one should ever face a medical emergency alone. What began as a dedicated medical assistance provider has grown into a trusted global network of hospitals, aviation experts, and compassionate medical professionals — united by a single commitment, care without borders.',
-  'Our mobile app puts that promise directly in your hands. In moments that matter, every second counts: with one tap, the app connects you to our 24×7 emergency control centre to request an air ambulance, arrange ground transport, coordinate hospital admission, or call medical help for a loved one — no queues, no confusion, no delay.',
-  'Through the app, you access more than 3,500 partner hospitals and 11,000+ medical facilities worldwide, with experienced doctors, surgeons and paramedics managing every stage of care end to end — from documentation and clearances to bed-to-bed patient transfer. Beyond emergencies, book home health care, teleconsultations and digital paperwork that removes the stress of medical formalities.',
+  'Since 2004, Humancare World Wide has stood by one promise: no one should ever face a medical emergency alone. What began as a dedicated medical assistance provider has grown into a trusted global network of hospitals, aviation experts, and compassionate medical professionals, united by a single commitment: care without borders.',
+  'Our mobile app puts that promise directly in your hands. In moments that matter, every second counts: with one tap, the app connects you to our 24×7 emergency control centre to request an air ambulance, arrange ground transport, coordinate hospital admission, or call medical help for a loved one, with no queues, no confusion, no delay.',
+  'Through the app, you access more than 3,500 partner hospitals and 11,000+ medical facilities worldwide, with experienced doctors, surgeons and paramedics managing every stage of care end to end, from documentation and clearances to bed-to-bed patient transfer. Beyond emergencies, book home health care, teleconsultations and digital paperwork that removes the stress of medical formalities.',
   'With teams across the India, UAE, KSA, the UK and beyond, support in over 150 countries is always within reach. When every second matters, we are already on our way.',
 ];
 
@@ -30,11 +30,10 @@ describe('the approved introduction', () => {
       expect(all).toContain(piece);
     }
   });
-  test('nothing was shortened, paraphrased or added: the content file holds the company name and the four paragraphs, nothing else', () => {
+  test('nothing was shortened, paraphrased or added: the content file holds the four paragraphs, nothing else', () => {
     expect(content.ABOUT_INTRO.paragraphs.join('\n')).toBe(APPROVED.join('\n'));
     expect(Object.keys(content)).toEqual(['ABOUT_INTRO']);
-    expect(Object.keys(content.ABOUT_INTRO)).toEqual(['name', 'paragraphs']);
-    expect(content.ABOUT_INTRO.name).toBe('HumanCare Worldwide');
+    expect(Object.keys(content.ABOUT_INTRO)).toEqual(['paragraphs']);
   });
 });
 
@@ -49,8 +48,8 @@ describe('nothing else is on the page', () => {
     expect(imports.join('\n')).not.toMatch(/expo-constants|PressBox|lucide/);
     expect(imports.filter((line) => /data\/images/.test(line))).toEqual([]); // no logo, no image of any kind
   });
-  test('the only text on the page is the company name and the four paragraphs', () => {
-    expect((screen.match(/<Text\b/g) || []).length).toBe(2); // the name, and the one Text drawn once per paragraph
+  test('the only text on the page is the four paragraphs', () => {
+    expect((screen.match(/<Text/g) || []).length).toBe(1); // the one Text drawn once per paragraph (no company name heading)
     expect(screen).toContain('ABOUT_INTRO.paragraphs.map((paragraph, i) => (');
     expect(screen).toContain('{t(`about_p${i + 1}`)}</Text>'); // each paragraph in the person's language (the English dictionary text is the approved text: translationParity / areasTranslated tests)
     expect(screen).not.toContain('.slice('); // no paragraph is cut short
@@ -62,25 +61,21 @@ describe('nothing else is on the page', () => {
   });
 });
 
-describe('the heading at the top: the company name, and no logo', () => {
+describe('no company name heading and no logo at the top of the page', () => {
   const screen = code('app/about.js');
-  const block = screen.slice(screen.indexOf('<View style={{ alignItems'), screen.indexOf('ABOUT_INTRO.paragraphs.map'));
   test('the logo is gone from this page: no image and no logo import (the logo file itself stays for the rest of the app)', () => {
     expect(screen).not.toMatch(/LOGO|<Image|\bImage\b|require\(|uri:/);
     expect(read('data/images.js')).toMatch(/LOGO\s*=\s*require\(/);
   });
-  test('the company name is shown at the top, as a heading, centred, in the app\'s brand style', () => {
-    expect(block).toContain('accessibilityRole="header"');
-    expect(block).toContain('className="text-center font-inter-black text-[20px] text-navy">{t(\'about_name\')}</Text>');
-    expect(content.ABOUT_INTRO.name).toBe('HumanCare Worldwide');
+  test('there is no company name heading: the title bar says "About" and the page starts with the introduction', () => {
+    expect(screen).not.toContain('about_name');
+    expect(screen).not.toContain('accessibilityRole="header"');
+    expect(screen).not.toContain('ABOUT_INTRO.name');
+    for (const lang of Object.keys(i18n)) expect({ lang, has: 'about_name' in i18n[lang] }).toEqual({ lang, has: false });
+    expect(i18n.EN.prof_about).toBe('About');
   });
-  test('the name is centred at the top, with space before the introduction', () => {
-    expect(block).toContain("alignItems: 'center'");
-    expect(block).toContain('marginBottom: 24');
-    expect(screen.indexOf('{ABOUT_INTRO.name}')).toBeLessThan(screen.indexOf('ABOUT_INTRO.paragraphs.map'));
-  });
-  test('open layout: no card, border, shadow or background around the name either', () => {
-    for (const boxed of ['Card', 'backgroundColor', 'bg-', 'border', 'shadow', 'elevation', 'rounded']) expect({ boxed, present: block.includes(boxed) }).toEqual({ boxed, present: false });
+  test('the title says just About in every language, with no company name', () => {
+    for (const lang of Object.keys(i18n)) expect({ lang, named: /Humancare/i.test(i18n[lang].prof_about) }).toEqual({ lang, named: false });
   });
 });
 
@@ -94,7 +89,7 @@ describe('the layout: open text, styled exactly like the Privacy Policy page', (
 
   test('the Privacy Policy page is the LegalScreen component (so its values are LegalScreen\'s), and it is untouched', () => {
     expect(privacy).toContain("import { LegalScreen } from '../components/LegalScreen';");
-    expect(privacy).toContain('<LegalScreen titleKey="privacy_title" sections={SECTIONS} />');
+    expect(privacy).toContain('<LegalScreen titleKey="privacy_title" sections={SECTIONS} showUpdated={false} />'); // the Privacy page shows no "Last updated" line
   });
   test('the same side and top padding as the Privacy page: 18 on every side, so the left and right are equal', () => {
     const mine = /<Body contentClassName="([^"]+)">/.exec(screen)[1];
@@ -166,7 +161,7 @@ describe('the layout: open text, styled exactly like the Privacy Policy page', (
 
 describe('what this work did not touch', () => {
   test('the Profile row that opens the page is unchanged, and the route and the legal screens still exist', () => {
-    expect(code('app/profile.js')).toContain("router.push('/about')");
+    expect(code('app/(tabs)/profile.js')).toContain("router.push('/about')");
     expect(fs.existsSync(path.join(__dirname, '../../app/about.js'))).toBe(true);
     expect(fs.existsSync(path.join(__dirname, '../../app/terms.js'))).toBe(true);
     expect(fs.existsSync(path.join(__dirname, '../../app/privacy.js'))).toBe(true);

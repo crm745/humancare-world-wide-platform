@@ -145,7 +145,7 @@ describe('missing fields', () => {
     expect(model.reference).toBe('Request');
     expect(model.statusLabel).toBe('Weird status');
     expect(model.submittedAt).toBeNull();
-    expect(model.serviceName).toBe('HumanCare service request');
+    expect(model.serviceName).toBe('Humancare World Wide service request');
   });
   test('rows with an empty or blank value are dropped, a zero is kept (age 0, 0 LPM)', () => {
     const rows = rowsOf(build('ground', { patientAge: 0, patientGender: '', description: '   ', careLevel: null, equipOxygenLpm: 0, equipOxygen: true }));

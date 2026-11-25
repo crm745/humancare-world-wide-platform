@@ -14,5 +14,5 @@ const SECTIONS = [
 ];
 
 export default function Privacy() {
-  return <LegalScreen titleKey="privacy_title" sections={SECTIONS} />;
+  return <LegalScreen titleKey="privacy_title" sections={SECTIONS} showUpdated={false} />;
 }

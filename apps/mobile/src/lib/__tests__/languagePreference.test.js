@@ -116,19 +116,19 @@ describe('how AppContext uses it (source checks; the screens are not rendered in
 describe('regression: Profile, the language sheet and the other screens still read the same context', () => {
   const read = (p) => fs.readFileSync(path.join(__dirname, p), 'utf8');
   test('the language sheet still lists LANGUAGES, marks the current one and calls setLang', () => {
-    const profile = read('../../app/profile.js');
-    expect(profile).toContain("import { LANGUAGES } from '../data/mock';");
+    const profile = read('../../app/(tabs)/profile.js');
+    expect(profile).toContain("import { LANGUAGES } from '../../data/mock';");
     expect(profile).toContain('setLang(l.code);');
     expect(profile).toContain('const on = l.code === lang;');
     expect(profile).toContain("t('choose_language')");
   });
   test('every RTL consumer still reads isRTL from the context', () => {
-    for (const file of ['../../app/_layout.js', '../../components/layout.js', '../../components/widgets.js', '../../components/NationalityPhone.js', '../../app/profile.js']) {
+    for (const file of ['../../app/_layout.js', '../../components/layout.js', '../../components/widgets.js', '../../components/NationalityPhone.js', '../../app/(tabs)/profile.js']) {
       expect(read(file)).toMatch(/isRTL/);
     }
   });
   test('Home and the other screens only call t(key)', () => {
-    expect(read('../../app/home.js')).toContain('const { t, toast, isCorporate, profile } = useApp();');
+    expect(read('../../app/(tabs)/home.js')).toContain('const { t, toast, isCorporate, profile } = useApp();');
   });
   test('the session start is untouched by the language work', () => {
     const source = read('../../state/AppContext.js');

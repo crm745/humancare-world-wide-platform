@@ -366,7 +366,7 @@ describe('the upload-list message table of the mobile app matches the words the 
     (await policy.fileContentProblem({ path: mismatchFile, size: policy.MAX_FILE_BYTES + 1, mimetype: 'application/pdf', originalname: 'a.pdf' })).body.error,
     (await policy.fileContentProblem({ path: path.join(mockDir, 'does-not-exist'), size: 5, mimetype: 'application/pdf', originalname: 'a.pdf' })).body.error,
     'Unsupported file type. Allowed: PDF, JPG, PNG, WEBP, DOC, DOCX.', 'File too large', 'file is required', 'Request not found', 'This request has no case yet.',
-    'Document uploads are not available for Teleconsultation requests.', 'That upload id was already used for a different file.', 'This request has been approved. Please contact HumanCare to add more documents.',
+    'Document uploads are not available for Teleconsultation requests.', 'That upload id was already used for a different file.', 'This request has been approved. Please contact Humancare World Wide to add more documents.',
   ];
   test('every message the policy and the scan layer write is recognised by exactly the pattern for its code', async () => {
     const texts = [...(await actual())];
@@ -374,7 +374,7 @@ describe('the upload-list message table of the mobile app matches the words the 
       expect(scanSource).toContain(literal); // the string really is in the backend source
       texts.push(literal);
     }
-    for (const literal of ['You are uploading files too quickly. Please wait a few minutes and try again.', 'You have reached the daily limit for uploads. Please try again tomorrow or contact HumanCare.']) {
+    for (const literal of ['You are uploading files too quickly. Please wait a few minutes and try again.', 'You have reached the daily limit for uploads. Please try again tomorrow or contact Humancare World Wide.']) {
       expect(limiterSource).toContain(literal);
       texts.push(literal);
     }

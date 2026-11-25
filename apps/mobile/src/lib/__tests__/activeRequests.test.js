@@ -37,8 +37,8 @@ describe('which requests are active (the ONE definition, shared with My Requests
     expect(A.homeActiveSection([]).count).toBe(statusCounts([]).active);
   });
   test('My Requests filters with the same function (there is no second copy of the rule)', () => {
-    expect(read('app', 'my-requests.js')).toContain("status === 'active' ? isActiveRequest(r)");
-    expect(read('app', 'my-requests.js')).not.toMatch(/\['submitted', 'progress'\]\.includes/);
+    expect(read('app', '(tabs)', 'my-requests.js')).toContain("status === 'active' ? isActiveRequest(r)");
+    expect(read('app', '(tabs)', 'my-requests.js')).not.toMatch(/\['submitted', 'progress'\]\.includes/);
   });
 });
 
@@ -46,36 +46,33 @@ describe('how many cards Home shows', () => {
   const sec = (count) => A.homeActiveSection(items(Array.from({ length: count }, () => req())));
   test('0 active: the section is hidden (nothing is drawn)', () => {
     const s = A.homeActiveSection(items([req({ status: 'completed' })]));
-    expect(s).toMatchObject({ count: 0, shown: [], hasMore: false });
+    expect(s).toMatchObject({ count: 0, shown: [], visible: false });
     const component = read('components', 'home', 'ActiveRequestCard.js');
-    expect(component).toContain('if (!section || section.count === 0) return null;');
-    expect(read('app', 'home.js')).toContain('{activeSection.count > 0 && (');
+    expect(component).toContain('if (!section || !section.visible) return null;');
+    expect(read('app', '(tabs)', 'home.js')).toContain('{activeSection.visible && (');
   });
-  test('1 active: one card, no "All Active Requests"', () => { expect(sec(1)).toMatchObject({ count: 1, hasMore: false }); expect(sec(1).shown).toHaveLength(1); });
-  test('2 or more: still exactly ONE card (the first by the ordering), and "All Active Requests" with the real count', () => {
+  test('1 active: the one card', () => { expect(sec(1)).toMatchObject({ count: 1, visible: true }); expect(sec(1).shown).toHaveLength(1); });
+  test('2 or more: the whole section is hidden (the Tracking tab lists them), but the count stays the real one', () => {
     expect(A.HOME_ACTIVE_MAX).toBe(1);
-    for (const count of [2, 3, 4, 9]) { const s = sec(count); expect(s.shown).toHaveLength(1); expect(s).toMatchObject({ count, hasMore: true }); }
-    const component = read('components', 'home', 'ActiveRequestCard.js');
-    expect(component).toContain("{section.hasMore ? (");
-    expect(component).toContain("t('home_all_active_requests')");
+    for (const count of [2, 3, 4, 9]) { const s = sec(count); expect(s.shown).toHaveLength(0); expect(s).toMatchObject({ count, visible: false }); expect(s.active).toHaveLength(count); }
   });
-  test('the one card is the first by the ordering: patient action required first, then most recently updated', () => {
+  test('the ordering Home and Tracking share: patient action required first, then most recently updated; Home draws the one request there is', () => {
     const older = req({ updatedAt: '2026-11-01T10:00:00.000Z' });
     const newer = req({ updatedAt: '2026-11-22T10:00:00.000Z' });
     const needs = req({ updatedAt: '2026-11-02T10:00:00.000Z', reviewStatus: 'changes_requested' });
-    expect(A.homeActiveSection(items([older, newer])).shown.map((i) => i.rawId)).toEqual([newer.id]);
-    expect(A.homeActiveSection(items([older, newer, needs])).shown.map((i) => i.rawId)).toEqual([needs.id]);
+    expect(A.activeRequestsOf(items([older, newer])).map((i) => i.rawId)).toEqual([newer.id, older.id]);
+    expect(A.activeRequestsOf(items([older, newer, needs])).map((i) => i.rawId)).toEqual([needs.id, newer.id, older.id]);
     expect(A.homeActiveSection(items([older, newer, needs])).count).toBe(3); // the count is every active request
   });
   test('My Requests is unchanged: it still lists every active request (Home\'s limit is not applied there)', () => {
-    const mr = read('app', 'my-requests.js');
+    const mr = read('app', '(tabs)', 'my-requests.js');
     expect(mr).not.toMatch(/HOME_ACTIVE_MAX|homeActiveSection|slice\(0, 1\)/);
     expect(mr).toContain('isActiveRequest(r)');
   });
-  test('each request has its own card: cards are keyed and built per request, never combined', () => {
-    const s = sec(2);
+  test('the one card is built from the request itself, keyed by its id', () => {
+    const s = sec(1);
     expect(s.shown).toHaveLength(1);
-    expect(s.active).toHaveLength(2);
+    expect(s.active).toHaveLength(1);
     expect(read('components', 'home', 'ActiveRequestCard.js')).toContain('section.shown.map((item) => <ActiveRequestCard key={item.rawId} item={item}');
   });
 });
@@ -165,26 +162,24 @@ describe('what one card shows', () => {
     expect(v.variant).toBe(I18N[lang].tb_short_charter);
     expect(v.statusLabel).toBe(I18N[lang].status_progress);
     expect(I18N[lang].home_active_requests.trim()).not.toBe('');
-    expect(I18N[lang].home_all_active_requests.trim()).not.toBe('');
-    if (lang !== 'EN') { expect(I18N[lang].home_active_requests).not.toBe(I18N.EN.home_active_requests); expect(I18N[lang].home_all_active_requests).not.toBe(I18N.EN.home_all_active_requests); }
+    if (lang !== 'EN') expect(I18N[lang].home_active_requests).not.toBe(I18N.EN.home_active_requests);
   });
 });
 
 describe('the screens', () => {
   const component = read('components', 'home', 'ActiveRequestCard.js');
-  test('Track Request on a card opens THAT card\'s own request; "All Active Requests" opens My Requests with the Active filter selected', () => {
-    const home = read('app', 'home.js');
+  test('Track Request on a card opens THAT card own request, and Home has no "All Active Requests" link', () => {
+    const home = read('app', '(tabs)', 'home.js');
     expect(home).toContain("onTrack={(item) => router.push({ pathname: '/request-tracking', params: { id: item.rawId } })}");
-    expect(home).toContain("onViewAll={() => navReplace({ pathname: '/my-requests', params: { status: 'active' } })}");
     expect(component).toContain('onTrack={() => onTrack(item)}');
     expect(component).toContain('onOpen={() => onOpen(item)}');
-    const mr = read('app', 'my-requests.js');
+    const mr = read('app', '(tabs)', 'my-requests.js');
     expect(mr).toContain("useState(params.status || 'all')");
     expect(mr).toContain("const STATUSES = ['all', 'active', 'submitted', 'progress', 'completed', 'cancelled'];");
     expect(mr).toContain("s === 'active' ? 'lbl_active'");
   });
   test('My Requests draws active requests with the new card (All and Active) and the others with their own card; no new bottom tab', () => {
-    const mr = read('app', 'my-requests.js');
+    const mr = read('app', '(tabs)', 'my-requests.js');
     expect(mr).toContain('isActiveRequest(r)');
     expect(mr).toContain('<ActiveRequestCard key={r.id} item={r}');
     expect(mr).toContain('<RequestCard key={r.id} item={r}');
@@ -200,8 +195,6 @@ describe('the screens', () => {
     expect(component).toContain("maxWidth: '44%'");
     expect(component).toContain('minHeight: 46, borderRadius: 12');
     expect(component).toContain('hitSlop={{ top: 1, bottom: 1 }}'); // 46 + 2 = 48 dp touch target
-    expect(component).toContain("minHeight: 48, borderRadius: 14");
-    expect(component).toContain("borderColor: '#DCE1F2'");
     expect((component.match(/scaleX: -1/g) || []).length).toBe(1); // only the Track Request arrow remains, and it mirrors in RTL
     expect(component).toContain('accessibilityLabel={`${t(\'home_track_request\')}, ${v.reference}`}');
     expect(component).toContain("accessibilityLabel={`${v.label}. ${t('mr_view_details')}`}");
@@ -212,9 +205,11 @@ describe('the screens', () => {
     expect(component).toContain('i < progress.step ? COLORS.primary');
     expect(component).not.toMatch(/\d+\s*%.*progress|progress.*percent/i); // no invented percentages
   });
-  test('Home keeps its loading skeleton, error and pull-to-refresh', () => {
-    const home = read('app', 'home.js');
-    expect(home).toContain('<ActiveRequestSkeleton label={t(\'sk_loading_active\')} />');
+  test('Home has no Active Request skeleton (the card appears only once the list confirms exactly one), and keeps its error and pull-to-refresh', () => {
+    const home = read('app', '(tabs)', 'home.js');
+    expect(home).not.toContain('ActiveRequestSkeleton');
+    expect(home).toContain('<Reveal animate={arrivesLater}>'); // fades in after a cold start, simply appears when the list was already known
+    expect(home).toContain('const [arrivesLater] = useState(() => loading && !isCorporate);');
     expect(home).toContain('<LoadFailure titleKey="lf_title_home"');
     expect(home).toContain('refreshControl={isCorporate ? undefined : <AppRefreshControl');
   });
@@ -238,13 +233,13 @@ describe('card navigation: the body opens Request Details, Track Request opens T
     expect(card).toContain('minHeight: 46');
   });
   test('Home: the body opens /request-details and Track opens /request-tracking, each with THAT card\'s own id', () => {
-    const home = read('app', 'home.js');
+    const home = read('app', '(tabs)', 'home.js');
     expect(home).toContain("onOpen={(item) => router.push({ pathname: '/request-details', params: { id: item.rawId } })}");
     expect(home).toContain("onTrack={(item) => router.push({ pathname: '/request-tracking', params: { id: item.rawId } })}");
     expect(component).toContain('onOpen={() => onOpen(item)} onTrack={() => onTrack(item)}');
   });
   test('My Requests: the same two actions for an active request', () => {
-    const mr = read('app', 'my-requests.js');
+    const mr = read('app', '(tabs)', 'my-requests.js');
     expect(mr).toContain("onOpen={() => router.push({ pathname: '/request-details', params: { id: r.rawId } })} onTrack={() => router.push({ pathname: '/request-tracking', params: { id: r.rawId } })}");
   });
 });
@@ -261,28 +256,18 @@ describe('Private Charter progress stays evidence-based', () => {
   });
 });
 
-describe('no number and no arrow on the section header and the "View All Active Requests" button', () => {
+describe('Home has no "View All Active Requests" button any more', () => {
   const component = read('components', 'home', 'ActiveRequestCard.js');
   const section = component.slice(component.indexOf('export function ActiveRequestsSection'));
   test('the header is the title only: no count pill, and its screen-reader label has no number', () => {
     expect(section).not.toContain('{section.count}');
-    expect(section).not.toMatch(/section\.count\}/);
+    expect(section).not.toMatch(/section.count}/);
     expect(section).toContain("<Text accessibilityRole=\"header\"");
-    expect(section).not.toMatch(/accessibilityLabel=\{`\$\{t\('home_active_requests'\)\}/);
+    expect(section).not.toMatch(/accessibilityLabel={`${t('home_active_requests')}/);
   });
-  test('the button is the text only: no number, no arrow or chevron; its label has no number', () => {
-    expect(section).not.toContain('ChevronRight');
-    expect(component).not.toContain('ChevronRight');
-    expect(section).toContain("accessibilityLabel={t('home_all_active_requests')}");
-    const button = section.slice(section.indexOf('{section.hasMore ? ('));
-    expect(button).not.toMatch(/section\.count|Chevron|Arrow/);
-    expect(button).toContain("{t('home_all_active_requests')}");
-  });
-  test('the button text reads "View All Active Requests" in all six languages, still shown only when there are 2 or more', () => {
-    expect(I18N.EN.home_all_active_requests).toBe('View All Active Requests');
-    for (const lang of LANGS) expect({ lang, ok: I18N[lang].home_all_active_requests.trim() !== '' }).toEqual({ lang, ok: true });
-    for (const lang of LANGS.filter((l) => l !== 'EN')) expect(I18N[lang].home_all_active_requests).not.toBe(I18N.EN.home_all_active_requests);
-    expect(A.homeActiveSection(items([req()])).hasMore).toBe(false);
-    expect(A.homeActiveSection(items([req(), req()])).hasMore).toBe(true);
+  test('the button, its handler and its text are gone from the section, the screen and all six dictionaries', () => {
+    expect(section).not.toMatch(/home_all_active_requests|onViewAll|hasMore|ChevronRight/);
+    expect(read('app', '(tabs)', 'home.js')).not.toMatch(/onViewAll={() => navReplace|home_all_active_requests/);
+    for (const lang of LANGS) expect({ lang, has: 'home_all_active_requests' in I18N[lang] }).toEqual({ lang, has: false });
   });
 });

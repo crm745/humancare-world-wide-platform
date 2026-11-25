@@ -1,4 +1,4 @@
-// Draws the request summary PDF from the document model (summary-model.js): the HumanCare Worldwide header with the logo, the title, a meta panel (Request ID, status, generated and submitted
+// Draws the request summary PDF from the document model (summary-model.js): the Humancare World Wide header with the logo, the title, a meta panel (Request ID, status, generated and submitted
 // dates), the sections as two-column tables with wrapping text, the uploaded documents, the timeline, and on every page a running header and "Page X of Y". A4, 48 pt margins.
 //
 // TEXT. Every text is cut into runs by script (pdf/fonts.js) and each run is drawn with the Noto font of its script, so what the patient typed in Hindi, Marathi, Gujarati, Telugu or Arabic is drawn,
@@ -99,7 +99,7 @@ function renderSummaryPdf(model) {
       size: [PAGE.width, PAGE.height],
       margins: { top: MARGIN.top, bottom: MARGIN.bottom, left: MARGIN.left, right: MARGIN.right },
       bufferPages: true,
-      info: { Title: `HumanCare Worldwide - Request Summary ${model.reference}`, Author: 'HumanCare Worldwide', Subject: 'Request Summary', Creator: 'HumanCare Worldwide' },
+      info: { Title: `Humancare World Wide - Request Summary ${model.reference}`, Author: 'Humancare World Wide', Subject: 'Request Summary', Creator: 'Humancare World Wide' },
     });
     const chunks = [];
     doc.on('data', (chunk) => chunks.push(chunk));
@@ -111,7 +111,7 @@ function renderSummaryPdf(model) {
 
     // ---- the running header of the pages after the first
     const drawRunningHeader = () => {
-      doc.font(fontPath('latin', true)).fontSize(9).fillColor(COLORS.brand).text('HumanCare Worldwide', MARGIN.left, 40, { lineBreak: false });
+      doc.font(fontPath('latin', true)).fontSize(9).fillColor(COLORS.brand).text('Humancare World Wide', MARGIN.left, 40, { lineBreak: false });
       doc.font(fontPath('latin')).fontSize(8.5).fillColor(COLORS.muted).text(`Request ${model.reference}  ·  Request Summary`, MARGIN.left, 41, { width: CONTENT_W, align: 'right', lineBreak: false });
       doc.moveTo(MARGIN.left, 60).lineTo(PAGE.width - MARGIN.right, 60).lineWidth(0.8).strokeColor(COLORS.line).stroke();
     };
@@ -123,7 +123,7 @@ function renderSummaryPdf(model) {
     // ---- the first page's header, title and meta panel
     const drawFirstPage = () => {
       doc.image(LOGO, MARGIN.left, 34, { width: LOGO_W });
-      doc.font(fontPath('latin', true)).fontSize(15).fillColor(COLORS.brand).text('HumanCare Worldwide', MARGIN.left + LOGO_W + 14, 40, { lineBreak: false });
+      doc.font(fontPath('latin', true)).fontSize(15).fillColor(COLORS.brand).text('Humancare World Wide', MARGIN.left + LOGO_W + 14, 40, { lineBreak: false });
       doc.font(fontPath('latin')).fontSize(8.5).fillColor(COLORS.muted).text('Global Medical Assistance Company', MARGIN.left + LOGO_W + 14, 60, { lineBreak: false });
       doc.font(fontPath('latin', true)).fontSize(7.5).fillColor(COLORS.faint).text('REQUEST SUMMARY', MARGIN.left, 40, { width: CONTENT_W, align: 'right', characterSpacing: 1.2, lineBreak: false });
       doc.font(fontPath('latin', true)).fontSize(12).fillColor(COLORS.navy).text(model.reference, MARGIN.left, 52, { width: CONTENT_W, align: 'right', lineBreak: false });
@@ -231,7 +231,7 @@ function renderSummaryPdf(model) {
 
     // ---- the closing line, and the footer with page numbers on every page
     ensureRoom(lineHeight(8.5) * 2);
-    flow(wrapLines(doc, 'This summary lists the details submitted for this request. For the latest status, open the request in the HumanCare app.', CONTENT_W, 8.5), MARGIN.left, 8.5, COLORS.muted);
+    flow(wrapLines(doc, 'This summary lists the details submitted for this request. For the latest status, open the request in the Humancare World Wide app.', CONTENT_W, 8.5), MARGIN.left, 8.5, COLORS.muted);
 
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i += 1) {

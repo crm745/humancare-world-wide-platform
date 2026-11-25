@@ -11,7 +11,7 @@ const i18n = JSON.parse(fs.readFileSync(path.join(__dirname, '../../data/i18n.js
 const read = (relative) => fs.readFileSync(path.join(__dirname, relative), 'utf8');
 const NL = String.fromCharCode(10);
 const codeOf = (source) => source.split(NL).filter((l) => !l.trim().startsWith('//')).join(NL);
-const home = codeOf(read('../../app/home.js'));
+const home = codeOf(read('../../app/(tabs)/home.js'));
 const grid = codeOf(read('../../components/home/ServicesGrid.js'));
 const air = codeOf(read('../../app/air-ambulance.js'));
 const all = codeOf(read('../../app/all-services.js'));
@@ -29,7 +29,7 @@ describe('the eight top-level services, in the approved order', () => {
     expect(HOME_SERVICES.map((s) => s.key)).toEqual(['air', 'tele', 'homecare', 'ground', 'mortal', 'corporate', 'marine', 'medvalue']);
   });
   test('Home draws this list, and a "More" tile as the ninth cell', () => {
-    expect(home).toContain("import { HOME_SERVICES } from '../data/mock';");
+    expect(home).toContain("import { HOME_SERVICES } from '../../data/mock';");
     expect(home).toContain('const HOME_TILES = HOME_SERVICES;');
     expect(home).toContain('services={HOME_TILES}');
     expect(grid).toContain("const items = [...services, { key: '__more', more: true }];");
@@ -262,15 +262,15 @@ describe('the Home grid: ALWAYS three columns, at every width', () => {
 
 describe('what was left alone', () => {
   test('Home keeps its header, banner, active request card, SOS bar and bottom navigation', () => {
-    for (const piece of ['<HomeHeader hasUnread={hasUnread}', '<BannerCarousel', '<ActiveRequestsSection', '<ActiveRequestSkeleton', '<SosBar bottom={TAB_BAR + insets.bottom}', '<BottomNav />', '<Greeting']) {
+    for (const piece of ['<HomeHeader hasUnread={hasUnread}', '<BannerCarousel', '<ActiveRequestsSection', '<SosBar bottom={TAB_BAR + insets.bottom}', '<BottomNav />', '<Greeting']) {
       expect(home).toContain(piece);
     }
     expect(home).toContain("router.push({ pathname: '/request-tracking', params: { id: item.rawId } })");
   });
-  test('All Services keeps its header and bottom navigation, and its card design (its SOS is the floating button now)', () => {
+  test('All Services keeps its header with a back button (it is not a tab: no bottom navigation), and its card design (its SOS is the floating button now)', () => {
     expect(all).toContain("<TopBar title={t('filter_svc_all')} />");
     expect(all).not.toContain('SosBar');
-    expect(all).toContain('<BottomNav />');
+    expect(all).not.toContain('BottomNav');
     expect(all).toContain("minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: 14");
     expect(all).toContain("width: 54, height: 54, borderRadius: 14, backgroundColor: '#EDF2F9'");
     expect(all).toContain("borderColor: '#D6E2F2'");
@@ -278,7 +278,7 @@ describe('what was left alone', () => {
   test('the "More" tile (not a "View all services" link) opens All Services, which is a screen of its own', () => {
     expect(grid).not.toContain('home_view_all');
     expect(grid).toContain('s.more ? onViewAll() : onPressService(s)');
-    expect(home).toContain("onViewAll={() => navReplace('/all-services')}");
+    expect(home).toContain("onViewAll={() => router.push('/all-services')}"); // a screen above Home, not a tab: back returns to Home
   });
   test('"Select a Service" (used when changing the service of a request) is as it was', () => {
     expect(codeOf(read('../../components/ServiceGrid.js'))).toContain('SERVICE_TILES.map((s) => (');

@@ -8,26 +8,28 @@ import { MODAL_EDGE_PROPS } from '../keyboard';
 import { Button, Text } from '../ui';
 import { shouldDismissSheet, sheetOffset } from '../../lib/sheetDrag';
 import { TextButton } from '../network/TextButton';
+import { Spinner } from '../Spinner';
 
 // "Saved draft found": the question asked when a new request is started while an unfinished one is saved on the phone. A bottom sheet over a dimmed screen (it replaces the native alert):
 // a drag handle, a pencil in a soft circle, the title and the text, then Resume (primary), Start new (outline, red: it deletes the saved draft) and Cancel. The three actions are exactly the old
 // alert's: Resume opens the saved draft, Start new discards it and begins a new request, Cancel does nothing. Tapping the dimmed area is Cancel.
 const FONT = { 400: 'Inter_400Regular', 800: 'Inter_800ExtraBold' };
 
-export function DraftSheet({ visible, onResume, onStartNew, onCancel }) {
+// `busy`: null, or 'resume' / 'new' while the choice is being carried out (the saved draft is read, or deleted): the tapped button shows its spinner at once, the sheet stays up, and a second tap does nothing.
+export function DraftSheet({ visible, busy = null, onResume, onStartNew, onCancel }) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel} {...MODAL_EDGE_PROPS}>
       <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,23,42,0.45)' }}>
         {/* The dimmed area closes the sheet by touch; a screen reader has the Cancel button, so this is not a second one. */}
         <Pressable accessible={false} importantForAccessibility="no" onPress={onCancel} style={{ flex: 1 }} />
-        <DraftSheetBody onResume={onResume} onStartNew={onStartNew} onCancel={onCancel} />
+        <DraftSheetBody busy={busy} onResume={onResume} onStartNew={onStartNew} onCancel={onCancel} />
       </View>
     </Modal>
   );
 }
 
 // The sheet itself (no Modal): the handle, the pencil, the text and the three buttons.
-export function DraftSheetBody({ onResume, onStartNew, onCancel }) {
+export function DraftSheetBody({ busy = null, onResume, onStartNew, onCancel }) {
   const { t } = useApp();
   const insets = useSafeAreaInsets();
   // Dragging the sheet down (or flicking it) closes it, the same as Cancel; a short drag springs back (lib/sheetDrag.js).
@@ -49,12 +51,12 @@ export function DraftSheetBody({ onResume, onStartNew, onCancel }) {
           <Text accessibilityRole="header" style={{ marginTop: 14, textAlign: 'center', fontFamily: FONT[800], fontSize: 22, lineHeight: 28, color: '#0D2340' }}>{t('draft_prompt_title')}</Text>
           <Text style={{ marginTop: 8, textAlign: 'center', fontFamily: FONT[400], fontSize: 15, lineHeight: 22, color: '#5B6B84' }}>{t('draft_prompt_body')}</Text>
           <View style={{ marginTop: 20, gap: 10 }}>
-            <Button title={t('draft_resume')} onPress={onResume} className="min-h-[52px] rounded-2xl" />
+            <Button title={t('draft_resume')} loading={busy === 'resume'} disabled={busy === 'new'} onPress={onResume} className="min-h-[52px] rounded-2xl" />
             <Pressable
-              accessibilityRole="button" onPress={onStartNew}
-              style={{ minHeight: 52, borderRadius: 16, borderWidth: 1.5, borderColor: '#F1C7C7', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' }}
+              accessibilityRole="button" accessibilityState={{ disabled: !!busy, busy: busy === 'new' }} disabled={!!busy} onPress={onStartNew}
+              style={{ minHeight: 52, borderRadius: 16, borderWidth: 1.5, borderColor: '#F1C7C7', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', opacity: busy === 'resume' ? 0.5 : 1 }}
             >
-              <Text className="font-inter-bold" style={{ fontSize: 16, color: '#C53030' }}>{t('draft_start_new')}</Text>
+              {busy === 'new' ? <Spinner size={19} color="#C53030" trackColor="#F1C7C7" /> : <Text className="font-inter-bold" style={{ fontSize: 16, color: '#C53030' }}>{t('draft_start_new')}</Text>}
             </Pressable>
             <TextButton title={t('pd_cancel')} onPress={onCancel} />
           </View>

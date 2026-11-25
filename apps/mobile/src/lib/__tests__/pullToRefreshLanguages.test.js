@@ -17,7 +17,7 @@ const placeholders = (text) => (String(text).match(/\{\{?[A-Za-z0-9_.]+\}?\}/g) 
 
 // Every screen that can be pulled (data screens that reload, and the forms whose pull re-checks the connection).
 const PULL_SCREENS = [
-  'app/home.js', 'app/my-requests.js', 'app/my-documents.js', 'app/notifications.js', 'app/profile.js', 'app/request-details.js', 'app/request-tracking.js', 'app/tracking.js',
+  'app/(tabs)/home.js', 'app/(tabs)/my-requests.js', 'app/my-documents.js', 'app/notifications.js', 'app/(tabs)/profile.js', 'app/request-details.js', 'app/request-tracking.js', 'app/tracking.js',
   'app/personal-details.js', 'app/service/[key].js', 'components/request/RequestFrame.js',
 ];
 
@@ -33,7 +33,7 @@ describe('the same screens are pullable whatever the language', () => {
     }
   });
   test('the only conditions on the control are about the account (a corporate account has its own screens), never the language', () => {
-    for (const file of ['app/home.js', 'app/profile.js', 'app/notifications.js']) {
+    for (const file of ['app/(tabs)/home.js', 'app/(tabs)/profile.js', 'app/notifications.js']) {
       const lines = read(file).split('\n').filter((l) => /refreshControl=/.test(l));
       for (const line of lines) expect(line).not.toMatch(/lang|isRTL|AR\b/);
     }
@@ -89,7 +89,7 @@ describe('the loading and error messages exist, translated, in all six languages
     }
   });
   test('every pullable screen reports a failed pull with the SAME key, so the message differs only by language', () => {
-    for (const file of ['app/home.js', 'app/my-requests.js', 'app/my-documents.js', 'app/notifications.js', 'app/profile.js', 'app/request-details.js', 'app/request-tracking.js', 'app/tracking.js']) {
+    for (const file of ['app/(tabs)/home.js', 'app/(tabs)/my-requests.js', 'app/my-documents.js', 'app/notifications.js', 'app/(tabs)/profile.js', 'app/request-details.js', 'app/request-tracking.js', 'app/tracking.js']) {
       expect({ file, key: read(file).includes("t('sk_refresh_failed')") }).toEqual({ file, key: true });
     }
     expect(read('lib/useNetworkRefresh.js')).toContain("t('sk_refresh_failed')"); // the forms, the service detail and the personal details

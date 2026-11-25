@@ -39,7 +39,7 @@ describe('navigation: Marine opens its own workflow, not the generic form', () =
     expect(HOME_SERVICES.map((s) => s.key)).toEqual(['air', 'tele', 'homecare', 'ground', 'mortal', 'corporate', 'marine', 'medvalue']);
     const grid = read('components/ServiceGrid.js');
     expect(grid).toContain('router.push(`/service/${key}`)');
-    expect(read('app/home.js')).toContain('(s.route ? router.push(s.route) : openService(s.key))');
+    expect(read('app/(tabs)/home.js')).toContain('(s.route ? router.push(s.route) : openService(s.key))');
     expect(read('app/all-services.js')).toContain('(s.route ? router.push(s.route) : openService(s.key))');
   });
   test('"Request this service" starts the form for the key marine (the existing service page, unchanged)', () => {

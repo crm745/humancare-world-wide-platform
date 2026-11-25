@@ -37,7 +37,7 @@ describe('where each state goes', () => {
   });
   test('the routes are real screens, and Getting Started is public (a signed-out person can reach it)', () => {
     const { isPublicRoute } = require('../authGuard');
-    expect(fs.existsSync(path.join(__dirname, '../../app/home.js'))).toBe(true);
+    expect(fs.existsSync(path.join(__dirname, '../../app/(tabs)/home.js'))).toBe(true);
     expect(fs.existsSync(path.join(__dirname, '../../app/welcome.js'))).toBe(true);
     expect(isPublicRoute(START_ROUTE)).toBe(true);
     expect(isPublicRoute('/')).toBe(true); // the splash itself

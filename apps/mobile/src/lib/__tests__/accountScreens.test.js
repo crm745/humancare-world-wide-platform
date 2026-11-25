@@ -18,7 +18,7 @@ const LANGS = ['EN', 'HI', 'MR', 'GU', 'TE', 'AR'];
 const OTHERS = ['HI', 'MR', 'GU', 'TE', 'AR'];
 
 describe('Profile: About HumanCare, Delete account, Log out', () => {
-  const profile = code('app/profile.js');
+  const profile = code('app/(tabs)/profile.js');
   test('the order is About HumanCare, then Delete account, then Log out', () => {
     const about = profile.indexOf("t('prof_about')");
     const del = profile.indexOf("t('prof_delete')");
@@ -158,7 +158,7 @@ describe('strings: all six languages', () => {
     for (const lang of LANGS) expect(i18n[lang].del_blocked_body).toContain('{{n}}');
   });
   test('every key the new screens use exists', () => {
-    for (const file of ['app/about.js', 'app/delete-account.js', 'app/profile.js']) {
+    for (const file of ['app/about.js', 'app/delete-account.js', 'app/(tabs)/profile.js']) {
       for (const match of read(file).matchAll(/\bt\('([a-z_0-9]+)'/g)) {
         expect({ file, key: match[1], exists: typeof i18n.EN[match[1]] === 'string' }).toEqual({ file, key: match[1], exists: true });
       }

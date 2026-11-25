@@ -31,7 +31,7 @@ describe('no Pressable has a function style', () => {
     expect(hits).toEqual([]);
   });
   test('the components that lost their look on the phone use PressBox', () => {
-    for (const file of ['app/all-services.js', 'app/profile.js', 'app/request-details.js', 'components/requests/RequestCard.js', 'components/requests/RequestsHeader.js', 'components/sos/SosFab.js', 'components/tracking/TrackingDetails.js']) {
+    for (const file of ['app/all-services.js', 'app/(tabs)/profile.js', 'app/request-details.js', 'components/requests/RequestCard.js', 'components/requests/RequestsHeader.js', 'components/sos/SosFab.js', 'components/tracking/TrackingDetails.js']) {
       expect(fs.readFileSync(path.join(SRC, file), 'utf8')).toContain('<PressBox');
     }
   });

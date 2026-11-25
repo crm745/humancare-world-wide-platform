@@ -153,7 +153,7 @@ describe('the request forms (every service): a pull re-checks the connection and
 describe('screen audit: every patient screen has a decision (a new screen without one fails this test)', () => {
   // refresh: the screen reloads its server data on a pull | form: a pull re-checks the connection (the form is never reloaded) | none: why a pull would be meaningless
   const AUDIT = {
-    'app/home.js': 'refresh', 'app/my-requests.js': 'refresh', 'app/my-documents.js': 'refresh', 'app/notifications.js': 'refresh', 'app/profile.js': 'refresh',
+    'app/(tabs)/home.js': 'refresh', 'app/(tabs)/my-requests.js': 'refresh', 'app/(tabs)/active-tracking.js': 'refresh', 'app/my-documents.js': 'refresh', 'app/notifications.js': 'refresh', 'app/(tabs)/profile.js': 'refresh',
     'app/request-details.js': 'refresh', 'app/request-tracking.js': 'refresh', 'app/tracking.js': 'refresh', 'app/personal-details.js': 'refresh-or-recheck', 'app/service/[key].js': 'refresh',
     'app/request/step1.js': 'form', 'app/request/step2.js': 'form', 'app/request/review.js': 'form',
     'app/request/submitted.js': 'none: the result of a submission; its Try again is the only way a file is sent',
@@ -165,7 +165,7 @@ describe('screen audit: every patient screen has a decision (a new screen withou
     'app/reset-password.js': 'none: password reset', 'app/set-password.js': 'none: sets a password', 'app/complete-profile.js': 'none: a one-time form',
     'app/edit-profile.js': 'none: an edit form with nothing to reload', 'app/change-contact.js': 'none: a code flow', 'app/change-contact-otp.js': 'none: a code flow',
     'app/delete-account.js': 'none: a confirmation flow', 'app/delete-account-otp.js': 'none: a confirmation flow',
-    'app/_layout.js': 'none: layout',
+    'app/_layout.js': 'none: layout', 'app/(tabs)/_layout.js': 'none: layout',
   };
   const screens = (dir) => fs.readdirSync(path.join(SRC, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? screens(path.join(dir, e.name)) : [path.join(dir, e.name).replace(/\\/g, '/')]));
   // Corporate and Admin screens are not part of the patient app's audit.
@@ -194,7 +194,7 @@ describe('screen audit: every patient screen has a decision (a new screen withou
     expect(resource).toContain('if (refreshingRef.current) return;');
     expect(resource).toContain('setRefreshing(true);');
     expect(resource).toContain('if (failRef.current) failRef.current(err);');
-    for (const file of ['app/my-requests.js', 'app/my-documents.js', 'app/notifications.js', 'app/request-details.js', 'app/request-tracking.js', 'app/tracking.js', 'app/home.js']) {
+    for (const file of ['app/(tabs)/my-requests.js', 'app/my-documents.js', 'app/notifications.js', 'app/request-details.js', 'app/request-tracking.js', 'app/tracking.js', 'app/(tabs)/home.js']) {
       const source = read(file);
       expect({ file, hook: /useResource\(|useRequestTracking|useTracking/.test(source) || /onRefresh/.test(source) }).toEqual({ file, hook: true });
     }

@@ -21,7 +21,7 @@ function Faq({ q, a, last }) {
   const [open, setOpen] = useState(false);
   return (
     <Card className={`overflow-hidden p-0 ${last ? 'mb-4' : 'mb-3'}`}>
-      <Pressable onPress={() => setOpen(!open)} className="flex-row items-center justify-between gap-2 px-3.5 py-[15px]">
+      <Pressable onPress={() => setOpen(!open)} accessibilityRole="button" accessibilityState={{ expanded: open }} className="flex-row items-center justify-between gap-2 px-3.5 py-[15px]">
         <Text className="flex-1 font-inter-bold text-[13.5px]">{q}</Text>
         <View style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}><ChevronDown size={16} color="#97A4B8" /></View>
       </Pressable>
@@ -61,7 +61,7 @@ export default function HelpSupport() {
         </Card>
 
         <Heading>{t('lbl_faq')}</Heading>
-        {FAQS.map((f, i) => <Faq key={f.q} q={t(f.q)} a={f.a} last={i === FAQS.length - 1} />)}
+        {FAQS.map((f, i) => <Faq key={f.q} q={t(f.q)} a={t(f.a)} last={i === FAQS.length - 1} />)}
       </Body>
     </Screen>
   );

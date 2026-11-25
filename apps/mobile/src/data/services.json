@@ -76,7 +76,7 @@
   },
   "commercialair": {
     "title": "Medical Escort (Commercial Airlines)",
-    "desc": "ICU-grade stretcher and business-class wheelchair transfers on scheduled commercial flights — a cost-effective alternative to private air ambulances.",
+    "desc": "ICU-grade stretcher and business-class wheelchair transfers on scheduled commercial flights, a cost-effective alternative to private air ambulances.",
     "stats": [
       {
         "value": "2,000+",
@@ -101,7 +101,7 @@
   },
   "privatecharter": {
     "title": "Private Charter Air Ambulance Service",
-    "desc": "24/7 private chartered air ambulance from India, UAE, GCC, the UK, Canada and the US — airborne with a full ICU team in under 4 hours.",
+    "desc": "24/7 private chartered air ambulance from India, UAE, GCC, the UK, Canada and the US. Airborne with a full ICU team in under 4 hours.",
     "stats": [
       {
         "value": "<4 hrs",
@@ -151,7 +151,7 @@
   },
   "homecare": {
     "title": "Home Healthcare Services",
-    "desc": "Home ICU setup, private nursing, and remote patient monitoring — bringing critical care infrastructure into the home across 120+ cities.",
+    "desc": "Home ICU setup, private nursing, and remote patient monitoring, bringing critical care infrastructure into the home across 120+ cities.",
     "stats": [
       {
         "value": "120+",
@@ -229,7 +229,7 @@
   },
   "corporate": {
     "title": "Corporate Medical Solutions",
-    "desc": "Tailored workplace healthcare — onsite clinics, medical staffing, and wellness programs — supporting 50,000+ employees under annual health monitoring.",
+    "desc": "Tailored workplace healthcare, including onsite clinics, medical staffing, and wellness programs, supporting 50,000+ employees under annual health monitoring.",
     "stats": [
       {
         "value": "50,000+",

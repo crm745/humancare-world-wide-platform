@@ -21,7 +21,7 @@ describe('the rule', () => {
 
 describe('the screens', () => {
   test('My Requests switches scrolling off while its failure view shows and fits', () => {
-    const s = read('app', 'my-requests.js');
+    const s = read('app', '(tabs)', 'my-requests.js');
     expect(s).toContain('const fit = useFitScroll(!!error && !rows);');
     expect(s).toContain('scrollEnabled={fit.scrollEnabled} onLayout={fit.onLayout} onContentSizeChange={fit.onContentSizeChange}');
   });

@@ -118,7 +118,7 @@ describe('the wiring', () => {
     expect(wiring).toContain('clear: clearTokens');
   });
   test('Profile > Log out uses it: the screen opens first, the draft goes before the tokens, as before', () => {
-    const profile = read('app/profile.js');
+    const profile = read('app/(tabs)/profile.js');
     expect(profile).toContain("const signOut = async () => { navReplace(isCorporate ? '/corporate-login' : '/login'); await signOutSession({ isCorporate, beforeClear: clearDraftEverywhere }); };");
     expect(profile).not.toContain('clearTokens');
   });

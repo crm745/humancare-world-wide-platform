@@ -103,7 +103,7 @@ describe('request id changes (both screens)', () => {
 
   test('request-tracking starts over for a new id (useResource resets from the cache of the new key) with one fetch', () => {
     const hook = read('../useResource.js');
-    expect(hook).toContain('}, [key, enabled, reload]);');
+    expect(hook).toContain('}, [key, enabled, reload, freshMs]);');
     expect(hook).toContain('keyRef.current = key;');
     expect(requestTracking.match(/apiGet\(/g)).toHaveLength(1);
   });

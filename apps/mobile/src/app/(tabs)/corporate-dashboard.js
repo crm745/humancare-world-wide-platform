@@ -2,20 +2,21 @@ import { useState } from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
 import { Plus } from 'lucide-react-native';
-import { useApp } from '../state/AppContext';
-import { DEFAULT_FILTERS, applyFilters } from '../lib/filters';
-import { apiGet } from '../lib/api';
-import { toUiStatus, serviceKeyFromTitle } from '../lib/requestShape';
-import { Body, BottomNav, Screen, TopBar } from '../components/layout';
-import { Button, Card, Pill, Spacer, Text } from '../components/ui';
-import { FilterSheet } from '../components/FilterSheet';
-import { SearchHeader } from '../components/SearchHeader';
-import { AppRefreshControl } from '../components/AppRefreshControl';
-import { LoadFailure } from '../components/LoadFailure';
-import { Reveal } from '../components/skeleton/Reveal';
-import { useSkeletonGate } from '../components/skeleton/hooks';
-import { RowsSkeleton } from '../components/skeleton/screens';
-import { useResource } from '../lib/useResource';
+import { useApp } from '../../state/AppContext';
+import { DEFAULT_FILTERS, applyFilters } from '../../lib/filters';
+import { apiGet } from '../../lib/api';
+import { toUiStatus, serviceKeyFromTitle } from '../../lib/requestShape';
+import { Body, BottomNav, Screen, TopBar } from '../../components/layout';
+import { Button, Card, Pill, Spacer, Text } from '../../components/ui';
+import { FilterSheet } from '../../components/FilterSheet';
+import { SearchHeader } from '../../components/SearchHeader';
+import { AppRefreshControl } from '../../components/AppRefreshControl';
+import { LoadFailure } from '../../components/LoadFailure';
+import { Reveal } from '../../components/skeleton/Reveal';
+import { useSkeletonGate } from '../../components/skeleton/hooks';
+import { RowsSkeleton } from '../../components/skeleton/screens';
+import { useResource } from '../../lib/useResource';
+import { useRefreshOnFocus } from '../../lib/useTabRefresh';
 
 const STAGES = ['all', 'submitted', 'progress', 'scheduled'];
 const FILTER_SERVICES = [
@@ -60,6 +61,7 @@ export default function CorporateDashboard() {
     fetcher: () => apiGet('/corporate/cases').then(({ cases: rows }) => rows.map(toListItem)),
     onRefreshError: () => toast(t('sk_refresh_failed')),
   });
+  useRefreshOnFocus(reload); // the tab stays mounted: brought up to date quietly when it comes back into front (lib/useTabRefresh.js)
   const rawCases = data || [];
   const gate = useSkeletonGate(loading);
 

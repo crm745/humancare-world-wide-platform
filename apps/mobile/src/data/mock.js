@@ -95,12 +95,10 @@ export const REGIONAL_NUMBERS = [
   { label: 'country_uk', display: '+44 7557070702', tel: '+447557070702' },
 ];
 
-export const FAQS = [
-  { q: 'faq_q1', a: 'For critical cases, our team can have an aircraft airborne within 2–4 hours of confirmed clearance.' },
-  { q: 'faq_q2', a: 'We work directly with most major TPAs and insurers on a Guarantee of Payment basis.' },
-  { q: 'faq_q3', a: 'Open My Requests, tap a request, then View Live Tracking — no separate app needed.' },
-  { q: 'faq_q4', a: 'We have offices across 8 regions — India, UAE, Oman, Turkey, Canada, Kenya, Bangladesh and Singapore — plus a global network of 3,500+ partner hospitals.' },
-];
+// The Help & Support FAQs: ONLY what Humancare World Wide publishes on its own website (https://humancareworldwide.com/). Five are approved, in this order: hospital assistance, travel for treatment, Home Healthcare,
+// Mortal Remains and Corporate Medical Solutions. Each question and answer is a dictionary key (data/i18n.json faq_q<n> / faq_a<n>), so all six languages read the same list. Nothing here states a price,
+// an insurance cover, a response time, a guarantee or a policy the website does not publish.
+export const FAQS = Array.from({ length: 5 }, (_, i) => ({ q: `faq_q${i + 1}`, a: `faq_a${i + 1}` }));
 
 // The language list is the registry's (data/languages.js); this keeps the { code, name, label } shape the sheet reads.
 export const LANGUAGES = supportedLanguages();

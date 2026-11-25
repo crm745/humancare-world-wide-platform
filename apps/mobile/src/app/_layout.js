@@ -1,5 +1,6 @@
 // FIRST: if this window is the Google sign-in popup coming back from Google, hand the answer over before anything else loads (the web only).
 import { googleCallback } from '../lib/googleCallback';
+import '../lib/navGuardInstall'; // the navigation guard on the router: a repeated tap does not stack the same screen twice (lib/navGuard.js)
 import '../../global.css';
 import { View } from 'react-native';
 import { Stack } from 'expo-router';

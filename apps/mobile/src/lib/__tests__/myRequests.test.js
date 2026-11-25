@@ -13,7 +13,7 @@ const i18n = JSON.parse(fs.readFileSync(path.join(__dirname, '../../data/i18n.js
 const read = (relative) => fs.readFileSync(path.join(__dirname, relative), 'utf8');
 const NL = String.fromCharCode(10);
 const codeOf = (source) => source.split(NL).filter((l) => !l.trim().startsWith('//')).join(NL);
-const screen = codeOf(read('../../app/my-requests.js'));
+const screen = codeOf(read('../../app/(tabs)/my-requests.js'));
 const card = codeOf(read('../../components/requests/RequestCard.js'));
 const header = codeOf(read('../../components/requests/RequestsHeader.js'));
 
@@ -53,10 +53,10 @@ describe('toListItem only adds fields', () => {
     expect(applyFilters(list, DEFAULT_FILTERS, '2026-11-13').map((r) => r.id)).toEqual(['REQ-1064', 'REQ-1065']);
   });
   test('the only screen that uses toListItem is My Requests; the others use other helpers of requestShape, which are unchanged', () => {
-    const appDir = path.join(__dirname, '../../app');
-    const users = fs.readdirSync(appDir).filter((f) => f.endsWith('.js') && /import \{[^}]*\btoListItem\b[^}]*\} from '..\/lib\/requestShape'/.test(fs.readFileSync(path.join(appDir, f), 'utf8')));
-    expect(users).toEqual(['home.js', 'my-requests.js']); // Home builds its Active Requests section from the same list items (lib/activeRequests.js)
-    expect(read('../../app/corporate-dashboard.js')).toContain("import { toUiStatus, serviceKeyFromTitle } from '../lib/requestShape';");
+    const appDir = path.join(__dirname, '../../app/(tabs)'); // Home and My Requests live in the tab group
+    const users = fs.readdirSync(appDir).filter((f) => f.endsWith('.js') && /import \{[^}]*\btoListItem\b[^}]*\} from '..\/..\/lib\/requestShape'/.test(fs.readFileSync(path.join(appDir, f), 'utf8')));
+    expect(users).toEqual(['home.js']); // My Requests and Tracking load through lib/myRequestsResource.js, which holds toListItem // Home builds its Active Requests section from the same list items (lib/activeRequests.js)
+    expect(read('../../app/(tabs)/corporate-dashboard.js')).toContain("import { toUiStatus, serviceKeyFromTitle } from '../../lib/requestShape';");
     expect(toUiStatusOf('in_progress')).toBe('progress');
   });
 });
@@ -359,7 +359,7 @@ describe('the header', () => {
   test('built inside My Requests: the shared TopBar and SearchHeader are not used, and not changed', () => {
     expect(screen).not.toMatch(/TopBar|SearchHeader/);
     expect(read('../../components/SearchHeader.js')).toContain('export function SearchHeader(');
-    expect(read('../../app/corporate-dashboard.js')).toContain('<SearchHeader');
+    expect(read('../../app/(tabs)/corporate-dashboard.js')).toContain('<SearchHeader');
   });
   test('the back button keeps its behaviour (goBack), and flips in right-to-left', () => {
     expect(screen).toContain('onBack={goBack}');
@@ -382,14 +382,15 @@ describe('the list and its states', () => {
     expect(screen).toContain('width={width}');
   });
   test('the same request, and a card opens the same details screen as before', () => {
-    expect(screen).toContain("apiGet('/requests/me')");
-    expect(screen.split('apiGet(').length - 1).toBe(1);
+    expect(read('../myRequestsResource.js')).toContain("apiGet('/requests/me')");
+    expect(screen).toContain('fetcher: fetchMyRequests,');
+    expect(screen).not.toContain('apiGet(');
     expect(screen).toContain("router.push({ pathname: '/request-details', params: { id: r.rawId } })");
     expect(screen).not.toMatch(/apiPost|apiPatch|apiUpload|fetch\(/);
   });
   test('pull to refresh: the system spinner, the same request, a failed refresh keeps the list and says so', () => {
     expect(screen).toContain('refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}');
-    expect(screen).toContain("fetcher: () => apiGet('/requests/me').then(({ requests: list }) => list.map(toListItem)),");
+    expect(read('../myRequestsResource.js')).toContain("apiGet('/requests/me').then(({ requests }) => requests.map(toListItem))");
     expect(screen).toContain("onRefreshError: () => toast(t('sk_refresh_failed')),");
   });
   test('the first load shows the shimmer skeleton (never a spinner), a failed first load shows Try again, and what arrives fades in', () => {
@@ -400,7 +401,8 @@ describe('the list and its states', () => {
   });
   test('a request that is new after a pull is highlighted', () => {
     expect(screen).toContain('isNew={highlight.includes(r.rawId)}');
-    expect(screen).toContain('idsOf: (list) => list.map((r) => r.rawId),');
+    expect(screen).toContain('idsOf: idsOfRequests,');
+    expect(read('../myRequestsResource.js')).toContain('list.map((r) => r.rawId)');
     expect(card).toContain('{isNew ? <HighlightFill radius={L.radius} /> : null}');
   });
   test('a search or filter with no match says "No requests match"; no requests at all keeps the old empty state', () => {

@@ -645,7 +645,7 @@ describe('the screens (source checks)', () => {
     expect(store).toMatch(/createSubmissionTracker\(\{ storage: deviceStorage, getUserId: currentAccountId, generate: secureUuid, vault: submissionVault \}\)/); // the shared secure generator (Phase 5)
   });
   test('Home no longer draws the unconfirmed-request card (its key stays stored); only the saved-draft card is there', () => {
-    const home = read('app/home.js');
+    const home = read('app/(tabs)/home.js');
     expect(home).not.toMatch(/PendingSubmissionNotice/);
     expect(home).toMatch(/<>\s+<DraftNotice \/>\s+<BannerCarousel/);
     expect(fs.existsSync(path.join(__dirname, '..', '..', 'components/home/PendingSubmissionNotice.js'))).toBe(false);

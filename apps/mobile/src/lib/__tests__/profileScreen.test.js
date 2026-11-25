@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const read = (p) => fs.readFileSync(path.join(__dirname, p), 'utf8');
-const screen = read('../../app/profile.js');
+const screen = read('../../app/(tabs)/profile.js');
 const i18n = JSON.parse(read('../../data/i18n.json'));
 const KEYS = ['prof_title', 'prof_account', 'prof_preferences', 'prof_support', 'prof_personal', 'prof_documents', 'prof_payment', 'prof_language', 'prof_notifications', 'prof_privacy', 'prof_help', 'prof_terms', 'prof_logout', 'prof_footer', 'prof_soon'];
 

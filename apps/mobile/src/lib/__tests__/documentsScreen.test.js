@@ -74,8 +74,8 @@ describe('translations', () => {
     expect(i18n.EN.docs_err_share).not.toMatch(/saved/i);
     expect(i18n.EN.docs_err_share).toContain('could not be opened');
   });
-  test('the unverified-document message sends the person to HumanCare, in every language', () => {
-    for (const lang of Object.keys(i18n)) expect(i18n[lang].docs_err_unverified).toContain('HumanCare');
+  test('the unverified-document message sends the person to Humancare World Wide, in every language', () => {
+    for (const lang of Object.keys(i18n)) expect(i18n[lang].docs_err_unverified).toContain('Humancare World Wide');
   });
   test('English is the default and the others are translated', () => {
     expect(i18n.EN.docs_empty_title).toBe('No documents yet');
