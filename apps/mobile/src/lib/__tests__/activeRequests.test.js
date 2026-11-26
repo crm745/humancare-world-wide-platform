@@ -154,7 +154,7 @@ describe('what one card shows', () => {
     expect(v.progress).toBeNull();
     expect(v.stage).toBe('');
     expect(v.label).not.toMatch(/step/);
-    expect(read('components', 'home', 'ActiveRequestCard.js')).toContain('{v.progress ? <Progress progress={v.progress} stage={v.stage} t={t} /> : null}');
+    expect(read('components', 'home', 'ActiveRequestCard.js')).toContain('{v.progress ? <Progress progress={v.progress} stage={v.stage} t={t} S={S} /> : null}');
   });
   test.each(LANGS)('%s: every text of the card comes from the dictionary (no English leaks into the label)', (lang) => {
     const v = view({ status: 'in_progress', serviceType: 'Private Charter Air Ambulance Service', serviceKey: 'privatecharter' }, lang);
@@ -181,21 +181,22 @@ describe('the screens', () => {
   test('My Requests draws active requests with the new card (All and Active) and the others with their own card; no new bottom tab', () => {
     const mr = read('app', '(tabs)', 'my-requests.js');
     expect(mr).toContain('isActiveRequest(r)');
-    expect(mr).toContain('<ActiveRequestCard key={r.id} item={r}');
+    expect(mr).toContain('<ActiveRequestCard key={r.id} variant="compact" item={r}');
     expect(mr).toContain('<RequestCard key={r.id} item={r}');
     expect(read('components', 'layout.js')).toMatch(/TABS = \[/);
     const tabs = /TABS = \[([\s\S]*?)\];/.exec(read('components', 'layout.js'))[1];
     expect((tabs.match(/id:/g) || []).length).toBe(4);
   });
   test('the card follows the design: sizes, colours, the Track button, mirrored arrows, accessibility', () => {
-    expect(component).toContain("borderColor: '#E4E9F2', borderRadius: 18, padding: 16, gap: 14");
+    expect(component).toContain("borderColor: '#E4E9F2', borderRadius: S.radius, padding: S.pad, gap: S.gap"); // the full variant: radius 18, padding 16, gap 14 (SIZES.full)
+    expect(component).toContain('pad: 16, radius: 18, gap: 14');
     expect(component).toContain('shadowOpacity: 0.06, shadowRadius: 14, shadowOffset: { width: 0, height: 4 }');
-    expect(component).toContain('size={44}');
-    expect(component).toContain("fontFamily: FONT[800], fontSize: 16, lineHeight: 21");
-    expect(component).toContain("maxWidth: '44%'");
-    expect(component).toContain('minHeight: 46, borderRadius: 12');
-    expect(component).toContain('hitSlop={{ top: 1, bottom: 1 }}'); // 46 + 2 = 48 dp touch target
-    expect((component.match(/scaleX: -1/g) || []).length).toBe(1); // only the Track Request arrow remains, and it mirrors in RTL
+    expect(component).toContain('tile: 44, tileRadius: 12');
+    expect(component).toContain('name: [16, 21]');
+    expect(component).toContain("max: '44%'");
+    expect(component).toContain('track: { minHeight: 46, radius: 12, size: 15, arrow: 18 }');
+    expect(component).toContain('Math.ceil((48 - S.track.minHeight) / 2)'); // 46 + 1 + 1 = 48 dp touch target (full)
+    expect((component.match(/scaleX: -1/g) || []).length).toBe(2); // only the Track Request arrow, in its two layouts (full and compact), and it mirrors in RTL
     expect(component).toContain('accessibilityLabel={`${t(\'home_track_request\')}, ${v.reference}`}');
     expect(component).toContain("accessibilityLabel={`${v.label}. ${t('mr_view_details')}`}");
     expect(component).toContain("accessibilityRole=\"header\"");
@@ -229,8 +230,8 @@ describe('card navigation: the body opens Request Details, Track Request opens T
     expect(bodyOpen).toBeGreaterThan(0);
     expect(trackOpen).toBeGreaterThan(bodyClose); // the Track button starts after the body button has closed
     expect(card).toContain("accessibilityLabel={`${t('home_track_request')}, ${v.reference}`}");
-    expect(card).toContain('hitSlop={{ top: 1, bottom: 1 }}');
-    expect(card).toContain('minHeight: 46');
+    expect(card).toContain('Math.ceil((48 - S.track.minHeight) / 2)');
+    expect(card).toContain('minHeight: S.track.minHeight');
   });
   test('Home: the body opens /request-details and Track opens /request-tracking, each with THAT card\'s own id', () => {
     const home = read('app', '(tabs)', 'home.js');

@@ -14,5 +14,5 @@ const SECTIONS = [
 ];
 
 export default function Terms() {
-  return <LegalScreen titleKey="terms_title" sections={SECTIONS} />;
+  return <LegalScreen titleKey="terms_title" sections={SECTIONS} showUpdated={false} />;
 }

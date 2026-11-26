@@ -54,3 +54,11 @@ export function countryLabelsByEnglishName(lang = active) {
   for (const [iso, name] of Object.entries(COUNTRY_NAME_BY_ISO)) { const shown = countryName(iso, lang); if (shown) labels[name] = shown; }
   return labels;
 }
+
+// The flag of an ISO 3166-1 country ("IN" -> the Indian flag), made from the two letters of its code: each letter becomes its "regional indicator" symbol, and a phone shows the pair as the flag. No picture files and
+// no library: the flag comes with the phone's own emoji font. '' for anything that is not two letters.
+export function flagEmoji(iso) {
+  const code = String(iso || '').toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return '';
+  return String.fromCodePoint(...[...code].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65));
+}

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef } from 'react';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useApp } from '../state/AppContext';
 import { apiGet } from '../lib/api';
 import { goBack } from '../lib/nav';
@@ -15,7 +15,7 @@ import { ScreenHeader } from '../components/request/DetailsParts';
 import TrackingDetails from '../components/tracking/TrackingDetails';
 
 // Tracking Details: where the request is, drawn to the design (a route card and a progress timeline). Opened from
-// "Open live tracking" on Request Details and "Track request" on Home. What it draws comes from lib/trackingDetailsView.js,
+// "Open live tracking" on Request Details, "Track request" on Home and the Tracking tab. It has no link back to Request Details. What it draws comes from lib/trackingDetailsView.js,
 // which uses the Private Charter model for Private Charter and the generic model for everything else, and draws whatever
 // steps they return.
 //
@@ -67,7 +67,7 @@ export default function RequestTracking() {
       {header}
       <Body clearSos refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         <Reveal animate={gate.wasShown}>
-          <TrackingDetails d={details} highlightKeys={highlightKeys} onOpenRequest={() => router.push({ pathname: '/request-details', params: { id: request.id } })} />
+          <TrackingDetails d={details} highlightKeys={highlightKeys} />
         </Reveal>
       </Body>
     </Screen>

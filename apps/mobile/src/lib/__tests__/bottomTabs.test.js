@@ -230,15 +230,14 @@ describe('the Tracking tab replaces Services in the bottom bar', () => {
 
 describe('the Tracking screen', () => {
   const screen = read('app/(tabs)/active-tracking.js');
-  test('it lists the active requests in the shared order (needs action first, then newest), on the Home card', () => {
-    expect(screen).toContain("import { activeRequestsOf } from '../../lib/activeRequests';");
+  test('it lists the active requests in the shared order (needs action first, then newest), on the Tracking card', () => {
+    expect(screen).toContain("import { activeRequestsOf, matchesTrackingQuery } from '../../lib/activeRequests';");
     expect(screen).toContain('const active = activeRequestsOf(rows || []);');
-    expect(screen).toContain('<ActiveRequestCard');
+    expect(screen).toContain('<TrackingRequestCard');
     expect(screen).toContain('key={r.id}');
   });
-  test('Track Request opens /request-tracking with THAT request id; the card body opens its details', () => {
+  test('Track Request opens /request-tracking with THAT request id; the card and the button both open it', () => {
     expect(screen).toContain("onTrack={() => router.push({ pathname: '/request-tracking', params: { id: r.rawId } })}");
-    expect(screen).toContain("onOpen={() => router.push({ pathname: '/request-details', params: { id: r.rawId } })}");
   });
   test('loading, error, empty, refresh and a quiet refresh when the tab comes back into front', () => {
     expect(screen).toContain("<RequestsSkeleton label={t('sk_loading_requests')} />");

@@ -90,7 +90,7 @@ export const NOTIFICATIONS = [
 export const REGIONAL_NUMBERS = [
   { label: 'country_india', display: '+91 9699999065', tel: '+919699999065' },
   { label: 'country_uae_global', display: '+971 585787878', tel: '+971585787878' },
-  { label: 'country_oman', display: '+968 92402959', tel: '+96892402959' },
+  { label: 'country_oman', display: '+968 98882797', tel: '+96898882797' },
   { label: 'country_bangladesh', display: '+880 1314968067', tel: '+8801314968067' },
   { label: 'country_uk', display: '+44 7557070702', tel: '+447557070702' },
 ];

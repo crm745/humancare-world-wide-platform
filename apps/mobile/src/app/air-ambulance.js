@@ -4,7 +4,7 @@ import { useApp } from '../state/AppContext';
 import { AIR_OPTIONS } from '../data/mock';
 import { Body, Screen, TopBar } from '../components/layout';
 import { Text } from '../components/ui';
-import { openService } from '../components/ServiceGrid';
+import { useOpenService } from '../components/ServiceGrid';
 import { ServiceIcon } from '../components/home/ServiceIcon';
 import { PressBox } from '../components/PressBox';
 
@@ -15,6 +15,7 @@ const NAVY = '#0D2340';
 // It is a normal screen on the stack, so the back button and the Android back key both return to Home.
 export default function AirAmbulance() {
   const { t, isRTL } = useApp();
+  const openService = useOpenService(); // the service's page, or (while changing the service of a request being filled) straight back to the form
   return (
     <Screen>
       <TopBar title={t('svc_air')} />
@@ -29,7 +30,7 @@ export default function AirAmbulance() {
               onPress={() => openService(s.key)}
               style={({ pressed }) => ({ minHeight: 84, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 14, paddingVertical: 14, backgroundColor: pressed ? '#F5F8FC' : '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#E4E9F2' })}
             >
-              <View style={{ width: 54, height: 54, borderRadius: 14, backgroundColor: '#EDF2F9', alignItems: 'center', justifyContent: 'center' }}>
+              <View style={{ width: 54, height: 54, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E4E9F2', alignItems: 'center', justifyContent: 'center' }}>
                 <ServiceIcon serviceKey={s.key} size={25} color={NAVY} fill={NAVY} fillOpacity={0.12} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>

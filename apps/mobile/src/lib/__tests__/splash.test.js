@@ -21,7 +21,7 @@ describe('the numbers', () => {
   });
   test('the screen uses these (there is no 5-second constant left, and no number of its own)', () => {
     const screen = code('app/index.js');
-    expect(screen).toContain("import { MIN_SPLASH_MS, SESSION_TIMEOUT_MS, splashDecision } from '../lib/splash';");
+    expect(screen).toContain("import { MIN_SPLASH_MS, SESSION_TIMEOUT_MS, keepBrandTogether, splashDecision } from '../lib/splash';");
     expect(screen).toContain('setTimeout(() => setMinElapsed(true), MIN_SPLASH_MS)');
     expect(screen).toContain('setTimeout(() => setTimedOut(true), SESSION_TIMEOUT_MS)');
     expect(screen).not.toMatch(/\b5000\b/);
@@ -186,5 +186,34 @@ describe('the native splash is untouched', () => {
     expect(JSON.stringify(appJson)).not.toMatch(/splash/i);
     const pkg = JSON.parse(read('../package.json'));
     expect(JSON.stringify({ ...pkg.dependencies, ...pkg.devDependencies })).not.toMatch(/splash/i);
+  });
+});
+
+describe('the splash tagline: 16 / 23, 28 under the logo, 44 above the loading line, the brand name in one piece', () => {
+  const { keepBrandTogether } = require('../splash');
+  const screen = read('app/index.js');
+  const I18N = require('../../data/i18n.json');
+  test('the style', () => {
+    expect(screen).toContain("marginTop: 28, paddingHorizontal: 24, textAlign: 'center', color: '#0D2340', fontSize: 16, lineHeight: 23, fontFamily: SERIF");
+    expect(screen).toContain("<View style={{ width: '50%', maxWidth: 200, marginTop: 44 }}>");
+    expect(screen).toContain('maxFontSizeMultiplier={1.3}');
+    expect(screen).toContain("keepBrandTogether(t('splash_tagline'))");
+  });
+  test('"Humancare World Wide" is joined with non-breaking spaces, in the English line and in every language', () => {
+    expect(keepBrandTogether('Through Humancare World Wide')).toBe('Through Humancare\u00A0World\u00A0Wide');
+    for (const lang of ['EN', 'HI', 'MR', 'GU', 'TE', 'AR']) {
+      const out = keepBrandTogether(I18N[lang].splash_tagline);
+      expect({ lang, kept: out.includes('Humancare\u00A0World\u00A0Wide'), split: /Humancare World Wide/.test(out) }).toEqual({ lang, kept: true, split: false });
+    }
+  });
+  test('English is exactly two lines; the text itself is unchanged', () => {
+    expect(I18N.EN.splash_tagline).toBe('Excellence in Saving Lives\nThrough Humancare World Wide');
+    expect(keepBrandTogether(null)).toBe('');
+  });
+  test('the boot screen and the browser boot splash keep the same room, so the logo does not move when the splash appears', () => {
+    expect(read('components/BootScreen.js')).toContain('const TAGLINE_SPACE = 118;');
+    const html = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'public', 'index.html'), 'utf8');
+    expect(html).toContain('margin-top: 28px; padding: 0 24px; text-align: center; font: 16px/23px');
+    expect(html).toContain('height: 3px; margin-top: 44px');
   });
 });

@@ -26,6 +26,7 @@ import { ActiveRequestCard } from '../../components/home/ActiveRequestCard';
 import { RequestsHeader } from '../../components/requests/RequestsHeader';
 
 const TAB_BAR = 64;
+const CARD_GAP = 10; // between the cards of the list (the compact active card's 10)
 const STATUSES = ['all', 'active', 'submitted', 'progress', 'completed', 'cancelled'];
 const FILTER_SERVICES = Object.entries(SERVICE_LABELS).map(([value, labelKey]) => ({ value, labelKey }));
 
@@ -102,7 +103,7 @@ export default function MyRequests() {
         ref={scrollRef}
         style={{ flex: 1 }}
         {...scrollProps}
-        contentContainerStyle={{ flexGrow: 1, paddingTop: L.listPadTop, paddingHorizontal: L.listPadSide, paddingBottom, gap: L.listGap }}
+        contentContainerStyle={{ flexGrow: 1, paddingTop: L.listPadTop, paddingHorizontal: L.listPadSide, paddingBottom, gap: CARD_GAP }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         refreshControl={<AppRefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -111,11 +112,11 @@ export default function MyRequests() {
         {loading && gate.visible && <RequestsSkeleton label={t('sk_loading_requests')} />}
         {error && !rows && <LoadFailure titleKey="lf_title_requests" error={error} onRetry={reload} />}
         {!loading && rows && (
-        <Reveal animate={gate.wasShown} style={{ gap: L.listGap }}>
+        <Reveal animate={gate.wasShown} style={{ gap: CARD_GAP }}>
         {items.map((r) => (
           // An active request (submitted / in progress) is drawn with the Active Requests card, in All and in Active; completed and cancelled ones keep their own card.
           isActiveRequest(r)
-            ? <ActiveRequestCard key={r.id} item={r} isNew={highlight.includes(r.rawId)} onOpen={() => router.push({ pathname: '/request-details', params: { id: r.rawId } })} onTrack={() => router.push({ pathname: '/request-tracking', params: { id: r.rawId } })} />
+            ? <ActiveRequestCard key={r.id} variant="compact" item={r} isNew={highlight.includes(r.rawId)} onOpen={() => router.push({ pathname: '/request-details', params: { id: r.rawId } })} onTrack={() => router.push({ pathname: '/request-tracking', params: { id: r.rawId } })} />
             : <RequestCard key={r.id} item={r} t={t} isRTL={isRTL} isNew={highlight.includes(r.rawId)} onPress={() => router.push({ pathname: '/request-details', params: { id: r.rawId } })} />
         ))}
         {requests.length === 0 && (

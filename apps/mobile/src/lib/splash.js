@@ -44,3 +44,6 @@ export function splashDecision({ status, savedSession, minElapsed = false, timed
   }
   return startupDestination({ status, savedSession }); // known: go at once (the splash is not stretched when the check was quick or the minimum was the slow part)
 }
+
+// The brand name in the tagline never splits across lines: the spaces inside "Humancare World Wide" become non-breaking spaces (U+00A0), in every language's text (the name is written in Latin in all of them).
+export const keepBrandTogether = (text) => String(text == null ? '' : text).replace(/Humancare World Wide/g, 'Humancare\u00A0World\u00A0Wide');

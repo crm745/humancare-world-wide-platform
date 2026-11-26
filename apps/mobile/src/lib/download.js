@@ -67,6 +67,7 @@ export function downloadErrorInfo(err) {
   const code = err && err.code;
   const status = err && err.status;
   if (code === 'share_unavailable') return { key: 'docs_err_share' };
+  if (code === 'save_failed') return { key: 'docs_err_save' };
   if (code === 'network' || (err && err.name === 'TypeError')) return { key: 'docs_err_network' };
   if (code === 'session_expired' || code === 'not_signed_in' || code === 'session_unverified' || status === 401) return { key: 'docs_err_session' };
   if (typeof code === 'string' && Object.prototype.hasOwnProperty.call(KEY_BY_CODE, code)) return { key: KEY_BY_CODE[code] };

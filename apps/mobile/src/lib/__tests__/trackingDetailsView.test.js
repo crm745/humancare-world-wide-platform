@@ -110,11 +110,11 @@ describe('a Private Charter request', () => {
     const changes = charter('submitted', null, [], { reviewStatus: 'changes_requested', documentsRequestReason: 'Send a clearer copy of the ID.', submittedAt: '2026-11-13T13:00:00' });
     const d = V.buildTrackingDetails(changes, t);
     expect(d.message).toBe('Send a clearer copy of the ID.');
-    expect(d.openRequest).toBe(true);
+    expect(d.openRequest).toBeUndefined();
     expect(d.steps.find((s) => s.state === 'current').key).toBe('documents_review');
     const plain = V.buildTrackingDetails(HALF_WAY, t);
     expect(plain.message).toBeNull();
-    expect(plain.openRequest).toBe(false);
+    expect(plain.openRequest).toBeUndefined();
   });
 });
 

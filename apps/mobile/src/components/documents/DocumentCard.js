@@ -21,7 +21,7 @@ const HIDDEN_FROM_READER = { accessibilityElementsHidden: true, importantForAcce
 
 // state: { status: 'idle' | 'downloading' | 'error', progress (0..1), message }
 // `isNew`: a document that was not in the list before the last pull-to-refresh (a brief highlight, 1.8 s).
-export function DocumentCard({ doc, state = { status: 'idle' }, onPress, t, isNew = false, offline = false }) {
+export function DocumentCard({ doc, state = { status: 'idle' }, onPress, onDownload, t, isNew = false, offline = false }) {
   // A change of the download's state (started, failed, finished) is announced once; progress ticks are not.
   const previous = useRef(state);
   useEffect(() => {
@@ -36,36 +36,55 @@ export function DocumentCard({ doc, state = { status: 'idle' }, onPress, t, isNe
   // Offline a document cannot be opened (nothing is kept on the phone to show), and the card says so in its own line instead of a message after the tap.
   const meta = [fileMeta(doc), doc.case && doc.case.referenceNumber, offline ? t('net_opens_online') : null].filter(Boolean).join(' · ');
   const percent = Math.round((state.progress || 0) * 100);
+  // The download button has its own fixed 56-wide area on the right, as tall as the card and centred in it, so it is in the same place on every card whatever the length of the name.
+  // Two separate buttons side by side: the card (opens the preview) and the download button (fetches the file and shares / saves it). Neither is inside the other, so one tap is one action.
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={documentAccessibilityLabel(doc, state, t)}
-      accessibilityState={{ busy: downloading, disabled: downloading || offline }}
-      accessibilityHint={offline ? t('net_opens_online') : undefined}
-      disabled={downloading}
-      onPress={onPress}
-      className="mb-2.5 overflow-hidden rounded-2xl border border-line bg-white active:opacity-80"
-    >
+    <View className="mb-2.5 overflow-hidden rounded-2xl border border-line bg-white">
       {isNew ? <HighlightFill radius={16} /> : null}
-      <View className="flex-row items-center gap-3 p-3" {...HIDDEN_FROM_READER}>
-        <View className="h-10 w-10 items-center justify-center rounded-[11px]" style={{ backgroundColor: bg }}>
-          <Icon size={19} color={color} />
-        </View>
-        <View className="flex-1">
-          <Text numberOfLines={offline ? 1 : 2} ellipsizeMode="tail" className="font-inter-bold text-[14px] text-navy">{doc.name}</Text>
-          {meta ? <Text className="mt-0.5 text-[12px] text-muted">{meta}</Text> : null}
-          {added ? <Text className="mt-0.5 text-[12px] text-faint">{added}</Text> : null}
-        </View>
-        {offline && !downloading ? null : <View className="h-11 w-11 items-center justify-center">
-          {downloading ? (
-            <View className="items-center gap-0.5">
-              <Spinner size={18} color={P.brand} trackColor={P.brandSoft} />
-              {state.progress > 0 ? <Text className="text-[10px] text-faint">{`${percent}%`}</Text> : null}
+      <View className="flex-row items-center">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={documentAccessibilityLabel(doc, state, t)}
+          accessibilityState={{ busy: downloading, disabled: downloading || offline }}
+          accessibilityHint={offline ? t('net_opens_online') : undefined}
+          disabled={downloading}
+          onPress={onPress}
+          className="flex-1 flex-row items-center gap-3 p-3 active:opacity-80"
+        >
+          <View className="flex-1 flex-row items-center gap-3" style={{ minWidth: 0 }} {...HIDDEN_FROM_READER}>
+            <View className="h-10 w-10 items-center justify-center rounded-[11px]" style={{ backgroundColor: bg }}>
+              <Icon size={19} color={color} />
             </View>
-          ) : (
-            <Download size={18} color={P.brand} />
-          )}
-        </View>}
+            {/* minWidth 0: a long file name wraps inside this column (up to 3 lines) and can never run under the download button. */}
+            <View className="flex-1" style={{ minWidth: 0 }}>
+              <Text numberOfLines={offline ? 1 : 3} ellipsizeMode="tail" className="font-inter-bold text-[14px] text-navy">{doc.name}</Text>
+              {meta ? <Text className="mt-0.5 text-[12px] text-muted">{meta}</Text> : null}
+              {added ? <Text className="mt-0.5 text-[12px] text-faint">{added}</Text> : null}
+            </View>
+          </View>
+        </Pressable>
+        {/* The download button. Offline it is not drawn (nothing can be fetched); while downloading it shows the progress instead. */}
+        {offline && !downloading ? null : (
+          <Pressable
+            testID={`download-${doc.id}`}
+            accessibilityRole="button"
+            accessibilityLabel={`${t('docs_download')} ${doc.name}`}
+            accessibilityState={{ busy: downloading, disabled: downloading }}
+            disabled={downloading || !onDownload}
+            onPress={onDownload}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 8 }}
+            className="w-14 items-center justify-center self-stretch active:opacity-70" style={{ minHeight: 48 }}
+          >
+            {downloading ? (
+              <View className="items-center gap-0.5">
+                <Spinner size={18} color={P.brand} trackColor={P.brandSoft} />
+                {state.progress > 0 ? <Text className="text-[10px] text-faint">{`${percent}%`}</Text> : null}
+              </View>
+            ) : (
+              <Download size={18} color={P.brand} />
+            )}
+          </Pressable>
+        )}
       </View>
       {downloading ? (
         <View style={{ height: 3, backgroundColor: P.line }} {...HIDDEN_FROM_READER}>
@@ -78,6 +97,6 @@ export function DocumentCard({ doc, state = { status: 'idle' }, onPress, t, isNe
           <Text className="mt-0.5 font-inter-bold text-[12px]" style={{ color: P.brand }}>{t('docs_tap_retry')}</Text>
         </View>
       ) : null}
-    </Pressable>
+    </View>
   );
 }

@@ -1,10 +1,9 @@
 import { Text, View } from 'react-native';
-import { ArrowRight, Check } from 'lucide-react-native';
+import { Check } from 'lucide-react-native';
 import { useApp } from '../../state/AppContext';
 import TrackingBanner from './TrackingBanner';
 import { C, Card, FONT, Section, WRAP } from '../request/DetailsParts';
 import { COLORS } from '../../theme/colors';
-import { PressBox } from '../PressBox';
 import { HighlightFill } from '../skeleton/HighlightFill';
 
 // The Tracking Details screen, drawn to the design from lib/trackingDetailsView.js. It decides nothing about the journey: it
@@ -63,10 +62,10 @@ function Message({ text, t }) {
   );
 }
 
-// `d` is what buildTrackingDetails returns. `onOpenRequest` is offered only while the patient has something to do.
+// `d` is what buildTrackingDetails returns. Tracking Details shows tracking only: it has no way over to Request Details.
 // `highlightKeys`: the steps with a stage event that is new since the last pull-to-refresh (shown with a brief highlight).
-export default function TrackingDetails({ d, onOpenRequest, highlightKeys = [] }) {
-  const { t, isRTL } = useApp();
+export default function TrackingDetails({ d, highlightKeys = [] }) {
+  const { t } = useApp();
   return (
     <View style={{ paddingTop: 16, paddingHorizontal: 16, paddingBottom: 0, gap: 14 }}>
       <TrackingBanner d={d} />
@@ -78,15 +77,6 @@ export default function TrackingDetails({ d, onOpenRequest, highlightKeys = [] }
           </View>
         </Card>
       </Section>
-      {d.openRequest && onOpenRequest ? (
-        <PressBox
-          accessibilityRole="button" accessibilityLabel={t('tcp_open_request')} onPress={onOpenRequest}
-          style={({ pressed }) => ({ minHeight: 52, borderRadius: 16, backgroundColor: BLUE, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, opacity: pressed ? 0.88 : 1 })}
-        >
-          <Text style={{ fontFamily: FONT[800], fontSize: 16, color: '#FFFFFF' }}>{t('tcp_open_request')}</Text>
-          <View style={isRTL ? { transform: [{ scaleX: -1 }] } : null}><ArrowRight size={18} color="#FFFFFF" strokeWidth={2.4} /></View>
-        </PressBox>
-      ) : null}
     </View>
   );
 }

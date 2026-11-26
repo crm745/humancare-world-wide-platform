@@ -169,7 +169,7 @@ describe('5-6. loading, and a document that cannot be loaded', () => {
 describe('7. a format that cannot be previewed', () => {
   const screen = read('app/document-preview.js');
   test('it says so, and offers Share: nothing is downloaded and the share sheet does not open by itself', () => {
-    expect(screen).toContain("enabled: kind !== 'unsupported' && Boolean(id)");
+    expect(screen).toContain("enabled: !localUri && kind !== 'unsupported' && Boolean(id)"); // a copy the app saved itself (localUri) is not fetched again
     expect(screen).toContain("body = <Message title={t('dp_unsupported_title')} text={t('dp_unsupported_text')}><ActionButton label={t('dp_share')} onPress={share} busy={sharing} disabled={isOffline} hint={t('net_offline_text')} /><NeedsInternet /></Message>;");
   });
   test('without a PDF viewer in the build (a phone build made before it was added) the PDF says so, and Share is the intentional way out', () => {

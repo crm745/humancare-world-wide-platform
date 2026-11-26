@@ -78,7 +78,7 @@ describe('the Tracking Details screen is drawn to the design', () => {
   });
   test('row 1: the white 28 chip (icon 15, 12.5/800 in the brand blue), a 1x16 divider and the request number that never wraps', () => {
     expect(banner).toContain("height: 28, borderRadius: 14, paddingHorizontal: 11, backgroundColor: '#FFFFFF'");
-    expect(banner).toContain('<ServiceIcon serviceKey={d.chipIcon} size={15} color={BRAND}');
+    expect(banner).toContain('<ServiceIcon serviceKey={d.chipIcon} size={15} color={NAVY}');
     expect(banner).toContain('fontFamily: FONT[800], fontSize: 12.5, color: BRAND');
     expect(banner).toContain("width: 1, height: 16, backgroundColor: 'rgba(255,255,255,0.35)'");
     expect(banner).toContain("numberOfLines={1} style={{ flexShrink: 0, fontFamily: FONT[700], fontSize: 12.5, letterSpacing: 0.375, color: 'rgba(255,255,255,0.85)' }}>{d.reference}");
@@ -161,10 +161,10 @@ describe('the Tracking Details screen is drawn to the design', () => {
     expect(code(card)).not.toMatch(/\.note\b|Share|ETA|coordinator|distance|LinearGradient|Menlo|monospace/);
     expect(code(read('../trackingDetailsView.js'))).not.toMatch(/\.note\b/);
   });
-  test('the admin\'s "changes required" message (above Progress) and the "Open request" button (below it) are kept', () => {
+  test('the admin\'s "changes required" message (above Progress) is kept, and there is no "Open request" button or link to Request Details', () => {
     expect(card.indexOf('<Message ')).toBeLessThan(card.indexOf("<Section title={t('td_progress')}>"));
-    expect(card.indexOf("<Section title={t('td_progress')}>")).toBeLessThan(card.indexOf("t('tcp_open_request')"));
-    expect(card).toContain('d.openRequest && onOpenRequest');
+    expect(card).not.toMatch(/tcp_open_request|openRequest|onOpenRequest/);
+    expect(read('../../app/request-tracking.js')).not.toMatch(/request-details|onOpenRequest/);
     expect(card).toContain("t('tcp_changes_label')");
   });
   test('the tracking logic and the API call are unchanged', () => {

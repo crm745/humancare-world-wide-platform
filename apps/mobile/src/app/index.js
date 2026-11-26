@@ -5,7 +5,7 @@ import { useApp } from '../state/AppContext';
 import { LOGO, SPLASH_BG } from '../data/images';
 import { navReplace } from '../lib/nav';
 import { hideBootSplash } from '../lib/bootSplash';
-import { MIN_SPLASH_MS, SESSION_TIMEOUT_MS, splashDecision } from '../lib/splash';
+import { MIN_SPLASH_MS, SESSION_TIMEOUT_MS, keepBrandTogether, splashDecision } from '../lib/splash';
 import { COLORS } from '../theme/colors';
 
 // The native animation driver exists on phones only; the browser preview animates in JS.
@@ -27,7 +27,8 @@ const SEGMENT = 0.38;
 const BG_COLOR = '#EEF6FD';
 // The tagline uses the phone's own serif font: no font file to add or load before the splash.
 const SERIF = Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia, "Times New Roman", serif' });
-const TAGLINE_STYLE = { marginTop: 14, paddingHorizontal: 28, textAlign: 'center', color: '#0D2340', fontSize: 21, fontFamily: SERIF };
+// 28 under the logo, 24 at each side, 16 / 23. The brand name "Humancare World Wide" is never split across lines (keepBrandTogether); the loading line is 44 under it.
+const TAGLINE_STYLE = { marginTop: 28, paddingHorizontal: 24, textAlign: 'center', color: '#0D2340', fontSize: 16, lineHeight: 23, fontFamily: SERIF };
 
 // Splash: the logo centred over the globe picture with a thin line sweeping left to right under it. It is shown for at least 3 seconds (MIN_SPLASH_MS, lib/splash.js) on
 // every launch, and it is NOT interactive: a tap does nothing, so nothing can skip the session check. AppContext checks the saved session with the server in parallel
@@ -104,8 +105,8 @@ export default function Splash() {
           }}
         >
           <Image source={LOGO} style={logoSize(screenW)} resizeMode="contain" onLoad={() => setLoaded((s) => ({ ...s, logo: true }))} onError={() => setLoaded((s) => ({ ...s, logo: true }))} />
-          <Text style={TAGLINE_STYLE} maxFontSizeMultiplier={1.3}>{t('splash_tagline')}</Text>
-          <View style={{ width: '50%', maxWidth: 200, marginTop: 28 }}>
+          <Text style={TAGLINE_STYLE} maxFontSizeMultiplier={1.3}>{keepBrandTogether(t('splash_tagline'))}</Text>
+          <View style={{ width: '50%', maxWidth: 200, marginTop: 44 }}>
             <View
               className="h-[3px] overflow-hidden rounded-full bg-line"
               onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}

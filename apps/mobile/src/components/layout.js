@@ -32,9 +32,10 @@ const BOTTOM_GAP = 32;
 // field when validation fails) can call scrollTo on the underlying ScrollView.
 // `bottomEdge`: how far the bottom of this scroll area is above the bottom of the screen, when the screen has a fixed bar of its own under it.
 // `footerHeight`: the height of a bar that rides on top of the keyboard under this scroll area (see components/keyboard).
+// `onTouchStart`: called when a touch begins anywhere on the scroll area, without taking the touch from what is under it (the login screen uses it to close its country list on an outside tap).
 // `clearSos`: where the floating SOS button shows, the end of the scroll is at least `sosMinPad` (96) and at least the button's clearance (lib/sos.js), so the last item scrolls fully above it.
 export const SOS_MIN_PAD = 96;
-export const Body = forwardRef(function Body({ children, className = '', contentClassName = '', withNav, grow = true, bottomEdge = 0, refreshControl, footerHeight = 0, clearSos = false, noScrollWhenFits = false }, ref) {
+export const Body = forwardRef(function Body({ children, className = '', contentClassName = '', withNav, grow = true, bottomEdge = 0, refreshControl, footerHeight = 0, clearSos = false, noScrollWhenFits = false, onTouchStart }, ref) {
   const insets = useSafeAreaInsets();
   const inner = useRef(null);
   const fit = useFitScroll(noScrollWhenFits); // true while a "Couldn't load" view is shown: no scrolling when it fits
@@ -58,6 +59,7 @@ export const Body = forwardRef(function Body({ children, className = '', content
       {...scrollProps}
       showsVerticalScrollIndicator={false}
       refreshControl={refreshControl}
+      onTouchStart={onTouchStart}
       scrollEnabled={fit.scrollEnabled} onLayout={fit.onLayout} onContentSizeChange={fit.onContentSizeChange}
     >
       {children}

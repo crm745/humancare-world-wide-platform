@@ -9,7 +9,7 @@
 //           A cancelled request's stop step is a 'pending'-looking step (no ring, no check) with `stopped: true`, titled
 //           "Cancelled", as the existing models show it.
 import { MILESTONE_STATE, buildPrivateCharterTracking } from './tracking/privateCharterTracking';
-import { changesMessage, showOpenRequest } from './tracking/privateCharterTrackingView';
+import { changesMessage } from './tracking/privateCharterTrackingView';
 import { isPrivateCharterTracking } from './tracking/serviceFamily';
 import { formatDayMonth, formatTime } from './dateFormat';
 import { trackingView } from './requestTracking';
@@ -114,8 +114,7 @@ export function buildTrackingDetails(request, t) {
     bannerImage: bannerImageFor(serviceKey),
     shortName: config.shortKey ? t(config.shortKey) : '',
     updatedAt: latestUpdateAt(request),
-    // Private Charter only: the Admin's message while changes are requested, and the way to the request to answer it.
+    // Private Charter only: the Admin's message while changes are requested.
     message: charter ? changesMessage(model) : null,
-    openRequest: charter ? showOpenRequest(model) : false,
   };
 }

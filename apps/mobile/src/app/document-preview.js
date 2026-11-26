@@ -74,7 +74,10 @@ export default function DocumentPreview() {
   const id = first(params.id);
   const name = first(params.name) || '';
   const kind = previewKind(name);
-  const file = useDocumentFile({ id, name, enabled: kind !== 'unsupported' && Boolean(id) });
+  // A copy the app saved itself (Documents & Reports > Open) is shown as it is, never downloaded again; the screen never deletes it.
+  const localUri = first(params.localUri) || '';
+  const fetched = useDocumentFile({ id, name, enabled: !localUri && kind !== 'unsupported' && Boolean(id) });
+  const file = localUri ? { status: 'ready', progress: 1, file: { uri: localUri }, error: null, retry: () => {} } : fetched;
   const [broken, setBroken] = useState(false); // the viewer could not draw a file that did download
   const [sharing, setSharing] = useState(false);
 
@@ -142,7 +145,7 @@ export default function DocumentPreview() {
         >
           <ChevronLeft size={22} color={C.navy} strokeWidth={2.4} />
         </Pressable>
-        <Text accessibilityRole="header" numberOfLines={1} ellipsizeMode="middle" style={{ flex: 1, minWidth: 0, fontFamily: FONT[800], fontSize: 16, lineHeight: 22, color: C.navy }}>{name || t('my_documents')}</Text>
+        <Text accessibilityRole="header" numberOfLines={1} ellipsizeMode="middle" style={{ flex: 1, minWidth: 0, fontFamily: FONT[800], fontSize: 16, lineHeight: 22, color: C.navy }}>{name || t('prof_documents')}</Text>
         {canShare ? (
           <PressBox
             accessibilityRole="button" accessibilityLabel={t('dp_share')} onPress={share} disabled={sharing}

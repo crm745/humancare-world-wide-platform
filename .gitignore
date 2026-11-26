@@ -26,3 +26,4 @@ serviceAccountKey*.json
 docs/
 
 
+backend/*.sql

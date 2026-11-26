@@ -26,8 +26,9 @@ describe('the My Documents screen', () => {
     expect(screen).not.toMatch(/DocRow|downloadAndShare|downloadDocument|Sharing|Share\.share|shareAsync/);
   });
   test('shared TopBar and Body; a count, a search, a retry, an empty state and a no-match state', () => {
-    expect(screen).toContain("<TopBar title={t('my_documents')} />");
-    expect(screen).toContain('countLabel(shown.length, docs.length)');
+    expect(screen).toContain("<TopBar title={t('prof_documents')} />");
+    expect(screen).not.toContain('lbl_medical_records'); // no "Medical records (n)" heading above the list
+    expect(screen).not.toContain('countLabel');
     expect(screen).toContain('filterDocuments(docs, query)');
     expect(screen).toContain('onRetry={retry}');
     expect(screen).toContain("t('docs_empty_title')");
@@ -51,8 +52,21 @@ describe('the My Documents screen', () => {
   test('the card is an accessible 44-point button with a label', () => {
     expect(card).toContain('accessibilityRole="button"');
     expect(card).toContain('accessibilityLabel={documentAccessibilityLabel(doc, state, t)}');
-    expect(card).toContain('h-11 w-11');
+    expect(card).toContain('w-14 items-center justify-center self-stretch'); // the download button: a fixed 56-wide area, centred, at least 48 high
+    expect(card).toContain('minHeight: 48');
   });
+  test('the download button is its own button beside the card: it SAVES the file (no share sheet), with progress, a message and a retry', () => {
+    expect(card).toContain('onPress={onDownload}');
+    expect(card).toContain("accessibilityLabel={`${t('docs_download')} ${doc.name}`}");
+    expect(screen).toContain('onDownload={() => download(d)}');
+    expect(screen).toContain('await saveDocumentToDevice(doc.id, doc.name,');
+    expect(screen).toContain("toast(t('docs_saved').replace('{name}', saved.name));");
+    expect(screen).toContain('if (isSaveCancelled(err))');
+    expect(screen).toContain('state={downloads[d.id]}');
+    expect(screen).toContain('if (downloading.current) return;'); // a second tap starts nothing
+    expect(screen).not.toMatch(/shareDocumentFile|Sharing/);
+  });
+
 });
 
 describe('translations', () => {
@@ -107,5 +121,81 @@ describe('what was left alone', () => {
     const session = read('../session.js');
     expect(session).toContain('export async function compareAndClearTokens');
     expect(read('../api.js')).toContain('export async function apiUpload');
+  });
+});
+
+describe('Download saves the document: lib/documentSave.js and its rules', () => {
+  const rules = require('../documentSaveRules');
+  const save = read('../documentSave.js');
+  test('uniqueName keeps the name and extension, and numbers a name only when the folder already has it', () => {
+    expect(rules.uniqueName('Report.pdf', [])).toBe('Report.pdf');
+    expect(rules.uniqueName('Report.pdf', ['report.pdf'])).toBe('Report (1).pdf');
+    expect(rules.uniqueName('Report.pdf', ['Report.pdf', 'Report (1).pdf'])).toBe('Report (2).pdf');
+    expect(rules.uniqueName('scan', ['scan'])).toBe('scan (1)');
+    expect(rules.uniqueName('a.b.jpeg', new Set(['a.b.jpeg']))).toBe('a.b (1).jpeg');
+  });
+  test('closing the folder picker is a cancel, not a failure; a real error is not', () => {
+    expect(rules.isSaveCancelled({ code: 'save_cancelled' })).toBe(true);
+    expect(rules.isSaveCancelled({ name: 'AbortError' })).toBe(true);
+    expect(rules.isSaveCancelled({ message: 'User cancelled the picker' })).toBe(true);
+    expect(rules.isSaveCancelled({ status: 401 })).toBe(false);
+    expect(rules.isSaveCancelled(null)).toBe(false);
+  });
+  test('Android 10+: straight into public Downloads through the native module, no folder picker; the notification only after the save; the temporary copy is removed', () => {
+    expect(save).toContain('HumancareDownloads.saveToDownloads(temp.uri, wanted, mime)');
+    expect(save.indexOf('saveToDownloads(')).toBeLessThan(save.indexOf('notifyDownloadComplete('));
+    expect(save).toContain('if (canNotify) {');
+    expect(save).toContain('temp.dispose();');
+    expect(save).not.toMatch(/pickDirectoryAsync|Sharing|shareAsync|shareDocumentFile/); // no picker, no share sheet
+    expect(save).toContain('fetchDocumentFile(id, name, onProgress)'); // the sign-in and its renewal are the existing ones
+  });
+  test('the notification permission is asked for on Android 13+ (a channel first), and a refusal falls back to the in-app message', () => {
+    expect(save).toContain('HumancareDownloads.ensureChannel(channelName)');
+    expect(save).toContain('Notifications.requestPermissionsAsync()');
+    expect(save).toContain('if (current.canAskAgain === false) return false;');
+    expect(read('../../app/my-documents.js')).toContain('else if (!saved.notified) setDone(');
+  });
+  test('iOS, Android 9 and older, and a build without the module: the own persistent storage of the app (Documents/Downloads), numbered names, no promise of a public folder', () => {
+    expect(save).toContain("new Directory(Paths.document, 'Downloads')");
+    expect(save).toContain('uniqueName(wanted, taken)');
+    expect(save).toContain("location: 'app'");
+    expect(save).toContain('if (!publicDownloads) return await saveInsideApp(temp, wanted, mime);');
+    expect(save).toContain("a.download = wanted;"); // the web
+  });
+  test('Open: public Downloads opens in the installed viewer (a message when there is none); the app copy opens in the app preview as the saved file', () => {
+    const screen2 = read('../../app/my-documents.js');
+    expect(screen2).toContain("if (!(await openSavedDownload(saved))) toast(t('docs_no_viewer'));");
+    expect(screen2).toContain("params: { id: String(doc.id), name: saved.name, localUri: saved.uri }");
+    expect(read('../../app/document-preview.js')).toContain("const localUri = first(params.localUri) || '';");
+  });
+  test('a save that fails has its own message in every language, and so do the new texts', () => {
+    expect(read('../download.js')).toContain("if (code === 'save_failed') return { key: 'docs_err_save' };");
+    expect(save).toContain("code: 'save_failed'");
+    for (const lang of ['EN', 'HI', 'MR', 'GU', 'TE', 'AR']) for (const key of ['docs_saved', 'docs_err_save', 'docs_dl_title', 'docs_dl_complete', 'docs_open', 'docs_no_viewer', 'docs_dismiss']) expect({ lang, key, ok: typeof i18n[lang][key] === 'string' && i18n[lang][key].length > 1 }).toEqual({ lang, key, ok: true });
+    expect(i18n.EN.docs_saved).toContain('{name}');
+  });
+  test('the in-app message shows the file name, "Download complete" and an OPEN button, and can be dismissed', () => {
+    const banner = read('../../components/documents/DownloadDone.js');
+    expect(banner).toContain('{done.name}');
+    expect(banner).toContain("t('docs_dl_complete')");
+    expect(banner).toContain('onPress={done.onOpen}');
+    expect(banner).toContain('onPress={onDismiss}');
+  });
+  test('the Android native module: MediaStore.Downloads, marked finished only after writing, removed on failure, an OPEN action, only when allowed', () => {
+    const kt = fs.readFileSync(path.join(__dirname, '../../../modules/humancare-downloads/android/src/main/java/expo/modules/humancaredownloads/HumancareDownloadsModule.kt'), 'utf8');
+    expect(kt).toContain('MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)');
+    expect(kt).toContain('Environment.DIRECTORY_DOWNLOADS');
+    expect(kt.indexOf('IS_PENDING, 1')).toBeLessThan(kt.indexOf('IS_PENDING, 0'));
+    expect(kt).toContain('resolver.delete(uri, null, null)');
+    expect(kt).toContain('areNotificationsEnabled()');
+    expect(kt).toContain('FLAG_GRANT_READ_URI_PERMISSION');
+    expect(kt).toContain('builder.addAction(');
+    expect(kt).toContain('setAutoCancel(true)');
+    expect(JSON.parse(fs.readFileSync(path.join(__dirname, '../../../modules/humancare-downloads/expo-module.config.json'), 'utf8')).platforms).toEqual(['android']);
+  });
+  test('long names wrap inside the text column and cannot run under the download button', () => {
+    const card2 = read('../../components/documents/DocumentCard.js');
+    expect(card2).toContain('style={{ minWidth: 0 }}');
+    expect(card2).toContain('numberOfLines={offline ? 1 : 3}');
   });
 });

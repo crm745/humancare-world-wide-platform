@@ -375,7 +375,7 @@ describe('the header', () => {
 
 describe('the list and its states', () => {
   test('the list is padded and spaced from the design\'s sizes; newest first (the filters sort)', () => {
-    expect(screen).toContain('paddingTop: L.listPadTop, paddingHorizontal: L.listPadSide, paddingBottom, gap: L.listGap');
+    expect(screen).toContain('paddingTop: L.listPadTop, paddingHorizontal: L.listPadSide, paddingBottom, gap: CARD_GAP');
     expect(screen).toContain('useFabScrollPad({ ownPad: L.listPadBottom, edge: TAB_BAR + insets.bottom })');
     expect(screen).toContain('applyFilters(requests, filters, today)');
     expect(screen).toContain('const L = cardSpec(scaleFor(width));');
@@ -443,7 +443,7 @@ describe('translations of the new labels', () => {
 
 describe('what was not touched', () => {
   test('Home\'s ServiceIcon is used as it is: this change adds no prop to it', () => {
-    expect(codeOf(read('../../components/home/ServiceIcon.js'))).toContain('export function ServiceIcon({ serviceKey, size = 24, color, fill, fillOpacity = 0.3 })');
+    expect(codeOf(read('../../components/home/ServiceIcon.js'))).toContain('export function ServiceIcon({ serviceKey, size = 24, color = SERVICE_LOOK.color, fill, fillOpacity = SERVICE_LOOK.fillOpacity })');
   });
   test('no other screen was edited for this: Request details, tracking and the shared Card/Pill still exist as they were', () => {
     expect(read('../../components/ui.js')).toContain('export function Pill(');

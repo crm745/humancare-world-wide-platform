@@ -6,7 +6,7 @@ import { useApp } from '../state/AppContext';
 import { HOME_SERVICES } from '../data/mock';
 import { Screen, TopBar } from '../components/layout';
 import { Text } from '../components/ui';
-import { openService } from '../components/ServiceGrid';
+import { useOpenService } from '../components/ServiceGrid';
 import { ServiceIcon } from '../components/home/ServiceIcon';
 import { useFabScrollPad } from '../components/sos/hooks';
 import { PressBox } from '../components/PressBox';
@@ -20,6 +20,7 @@ const NAVY = '#0D2340';
 // Not a bottom tab: it is opened from Home (the "More" tile and the banner) and from the request form, so it is an ordinary screen with its own back button (back returns to where it was opened from, else Home).
 export default function AllServices() {
   const { t, isRTL } = useApp();
+  const openService = useOpenService(); // opens the service's page, or (while changing the service of a request being filled) goes straight back to the form
   const insets = useSafeAreaInsets();
   const { paddingBottom, scrollProps } = useFabScrollPad({ ownPad: 16 + insets.bottom, edge: insets.bottom });
 
@@ -34,7 +35,7 @@ export default function AllServices() {
             const label = s.sub ? `${t(s.title)}. ${t(s.sub)}` : t(s.title);
             const body = (
               <>
-                <View style={{ width: 54, height: 54, borderRadius: 14, backgroundColor: '#EDF2F9', alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: 54, height: 54, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E4E9F2', alignItems: 'center', justifyContent: 'center' }}>
                   <ServiceIcon serviceKey={s.key} size={25} color={NAVY} fill={NAVY} fillOpacity={0.12} />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>

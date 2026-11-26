@@ -16,7 +16,7 @@ const walk = (dir) => fs.readdirSync(path.join(SRC, dir), { withFileTypes: true 
 const ALL = ['app', 'components', 'lib', 'state'].flatMap(walk);
 
 describe('the connection banner', () => {
-  const HEADERS = ['app/document-preview.js', 'app/request-details.js', 'components/home/HomeHeader.js', 'components/layout.js', 'components/request/DetailsParts.js', 'components/request/RequestFrame.js', 'components/requests/RequestsHeader.js'];
+  const HEADERS = ['app/document-preview.js', 'app/request-details.js', 'components/home/HomeHeader.js', 'components/layout.js', 'components/request/DetailsParts.js', 'components/request/RequestFrame.js', 'components/requests/RequestsHeader.js', 'components/tracking/TrackingSearch.js'];
   test('sits directly under the header of every screen that has one: the shared header components mount it, nothing else does', () => {
     const users = ALL.filter((f) => /<ConnectionBanner\b/.test(read(f)));
     expect(users.sort()).toEqual(HEADERS);

@@ -6,6 +6,7 @@
 import { isActiveRequest, cardView, serviceKeyOf, badgeFor } from './myRequestsView';
 import { buildTrackingDetails } from './trackingDetailsView';
 import { baseServiceName, transferTypeKey } from './requestDetailsView';
+import { relativeParts, relativeSpoken, relativeText } from './trackingBanner';
 
 export const HOME_ACTIVE_MAX = 1; // Home shows its card only when there is exactly this many active requests; with more, the Tracking tab lists them
 
@@ -79,4 +80,38 @@ export function activeCardView(item, t) {
     progress, stage,
     label: [name, variant, reference, base.statusLabel, stepPhrase, stage, routePhrase].filter(Boolean).join(', '),
   };
+}
+
+// The Tracking tab's card (components/tracking/TrackingRequestCard.js): shorter than the Home card, no status pill, focused on the current stage. `nowMs` is the clock (the screen moves it on once a minute).
+//   stage     the current stage name, or the status label when the stage is not available
+//   stepText  "Step 1 of 5", '' when the steps are missing
+//   updated   "2 min ago" ('' when the request has no last-updated time: the one the tracking details banner uses)
+export function trackingCardView(item, t, nowMs = Date.now()) {
+  const base = activeCardView(item, t);
+  const details = item && item.raw ? buildTrackingDetails(item.raw, t) : null;
+  const parts = relativeParts(details && details.updatedAt, nowMs);
+  const progress = base.progress;
+  const stage = (progress && progress.stage) || base.statusLabel;
+  const stepText = progress ? t('mr_step_of', { n: progress.step, total: progress.total }) : '';
+  const updated = relativeText(parts, t);
+  const updatedSpoken = relativeSpoken(parts, t);
+  const subline = [stepText, updated ? t('rd_updated', { when: updated }) : ''].filter(Boolean).join(' · ');
+  const label = [
+    base.name, base.variant, base.reference, stage,
+    progress ? t('mr_a11y_step', { n: progress.step, total: progress.total }) : '',
+    updatedSpoken ? t('rd_updated', { when: updatedSpoken }) : '',
+  ].filter(Boolean).join(', ');
+  return { id: base.id, key: base.key, name: base.name, variant: base.variant, reference: base.reference, route: base.route, progress, stage, stepText, updated, subline, label };
+}
+
+// The Tracking tab's search: a request matches when the trimmed, lower-cased text is part of its reference, its displayed service name, its raw service type, its variant, its origin city or its
+// destination city (any of them may be missing). An empty search matches everything. Local only: it filters the list that is already loaded.
+export function matchesTrackingQuery(item, query, t) {
+  const q = String(query == null ? '' : query).trim().toLowerCase();
+  if (!q) return true;
+  if (!item) return false;
+  const { name, variant } = nameAndVariant(item, t);
+  const route = cardView(item, t).route || {};
+  const fields = [item.id, name, item.serviceType, variant, item.origin, item.destination, route.from, route.to];
+  return fields.some((f) => typeof f === 'string' && f.toLowerCase().includes(q));
 }

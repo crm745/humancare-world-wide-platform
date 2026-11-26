@@ -34,7 +34,7 @@ describe('Call Alarm Desk and the regional numbers', () => {
     expect(EMERGENCY_TEL).toBe('+919699999065');
   });
   test('the regional numbers are unchanged', () => {
-    expect(REGIONAL_NUMBERS.map((n) => n.tel)).toEqual(['+919699999065', '+971585787878', '+96892402959', '+8801314968067', '+447557070702']);
+    expect(REGIONAL_NUMBERS.map((n) => n.tel)).toEqual(['+919699999065', '+971585787878', '+96898882797', '+8801314968067', '+447557070702']);
     expect(screen).toContain('onPress={() => open(`tel:${n.tel}`)}');
   });
 });

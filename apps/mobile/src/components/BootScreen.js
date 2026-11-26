@@ -7,7 +7,7 @@ import { LOGO, SPLASH_BG } from '../data/images';
 const BG_COLOR = '#EEF6FD';
 const LOGO_RATIO = 2440 / 1405;
 // The same size as the splash's logo and the spacer that stands where its tagline goes, so the logo does not move when the splash appears.
-const TAGLINE_SPACE = 64;
+const TAGLINE_SPACE = 118; // 28 above the tagline + two lines of 23 + 44 above the loading line
 
 export function BootScreen() {
   const { width, height } = useWindowDimensions();

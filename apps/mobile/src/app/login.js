@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Image, Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 import { ArrowRight, Building2 } from 'lucide-react-native';
@@ -6,7 +6,7 @@ import { useApp } from '../state/AppContext';
 import { Body, Screen } from '../components/layout';
 import { Button, FieldLabel, Heading, Input, Text } from '../components/ui';
 import { PasswordField } from '../components/widgets';
-import { CountryCodeBackdrop, CountryCodeField } from '../components/CountryCodeDropdown';
+import { CountryCodeField, CountryCodeOverlay } from '../components/CountryCodeDropdown';
 import { errorText } from '../lib/errorText';
 import { navReplace } from '../lib/nav';
 import { apiPost } from '../lib/api';
@@ -55,6 +55,7 @@ export default function Login() {
   const [mode, setMode] = useState('phone');
   const [phone, setPhone] = useState('');
   const [cc, setCc] = useState('+91');
+  const codeAnchor = useRef(null); // the country-code row: the floating list is placed against it
   const [codesOpen, setCodesOpen] = useState(false); // the country-code list under the number field
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -104,8 +105,9 @@ export default function Login() {
 
   return (
     <Screen bg="bg-white">
-      <Body contentClassName="justify-center p-[26px]">
-        {codesOpen && mode === 'phone' ? <CountryCodeBackdrop onPress={() => setCodesOpen(false)} /> : null}
+      {/* A touch anywhere on the page closes the country list; it is only heard, so the field that was touched still gets it (and the focus). */}
+      <Body contentClassName="justify-center p-[26px]" onTouchStart={() => { if (codesOpen) setCodesOpen(false); }}>
+        {codesOpen && mode === 'phone' ? <CountryCodeOverlay anchorRef={codeAnchor} value={cc} onChange={setCc} onClose={() => setCodesOpen(false)} /> : null}
         {/* The official HumanCare logo (its picture already carries the HUMANCARE wordmark), in its own proportions. */}
         <Image
           source={LOGO} accessible accessibilityLabel={t('gs_logo_label')} resizeMode="contain"
@@ -118,7 +120,7 @@ export default function Login() {
         {mode === 'phone' ? (
           <>
             <FieldLabel large required>{t('field_mobile_number')}</FieldLabel>
-            <CountryCodeField value={cc} onChange={setCc} open={codesOpen} onOpenChange={setCodesOpen} title={t('field_mobile_number')}>
+            <CountryCodeField value={cc} onChange={setCc} open={codesOpen} onOpenChange={setCodesOpen} title={t('field_mobile_number')} anchorRef={codeAnchor}>
               <Input large className="flex-1" placeholder={t('field_mobile_number')} value={phone} onChangeText={setPhone} keyboardType="phone-pad" onFocus={() => setCodesOpen(false)} onPressIn={() => setCodesOpen(false)} />
             </CountryCodeField>
             {phone && !valid ? <Text className="mt-1 text-[12px] text-danger">{t('err_number_for_country')}</Text> : null}

@@ -197,8 +197,8 @@ describe('DocumentCard: how it hands this to the screen reader', () => {
     expect(card).toContain('AccessibilityInfo.announceForAccessibility(text)');
     expect(card).toContain('previous.current = state;');
   });
-  test('the visual design is as it was: the same icon, size and colours, and a 44-point target', () => {
-    expect(card).toContain('h-11 w-11');
+  test('the visual design is as it was: the same icon, size and colours, and a 48-point download target', () => {
+    expect(card).toContain('w-14 items-center justify-center self-stretch'); // the download area: a fixed 56-wide column as tall as the card
     expect(card).toContain('h-10 w-10');
     expect(card).toContain('ICON[fileTypeOf(doc.name).kind]');
     expect(card).toContain('rounded-2xl border border-line bg-white');

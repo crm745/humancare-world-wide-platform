@@ -215,9 +215,13 @@ describe('Privacy Policy and Terms & Conditions', () => {
     const legal = read('components/LegalScreen.js');
     expect(legal).toContain('{`${i + 1}. ${t(headingKey)}\\n`}');
     expect(legal).toContain('{t(bodyKey)}</Text>');
-    expect(legal).toContain("{t('legal_last_updated')}"); // Terms still shows it; Privacy turns it off (showUpdated={false})
+    expect(legal).toContain("{t('legal_last_updated')}"); // Terms and Privacy both turn it off (showUpdated={false})
     expect(read('app/privacy.js')).toContain('showUpdated={false}');
-    expect(legal).toContain('ops@humancareworldwide.com.');
+    expect(read('app/terms.js')).toContain('showUpdated={false}');
+    expect(legal).toContain("email = 'ops@humancareworldwide.com'"); // Terms keeps the ops address
+    expect(legal).toContain('{`${email}.`}');
+    expect(read('app/privacy.js')).toContain('email="support@humancareworldwide.com"'); // the Privacy Policy shows the support address
+    expect(read('app/terms.js')).not.toContain('email=');
   });
   test('the contact line ends with a space, so the address follows it in every language', () => {
     for (const lang of CODES) for (const key of ['terms_s8_b', 'privacy_s8_b']) expect(I18N[lang][key].endsWith(' ')).toBe(true);

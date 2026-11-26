@@ -272,7 +272,7 @@ describe('what was left alone', () => {
     expect(all).not.toContain('SosBar');
     expect(all).not.toContain('BottomNav');
     expect(all).toContain("minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: 14");
-    expect(all).toContain("width: 54, height: 54, borderRadius: 14, backgroundColor: '#EDF2F9'");
+    expect(all).toContain("width: 54, height: 54, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E4E9F2'");
     expect(all).toContain("borderColor: '#D6E2F2'");
   });
   test('the "More" tile (not a "View all services" link) opens All Services, which is a screen of its own', () => {
@@ -282,5 +282,119 @@ describe('what was left alone', () => {
   });
   test('"Select a Service" (used when changing the service of a request) is as it was', () => {
     expect(codeOf(read('../../components/ServiceGrid.js'))).toContain('SERVICE_TILES.map((s) => (');
+  });
+});
+
+describe('the Mortal Remains icon is an upright tapered coffin with a centred cross, drawn by the shared ServiceIcon only', () => {
+  const icons = read('../../components/home/ServiceIcon.js');
+  const entry = icons.slice(icons.indexOf('  mortal: {'), icons.indexOf('  tele: {'));
+  test('the coffin and the cross are in place of the old casket, hand and heart, inside the 24 box', () => {
+    expect(entry).toContain("fill: 'M9.5 2h5L19 8.5 15.5 22h-7L5 8.5z'");
+    expect(entry).toContain("d: 'M9.5 2h5L19 8.5 15.5 22h-7L5 8.5zM12 6.5V16M8.5 10h7'");
+    expect(icons).not.toContain('HEART');
+    expect(entry).not.toContain('M4 12.5h16'); // the horizontal casket is gone
+    const nums = (entry.match(/[-\d.]+/g) || []).map(Number).filter((n) => n >= 0);
+    expect(Math.max(...nums)).toBeLessThanOrEqual(24);
+  });
+  test('the cross is centred on the coffin (x = 12, the middle of the 24 box)', () => {
+    expect(entry).toContain('M12 6.5V16'); // the upright of the cross
+    expect(entry).toContain('M8.5 10h7'); // the arm: 8.5 + 7 / 2 = 12
+  });
+  test('the rendering, the stroke, the colour tones and every other icon are unchanged', () => {
+    expect(icons).toContain('strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"');
+    expect(icons).toContain("mortal: ['#5B6B84', '#EEF1F6'],");
+    expect(icons).toContain('viewBox="0 0 24 24"');
+    for (const key of ['privatecharter', 'ground', 'hospital', 'homecare', 'commercialair', 'tele', 'marine', 'medvalue', 'corporate']) expect(icons).toContain(`  ${key}: {`);
+  });
+});
+
+describe('one icon per service everywhere: Home\'s ServiceIcon is the only place a service icon is drawn', () => {
+  const SRC = path.join(__dirname, '../..');
+  const files = [];
+  (function walk(d) { for (const f of fs.readdirSync(d)) { const p = path.join(d, f); if (fs.statSync(p).isDirectory()) { if (f !== '__tests__') walk(p); } else if (p.endsWith('.js')) files.push(p); } })(SRC);
+  const rel = (f) => path.relative(SRC, f).split(path.sep).join('/');
+  const src = (f) => fs.readFileSync(f, 'utf8');
+  test('the screens and cards that show a service draw it with ServiceIcon / ServiceIconTile', () => {
+    const users = files.filter((f) => /import \{[^}]*\bServiceIcon(Tile)?\b[^}]*\} from '[^']*home\/ServiceIcon'|from '\.\/ServiceIcon'/.test(src(f))).map(rel).sort();
+    expect(users).toEqual([
+      'app/air-ambulance.js', 'app/all-services.js', 'app/request-details.js', 'components/home/ActiveRequestCard.js', 'components/home/ServicesGrid.js', 'components/request/RequestFrame.js',
+      'components/request/ReviewParts.js', 'components/requests/RequestCard.js', 'components/tracking/TrackingBanner.js', 'components/tracking/TrackingRequestCard.js',
+    ]);
+  });
+  test('no other file draws service icon shapes of its own (only ServiceIcon.js and the brand marks of the social buttons have SVG paths)', () => {
+    const withPaths = files.filter((f) => /<Path\b/.test(src(f))).map(rel).sort();
+    expect(withPaths).toEqual(['components/SocialMarks.js', 'components/home/ServiceIcon.js']);
+  });
+  test('no file imports a Lucide icon in place of a service icon: no coffin-like, hand-heart, plane, ambulance or hospital icons outside the notifications categories', () => {
+    const lucide = /import \{([^}]*)\} from 'lucide-react-native'/;
+    const SERVICE_LIKE = ['HandHeart', 'Skull', 'Flower', 'Flower2', 'Cross', 'Ambulance', 'Plane', 'PlaneTakeoff', 'Hospital', 'Ship', 'Stethoscope', 'HeartPulse', 'Heart'];
+    const hits = [];
+    for (const f of files) {
+      const m = lucide.exec(src(f));
+      if (!m) continue;
+      for (const name of m[1].split(',').map((x) => x.trim().split(/\s+as\s+/)[0])) if (SERVICE_LIKE.includes(name)) hits.push(`${rel(f)}:${name}`);
+    }
+    expect(hits.sort()).toEqual(['app/notifications.js:Hospital', 'app/notifications.js:Plane']); // notification categories (flight, hospital), not services
+  });
+  test('the old hand-and-heart Mortal Remains drawing is gone everywhere', () => {
+    for (const f of files) expect({ file: rel(f), old: /M19 14c1\.49|M12 5 9\.04|\bHEART\b/.test(src(f)) }).toEqual({ file: rel(f), old: false });
+  });
+  test('every service key the app can show has an icon, and the tracking banner chip uses the same one', () => {
+    const icons = src(path.join(SRC, 'components/home/ServiceIcon.js'));
+    const keys = [...icons.slice(icons.indexOf('const PATHS')).matchAll(/^ {2}(\w+): \{/gm)].map((m) => m[1]).sort();
+    expect(keys).toEqual(['commercialair', 'corporate', 'ground', 'homecare', 'hospital', 'marine', 'medvalue', 'mortal', 'privatecharter', 'tele']);
+    const banner = src(path.join(SRC, 'lib/trackingBannerConfig.js'));
+    expect(banner).toContain("mortal: Object.freeze({ chipKey: 'tb_chip_mortal', shortKey: 'tb_short_mortal', icon: 'mortal' })");
+  });
+});
+
+describe('every service icon has the Home look: navy, a soft navy fill, a white tile with a thin line', () => {
+  const SRC = path.join(__dirname, '../..');
+  const src = (f) => fs.readFileSync(path.join(SRC, f), 'utf8');
+  const icons = src('components/home/ServiceIcon.js');
+  test('the one look is defined once, and ServiceIcon / ServiceIconTile use it with no colour passed in', () => {
+    expect(icons).toContain("SERVICE_LOOK = Object.freeze({ color: '#0D2340', fill: '#0D2340', fillOpacity: 0.12, tile: '#FFFFFF', line: '#E4E9F2' })");
+    expect(icons).toContain('export function ServiceIconTile({ serviceKey, size = 44, radius = 14 })');
+    expect(icons).toContain("backgroundColor: SERVICE_LOOK.tile, borderWidth: 1, borderColor: SERVICE_LOOK.line");
+    expect(icons).not.toContain('SERVICE_TONE[key]'); // no per-service colour is read any more
+  });
+  test('no caller overrides the colour of a service icon with anything but navy', () => {
+    const files = ['app/air-ambulance.js', 'app/all-services.js', 'app/request-details.js', 'components/home/ServicesGrid.js', 'components/request/ReviewParts.js', 'components/requests/RequestCard.js', 'components/tracking/TrackingBanner.js'];
+    for (const f of files) {
+      for (const m of src(f).matchAll(/<ServiceIcon [^>]*>/g)) expect({ f, tag: m[0], navy: /color=\{(NAVY|C\.navy)\}/.test(m[0]) && /fill=\{(NAVY|C\.navy)\}/.test(m[0]) && /fillOpacity=\{0\.12\}/.test(m[0]) }).toMatchObject({ navy: true });
+    }
+  });
+  test('the tile callers (the request form header, the Active and Tracking cards) pass no colours; only a size and a radius', () => {
+    for (const f of ['components/request/RequestFrame.js', 'components/home/ActiveRequestCard.js', 'components/tracking/TrackingRequestCard.js']) {
+      for (const m of src(f).matchAll(/<ServiceIconTile [^>]*\/>/g)) expect({ f, tag: m[0], overrides: /tint=|color=|fill=|fillOpacity=/.test(m[0]) }).toMatchObject({ overrides: false });
+    }
+  });
+  test('the service-list tiles (All Services, service page) are white with the same thin line as Home, not a grey-blue block', () => {
+    for (const f of ['app/all-services.js', 'app/air-ambulance.js']) { expect(src(f)).not.toContain('#EDF2F9'); expect(src(f)).toContain("backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E4E9F2'"); }
+  });
+});
+
+describe('changing the service from inside the request form: picking a service goes straight back to the form', () => {
+  const grid = read('../../components/ServiceGrid.js');
+  test('useOpenService: while changingService it keeps the draft for the new service and returns to the open form; otherwise it opens the service page', () => {
+    expect(grid).toContain('export function useOpenService()');
+    expect(grid).toContain('const { draft, resetDraft } = useApp();');
+    expect(grid).toContain('if (draft.changingService) {');
+    expect(grid).toContain('resetDraft(key);');
+    expect(grid).toContain("router.dismissTo('/request/step1');");
+    expect(grid).toContain('openService(key);');
+    expect(grid.indexOf("router.dismissTo('/request/step1')")).toBeLessThan(grid.lastIndexOf('openService(key);'));
+  });
+  test('All Services and the Air Ambulance choice both use it, so the pick works the same from either', () => {
+    for (const file of ['../../app/all-services.js', '../../app/air-ambulance.js']) {
+      const src = read(file);
+      expect(src).toContain("import { useOpenService } from '../components/ServiceGrid';");
+      expect(src).toContain('const openService = useOpenService();');
+    }
+  });
+  test('it is the same swap the service page does (resetDraft + dismissTo the form), and the form ends the swap when it is in front again', () => {
+    const page = read('../../app/service/[key].js');
+    expect(page).toContain("if (swapping) router.dismissTo('/request/step1');");
+    expect(read('../../components/request/RequestFrame.js')).toContain('updateDraft({ changingService: false });');
   });
 });

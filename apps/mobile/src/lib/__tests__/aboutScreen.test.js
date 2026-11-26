@@ -89,7 +89,7 @@ describe('the layout: open text, styled exactly like the Privacy Policy page', (
 
   test('the Privacy Policy page is the LegalScreen component (so its values are LegalScreen\'s), and it is untouched', () => {
     expect(privacy).toContain("import { LegalScreen } from '../components/LegalScreen';");
-    expect(privacy).toContain('<LegalScreen titleKey="privacy_title" sections={SECTIONS} showUpdated={false} />'); // the Privacy page shows no "Last updated" line
+    expect(privacy).toContain('<LegalScreen titleKey="privacy_title" sections={SECTIONS} showUpdated={false} email="support@humancareworldwide.com" />'); // the Privacy page shows no "Last updated" line
   });
   test('the same side and top padding as the Privacy page: 18 on every side, so the left and right are equal', () => {
     const mine = /<Body contentClassName="([^"]+)">/.exec(screen)[1];

@@ -4,13 +4,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, ChevronDown, Search, X } from 'lucide-react-native';
 import { useApp } from '../state/AppContext';
 import { dialOf } from '../lib/phoneCountry';
-import { displayNameOf, searchCountriesLocalized } from '../lib/countryNames';
+import { displayNameOf, flagEmoji, searchCountriesLocalized } from '../lib/countryNames';
 import { isValidMobileNumber } from '../lib/validators';
 import { FieldLabel, Input, Text } from './ui';
 import { COLORS } from '../theme/colors';
 import { KeyboardModalView, MODAL_EDGE_PROPS } from './keyboard';
 
-// A full-height list of every country with a search box. Typing a name ("emir") or a dial code
+// A full-height list of every country, each row its flag and its name (no dial code is shown), with a search box. Typing a name ("emir") or a dial code
 // ("971", "+1") narrows it. `selected` is an ISO code, and the row for it is ticked; countries
 // that share a dial code (+1, +7, +44) are separate rows, so the choice is a country, not a code.
 export function CountryPicker({ visible, title, selected, onPick, onClose }) {
@@ -48,11 +48,12 @@ export function CountryPicker({ visible, title, selected, onPick, onClose }) {
             return (
               <Pressable
                 onPress={() => pick(item.code)} accessibilityRole="button" accessibilityState={{ selected: on }}
-                accessibilityLabel={`${displayNameOf(item.code)}, ${item.dial}`}
+                accessibilityLabel={displayNameOf(item.code)}
                 className={`min-h-[48px] flex-row items-center gap-3 border-b border-divider px-[18px] py-2.5 active:bg-soft ${on ? 'bg-primary-soft' : ''}`}
               >
+                {/* The country's flag (from its ISO code: lib/countryNames.js flagEmoji) in a fixed-width slot, so every name starts at the same place; the dial code is not shown in this list. */}
+                <Text accessible={false} importantForAccessibility="no" style={{ width: 30, fontSize: 22, lineHeight: 28, textAlign: 'center' }}>{flagEmoji(item.code)}</Text>
                 <Text className="flex-1 text-[15px] text-navy">{displayNameOf(item.code)}</Text>
-                <Text className="text-[14px] text-muted">{item.dial}</Text>
                 {on ? <Check size={16} color={COLORS.primary} strokeWidth={2.6} /> : <View className="w-4" />}
               </Pressable>
             );
