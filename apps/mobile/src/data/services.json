@@ -209,7 +209,7 @@
       "Medical Evacuation & Repatriation",
       "Crew Illness & Injury Case Management"
     ],
-    "img": "IMG_AIR"
+    "img": "IMG_MARINES"
   },
   "medvalue": {
     "title": "Medical Value Travel",
@@ -225,7 +225,7 @@
       "Visa, Travel & Stay for the Patient and a Companion",
       "Airport Pickup, Interpreter & Follow-Up Care"
     ],
-    "img": "IMG_HOSPITAL"
+    "img": "IMG_MEDICAL_VALUE"
   },
   "corporate": {
     "title": "Corporate Medical Solutions",

@@ -17,7 +17,7 @@ export const SERVICE_TILES = [
   { key: 'tele', img: 'IMG_TELE', title: 'svc_tele', sub: 'svc_tele_sub' },
   { key: 'corporate', img: 'IMG_CORPORATE', title: 'svc_corporate', sub: 'svc_corporate_sub' },
   // Marine Medical Safety and Medical Value Travel: the standard patient request form, like Hospitalization.
-  { key: 'marine', img: 'IMG_AIR', title: 'svc_marine', sub: 'svc_marine_sub' },
+  { key: 'marine', img: 'IMG_MARINES', title: 'svc_marine', sub: 'svc_marine_sub' },
   { key: 'medvalue', img: 'IMG_HOSPITAL', title: 'svc_medvalue', sub: 'svc_medvalue_sub' },
 ];
 

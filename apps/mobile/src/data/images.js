@@ -2,14 +2,16 @@
 // (mortal.jpg is a Pexels coffin photo).
 export const IMAGES = {
   IMG_AIR: require('../../assets/images/air.webp'),
-  IMG_GROUND: require('../../assets/images/ground.webp'),
+  IMG_GROUND: require('../../assets/service-images/ground-ambulance.webp'),
   IMG_HOSPITAL: require('../../assets/images/hospital.jpg'),
-  IMG_TELE: require('../../assets/images/tele.webp'),
-  IMG_HOMECARE: require('../../assets/images/homecare.jpg'),
-  IMG_CORPORATE: require('../../assets/images/corporate.jpg'),
-  IMG_MORTAL: require('../../assets/images/mortal.jpg'),
-  IMG_COMMERCIALAIR: require('../../assets/images/commercialair.webp'),
-  IMG_PRIVATECHARTER: require('../../assets/images/privatecharter.jpg'),
+  IMG_TELE: require('../../assets/service-images/telehealth-consultation.webp'),
+  IMG_HOMECARE: require('../../assets/service-images/homecare.webp'),
+  IMG_CORPORATE: require('../../assets/service-images/corporate-medical-solutions.webp'),
+  IMG_MORTAL: require('../../assets/service-images/human-remains-transfer.webp'),
+  IMG_COMMERCIALAIR: require('../../assets/service-images/commercial-airline-repatriation.webp'),
+  IMG_PRIVATECHARTER: require('../../assets/service-images/private-charter-banner.webp'),
+  IMG_MARINES: require('../../assets/service-images/marine-safety.webp'),
+  IMG_MEDICAL_VALUE: require('../../assets/service-images/medical-value-travel.webp'),
 };
 
 export const LOGO = require('../../assets/images/logo-full.png');
